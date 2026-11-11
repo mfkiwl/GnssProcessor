@@ -5,14 +5,14 @@
 - **id:** ARU
 - **topic:** user-ar
 - **status:** open
-- **summary:** The user engine has never produced a correct integer fix. Stage A measures, with no fixing, whether the float ambiguities of a single receiver on one analysis centre's final products with published phase biases (CODE MGX final orbit, 30 s clock, OSB code and phase biases) are integer within their own formal covariance, with the position estimated and with the position held at the IGS coordinate. Stage B turns fixing on only if stage A passes, against bars frozen below. Stage A result (2026-11-10, section 4): float integer (A1 26 of 30, A2 30 of 30 system-days with the position estimated), covariance optimistic by a factor of about 2 to 3 (A3 15 of 30), stage A not passed as frozen; the MW wide-lane source of the search is wrong by 2 cycles on pairs with one GPS III satellite (satellite antenna offset per frequency omitted). Correction (section 6): stage A searched the narrowlane row, on which the float misses by 0.26 (GPS) and 0.19 (Galileo) cycle in hour 2; the integer grade holds for the ionosphere-free combination, the row stage B searches.
-- **dates:** 2026-11-10 (pre-registration), 2026-11-11 (stage B set-up frozen, section 5)
+- **summary:** The user engine has never produced a correct integer fix. Stage A measures, with no fixing, whether the float ambiguities of a single receiver on one analysis centre's final products with published phase biases (CODE MGX final orbit, 30 s clock, OSB code and phase biases) are integer within their own formal covariance, with the position estimated and with the position held at the IGS coordinate. Stage B turns fixing on only if stage A passes, against bars frozen below. Stage A result (2026-11-10, section 4): float integer (A1 26 of 30, A2 30 of 30 system-days with the position estimated), covariance optimistic by a factor of about 2 to 3 (A3 15 of 30), stage A not passed as frozen; the MW wide-lane source of the search is wrong by 2 cycles on pairs with one GPS III satellite (satellite antenna offset per frequency omitted). Correction (section 6): stage A searched the narrowlane row, on which the float misses by 0.26 (GPS) and 0.19 (Galileo) cycle in hour 2; the integer grade holds for the ionosphere-free combination, the row stage B searches. Stage B (2026-11-11, section 7), first three receivers: fails as frozen (B1 fails on 1 of 15 receiver-days, B2 on 2 of 15); fixed wide lanes independently confirmed; first failing term a held integer with no release or slip test through a disturbed arc (BAKE00CAN DOY 145); the 14 other receivers and the streams not run.
+- **dates:** 2026-11-10 (pre-registration), 2026-11-11 (stage B set-up frozen, section 5; corrections, section 6; stage B results, section 7)
 - **knobs / posture:** two new, default off (section 5): `estimation.ambiguity_resolution.wl_from_float`, `estimation.ambiguity_resolution.nl_sigma_floor_cyc`. Stage A runs `estimation.ambiguity_resolution.mode` 1 with `ratio_threshold` 1e9 (the search runs and logs, nothing is accepted) and the resolver log at debug.
 - **code:** `src/core/filter/AmbiguityResolver.cpp` (debug line `CLCOV`: the formal covariance of the double differences beside the existing `CLFRAC` values; logged only at debug, no other output changes); stage B: `floatWidelane_`, `addSharedReferenceFloor_` (section 5)
 - **run dirs:** `D:\GnssProcessorSupport\runs_nom\_rap_aru_*`; tools and grades `D:\GnssProcessorSupport\presentation\agu26\fixing_control\`
 - **source:** the live fixing sessions of 2026-11-10 (`D:\GnssProcessorSupport\presentation\agu26\figures\live_fixing_note.md`: 0 fixes in 27 946 searches, wide lane integer for GPS, ionosphere-free narrow lane near uniform under a formal sigma of 0.005 to 0.04 cycles); card [SSR-BIAS-SIGN](../realtime/SSR-BIAS-SIGN.md); the July 2026 wrong integers on ALGO00CAN ([CONSUMER-AR-BLUNDER](../../record/cards/consumer/CONSUMER-AR-BLUNDER.md))
 
-**Outcome.** Stage A (section 4, corrected in section 6): on CODE final products the ionosphere-free combination of the user float IS integer (the narrowlane row that stage A's searches used is not: 0.26 and 0.19 cycle in hour 2). Narrow lane within 0.10 cycle on 30 of 30 receiver-days (median 0.045 cycle with the position estimated, 0.034 held). The covariance bar A3 fails on most receiver-days: the miss levels off near 5 mm while the formal sigma keeps falling, so stage B was not started. First model term that prevents a correct fix: the MW wide lane fed to the WL-constrained search omits the satellite antenna offset per frequency, 2 cycles wrong on every pair with one GPS III satellite (5 526 of 5 526 pair-epochs). Open.
+**Outcome.** Stage A (section 4, corrected in section 6): on CODE final products the ionosphere-free combination of the user float IS integer (the narrowlane row that stage A's searches used is not: 0.26 and 0.19 cycle in hour 2). Narrow lane within 0.10 cycle on 30 of 30 receiver-days (median 0.045 cycle with the position estimated, 0.034 held). The covariance bar A3 fails on most receiver-days: the miss levels off near 5 mm while the formal sigma keeps falling, so stage B was not started. First model term that prevents a correct fix: the MW wide lane fed to the WL-constrained search omits the satellite antenna offset per frequency, 2 cycles wrong on every pair with one GPS III satellite (5 526 of 5 526 pair-epochs). Stage B (section 7) with the float wide lane, a 0.04-cycle floor and hold variance 1e-7, on 3 receivers and 5 days: fixing improves the median 3D error over minutes 60 to 360 on 13 of 15 receiver-days (7.3 against 10.9 mm), but fails the frozen bars. One pair at BAKE00CAN fixed to integers one narrow-lane cycle apart from the two cold starts, after its held integer was carried through a disturbed arc with no slip flagged. Open.
 
 > Results are appended TO THIS FILE, below the text.
 
@@ -259,3 +259,78 @@ written. Section 4 stays as written; this section governs where they differ.
 6. **Galileo-only search, whole run against hour 2.** "At some epoch in 12 of 15 runs" and "maximum 5 206" are over
    the whole run; the maximum is at minute 50.5 (`_rap_aru_a1gal_est_147_wtzz`). In hour 2 the ratio passed 3.0 in 11
    of 15 runs (537 of 1 790 searches, unchanged). By point 1 these are narrowlane-row ratios.
+
+## 7. Stage B results, first three receivers (2026-11-11)
+
+**Runs.** `D:\GnssProcessorSupport\runs_nom\_rap_aru_b6{fix,late,flt}_est_<doy>_<site>`, WTZZ00DEU, BAKE00CAN and
+STPM00SPM on DOY 143 to 147, 45 runs, all exit 0, executable `gnss_processor_arub.exe` (section 5). Grades:
+`D:\GnssProcessorSupport\presentation\agu26\fixing_control\grade_b6_phase1.json` (`tools\grade_b.py`), wide-lane
+witness `witness_b6_phase1.jsonl` (`tools\witness_wl.py`). Every fixed run searched on the ionosphere-free row
+(`nl_row=iono-free` in `main_log.log`).
+
+**7.1 The bars.** Stage B fails as frozen: B1 fails on 1 of 15 receiver-days, B2 on 2 of 15. By section 5 the 14 other
+test receivers were not run, and the stream sessions were not replayed.
+
+| receiver | DOY | B2 median 3D, min 60-360, fixed / float (mm) | B2 | B1 pair-arcs compared, different | B1 | time to 10 cm fixed / float (min) | 3D at min 60 fixed / float (mm) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| BAKE00CAN | 143 | 7.8 / 7.6 | fail (+0.2) | 66, 0 | pass | 17.0 / 17.0 | 8.3 / 26.4 |
+| BAKE00CAN | 144 | 5.6 / 8.5 | pass | 61, 0 | pass | 9.5 / 9.5 | 5.7 / 24.2 |
+| BAKE00CAN | 145 | 4.2 / 4.4 | pass | 72, 1 | fail | 14.5 / 14.5 | 6.4 / 12.3 |
+| BAKE00CAN | 146 | 6.4 / 7.0 | pass | 68, 0 | pass | 17.0 / 10.5 | 2.0 / 24.8 |
+| BAKE00CAN | 147 | 4.6 / 7.6 | pass | 59, 0 | pass | 13.0 / 13.0 | 4.4 / 16.6 |
+| STPM00SPM | 143 | 10.4 / 16.4 | pass | 68, 0 | pass | 12.0 / 12.0 | 11.0 / 12.4 |
+| STPM00SPM | 144 | 19.9 / 14.2 | fail (+5.8) | 80, 0 | pass | 8.5 / 8.5 | 13.4 / 3.8 |
+| STPM00SPM | 145 | 13.3 / 13.4 | pass | 71, 0 | pass | 15.5 / 15.5 | 17.2 / 24.6 |
+| STPM00SPM | 146 | 7.3 / 10.9 | pass | 64, 0 | pass | 24.5 / 24.5 | 10.4 / 12.4 |
+| STPM00SPM | 147 | 9.4 / 12.1 | pass | 53, 0 | pass | 15.0 / 15.0 | 10.8 / 10.0 |
+| WTZZ00DEU | 143 | 3.6 / 6.5 | pass | 70, 0 | pass | 11.0 / 11.0 | 14.4 / 10.8 |
+| WTZZ00DEU | 144 | 3.3 / 6.6 | pass | 54, 0 | pass | 18.0 / 18.0 | 20.8 / 13.4 |
+| WTZZ00DEU | 145 | 5.9 / 12.9 | pass | 66, 0 | pass | 6.5 / 28.5 | 7.9 / 13.8 |
+| WTZZ00DEU | 146 | 11.8 / 13.8 | pass | 31, 0 | pass | 9.5 / 9.5 | 26.7 / 10.9 |
+| WTZZ00DEU | 147 | 11.5 / 15.3 | pass | 21, 0 | pass | 10.5 / 10.5 | 9.0 / 27.1 |
+
+- Fixing works mechanically: the first fix comes at minute 16.0 to 29.0 in the runs from 00:00 (16.5 to 19.5 minutes
+  after the start in the runs from 01:00), soon after the position-sigma gate opens. The fixed median 3D error over
+  minutes 60 to 360 is lower than the float on 13 of 15 receiver-days (median over the 15: 7.3 mm fixed, 10.9 mm
+  float).
+- B1: 904 pair-arcs compared over the 15 receiver-days, 1 fixed to different integers. Checked on the raw fix lines
+  without re-expression, exactly one pair-arc in the 30 fixed runs took two values: G06-G31 in the BAKE00CAN DOY 145
+  run from 01:00. The two counts of "two values" that the grader lists for that run from 01:00 on DOY 143 come from
+  re-expression through a reference pair and are not in the raw lines.
+- B3 is reported for the 3 receivers only (the 17 were not run). Time to 10 cm is the same, fixed and float, on 13
+  of 15 receiver-days. On 14 of 15 the fixed run's error is below 10 cm for good before its first fix, so fixing
+  cannot shorten it with this position-sigma gate.
+
+**7.2 The B1 failure: a held integer carried through a disturbed arc.** BAKE00CAN (64 degrees north), DOY 145, run
+from 01:00. At 04:10:30 the full set of 11 pairs fixes (ratio 40.2) and G06-G31 takes N1 0, wide lane 4 (float
+-0.017). From the next epoch the same pair reads 0.20 cycle from its held integer, and the per-pair cap rejects each
+later full set for 10 minutes (partial fixes without that pair are accepted) while its hold stays in the state
+(`hold_variance` 1e-7). At 04:21 the pair re-fixes
+to N1 -1, wide lane 4: L1 and L2 both one cycle lower, one narrow-lane cycle in the ionosphere-free ambiguity. The
+run from 00:00 kept N1 0. Between 04:10 and 04:14 the geometry-free combination of G31 (L1W - L2W) steps by 2 to 8
+cm per 30 s epoch, with no loss-of-lock flag in the RINEX file, no slip flagged by the engine and no re-seed in
+`ambiguity_trace.csv`. A (1, 1) slip keeps the wide lane, so the MW test cannot see it, and its geometry-free step
+(-5.4 cm) hides among steps of that size. Which of the two integers is right is not known. The term: a fixed and
+held integer has no release when the float contradicts it beyond the per-pair cap, and no slip test that can see a
+wide-lane-preserving slip under disturbed ionosphere (standing invariant 1).
+
+**7.3 The B2 failures.** STPM00SPM DOY 144: the fixed run is 4 to 9 mm worse than the float in each hour from hour
+2. Its mean up error is -12.1, -19.8 and -19.8 mm in hours 2, 4 and 6; the run from 01:00 reads -20.8, -22.7 and
+-18.9; the float -2.0, -13.2 and -15.6. The two fixed runs agree with each other, the wide-lane witness agrees with
+every clear window, and the float drifts toward the same height. The fixed solution reaches a common height offset
+of about 2 cm earlier than the float; its source (the reference coordinate, the receiver antenna model or the
+troposphere) is not traced. BAKE00CAN DOY 143: 0.2 mm worse, equal from hour 3 (8.9 / 8.8, 7.8 / 7.5, 7.5 / 7.2,
+7.7 / 7.5 mm); a tie that the strict bar fails.
+
+**7.4 Independent wide-lane witness** (section 6 point 2, reported, not graded). Over the 30 fixed runs, minutes 60
+to 420: 3 027 clear GPS and 3 216 clear Galileo pair-windows (witness steady and near an integer, one fixed value);
+1 GPS window more than 0.5 cycle from the fixed wide lane (G12-G28, STPM00SPM DOY 146 run from 01:00, witness
+-150.344, fixed -151, window sd 0.22); 481 GPS and 349 Galileo windows unclear. Median |witness - fixed| per run and
+system 0.041 to 0.173 cycle. Control: without the antenna terms the witness reads +1.7 on G13-G12 at WTZZ00DEU against a
+fixed 4 (`_rap_aru_bdev_est_143_wtzz`), the stage A error. The fixed wide lanes are independently confirmed. The
+narrow lane has no independent check here: B1 tests repeatability, not truth.
+
+**7.5 Not done.** The 14 other test receivers (B1, B2, B3), stopped by the rule of section 5. The stream replays:
+`realtime_tools\replay_relay.py` is written (time-faithful, per-stream ports, a later engine connects as a cold
+start) but not run, and no stream configuration with the two keys exists. The CAS Galileo signal mapping. A slip
+test or release rule for held integers (7.2). The STPM00SPM height offset (7.3).
