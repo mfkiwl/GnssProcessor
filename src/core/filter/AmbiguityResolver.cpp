@@ -484,6 +484,29 @@ AmbiguityResolution AmbiguityResolver::resolve(
         if (n_dbg > 0) {
             log->debug("CLFRAC_SUMMARY n={} mean_abs_frac={:.4f}", n_dbg, sum_abs / n_dbg);
         }
+        // The formal covariance of the same differences (m^2): one line per
+        // signal pair of one satellite pair, the variance when the two
+        // signals are the same.  With the CLFRAC values this gives the formal
+        // sigma of the wide lane and of the ionosphere-free narrow lane, so a
+        // float that misses its integer can be read against its own claimed
+        // precision.
+        const Eigen::MatrixXd P_dbg = state_manager.getCovariance();
+        const auto n_state = P_dbg.rows();
+        auto ddCov = [&P_dbg](const DdPair& a, const DdPair& b) {
+            return P_dbg(a.state_idx_i, b.state_idx_i) - P_dbg(a.state_idx_i, b.state_idx_ref)
+                 - P_dbg(a.state_idx_ref, b.state_idx_i) + P_dbg(a.state_idx_ref, b.state_idx_ref);
+        };
+        for (size_t a = 0; a < pairs.size(); ++a) {
+            const DdPair& pa = pairs[a];
+            if (pa.state_idx_i >= n_state || pa.state_idx_ref >= n_state) continue;
+            for (size_t b = a; b < pairs.size(); ++b) {
+                const DdPair& pb = pairs[b];
+                if (pb.sat_i != pa.sat_i || pb.sat_ref != pa.sat_ref) continue;
+                if (pb.state_idx_i >= n_state || pb.state_idx_ref >= n_state) continue;
+                log->debug("CLCOV sat_i={} sat_ref={} sig_a={} sig_b={} cov_m2={:.6e}",
+                           pa.sat_i, pa.sat_ref, pa.signal, pb.signal, ddCov(pa, pb));
+            }
+        }
     }
 
     if (pairs.empty()) {
