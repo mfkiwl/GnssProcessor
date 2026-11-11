@@ -8695,6 +8695,30 @@ namespace GnssProcessor {
         bool getArNlIonoFreeRow() const { return ar_nl_iono_free_row_; }
 
         /**
+         * @brief Take the WL-constrained search's widelane integers from the
+         *        float states (@c estimation.ambiguity_resolution.wl_from_float).
+         *
+         * The MW detector's widelane omits the satellite antenna offset per
+         * frequency, 2 cycles for every GPS Block III pair; the float states
+         * carry it.  See AmbiguityResolverConfig::wl_from_float.
+         *
+         * @return true to round the float DD widelane (gated by
+         *         @ref getArWlMaxFrac); false (default, byte-identical) for the
+         *         MW detector's integer.
+         */
+        bool getArWlFromFloat() const { return ar_wl_from_float_; }
+
+        /**
+         * @brief Error floor on the WL-constrained N_1 search covariance
+         *        (@c estimation.ambiguity_resolution.nl_sigma_floor_cyc).
+         *
+         * See AmbiguityResolverConfig::nl_sigma_floor_cyc.
+         *
+         * @return The floor in narrow-lane cycles; 0 (default) disables it.
+         */
+        double getArNlSigmaFloorCyc() const { return ar_nl_sigma_floor_cyc_; }
+
+        /**
          * @brief Get the list of constellations eligible for AR.
          *
          * Empty list = all active systems are eligible (default).
@@ -9516,6 +9540,8 @@ namespace GnssProcessor {
         double ar_min_arc_info_{ 0.0 };   ///< Per-candidate AR maturity gate: minimum accumulated sin^2(el) on both arcs of a candidate. 0 = off (byte-identical). Makes AR safe, not useful; see AmbiguityResolverConfig::min_arc_info.
         double ar_nl_max_per_pair_frac_; ///< Max per-NL-pair |float − fixed| (cyc); rejects marginal fixes.
         bool   ar_nl_iono_free_row_{ false }; ///< WL-constrained N_1 search runs on the exact iono-free row instead of the narrowlane row. Default off (byte-identical); see AmbiguityResolverConfig::nl_iono_free_row for the 8.06× WL-sensitivity trade.
+        bool   ar_wl_from_float_{ false };   ///< WL-constrained search takes its widelane integers from the float states, not the MW detector. Default off (byte-identical).
+        double ar_nl_sigma_floor_cyc_{ 0.0 }; ///< Error floor (NL cycles) added to the WL-constrained N_1 search covariance. 0 = off (byte-identical).
         bool   ar_enable_partial_ar_;    ///< Partial AR: on full-set fix failure, retry on the largest gate-passing subset.
         std::vector<std::string> ar_active_systems_; ///< Constellations eligible for AR (empty = all).
 

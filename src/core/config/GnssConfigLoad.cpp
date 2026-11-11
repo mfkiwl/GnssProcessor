@@ -1966,6 +1966,24 @@ namespace GnssProcessor {
                       "N_1 target 3.53 cyc.  Verify the widelane before trusting fixes.");
         }
 
+        ar_wl_from_float_        = jval<bool>(json, "estimation.ambiguity_resolution.wl_from_float",
+                                               "ar_wl_from_float", false);
+        ar_nl_sigma_floor_cyc_   = jval<double>(json, "estimation.ambiguity_resolution.nl_sigma_floor_cyc",
+                                                 "ar_nl_sigma_floor_cyc", 0.0);
+        if (ar_wl_from_float_) {
+            log->info("AR: WL-constrained search takes its widelane integers from the float "
+                      "states (wl_from_float), not the MW detector; candidates gated by "
+                      "|frac| + 3 sigma <= wl_max_frac = {:.2f}", ar_wl_max_frac_);
+        }
+        if (ar_nl_sigma_floor_cyc_ > 0.0) {
+            log->info("AR: N_1 search covariance carries an error floor of {:.3f} NL cycles "
+                      "(nl_sigma_floor_cyc)", ar_nl_sigma_floor_cyc_);
+        } else if (ar_nl_sigma_floor_cyc_ < 0.0) {
+            log->warn("AR: nl_sigma_floor_cyc = {:.3f} is negative; treated as 0 (off)",
+                      ar_nl_sigma_floor_cyc_);
+            ar_nl_sigma_floor_cyc_ = 0.0;
+        }
+
         // estimation.ambiguity_resolution.active_systems = ["GPS","Galileo",...]
         // Empty / missing → all active systems are eligible for AR.
         ar_active_systems_.clear();

@@ -30,6 +30,8 @@ AmbiguityResolverConfig makeAmbiguityResolverConfig(const GnssConfig& config) {
     ar_config.min_arc_info          = config.getArMinArcInfo();
     ar_config.nl_max_per_pair_frac  = config.getArNlMaxPerPairFrac();
     ar_config.nl_iono_free_row      = config.getArNlIonoFreeRow();
+    ar_config.wl_from_float         = config.getArWlFromFloat();
+    ar_config.nl_sigma_floor_cyc    = config.getArNlSigmaFloorCyc();
     ar_config.enable_partial_ar     = config.getArEnablePartialAr();
     ar_config.ar_active_systems     = config.getArActiveSystems();
     ar_config.state_ambiguity_basis = config.getStateAmbiguityBasis();

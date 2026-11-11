@@ -6,9 +6,9 @@
 - **topic:** user-ar
 - **status:** open
 - **summary:** The user engine has never produced a correct integer fix. Stage A measures, with no fixing, whether the float ambiguities of a single receiver on one analysis centre's final products with published phase biases (CODE MGX final orbit, 30 s clock, OSB code and phase biases) are integer within their own formal covariance, with the position estimated and with the position held at the IGS coordinate. Stage B turns fixing on only if stage A passes, against bars frozen below. Stage A result (2026-11-10, section 4): float integer (A1 26 of 30, A2 30 of 30 system-days with the position estimated), covariance optimistic by a factor of about 2 to 3 (A3 15 of 30), stage A not passed as frozen; the MW wide-lane source of the search is wrong by 2 cycles on GPS III (satellite antenna offset per frequency omitted).
-- **dates:** 2026-11-10 (pre-registration)
-- **knobs / posture:** none new. Stage A runs `estimation.ambiguity_resolution.mode` 1 with `ratio_threshold` 1e9 (the search runs and logs, nothing is accepted) and the resolver log at debug.
-- **code:** `src/core/filter/AmbiguityResolver.cpp` (debug line `CLCOV`: the formal covariance of the double differences beside the existing `CLFRAC` values; logged only at debug, no other output changes)
+- **dates:** 2026-11-10 (pre-registration), 2026-11-11 (stage B set-up frozen, section 5)
+- **knobs / posture:** two new, default off (section 5): `estimation.ambiguity_resolution.wl_from_float`, `estimation.ambiguity_resolution.nl_sigma_floor_cyc`. Stage A runs `estimation.ambiguity_resolution.mode` 1 with `ratio_threshold` 1e9 (the search runs and logs, nothing is accepted) and the resolver log at debug.
+- **code:** `src/core/filter/AmbiguityResolver.cpp` (debug line `CLCOV`: the formal covariance of the double differences beside the existing `CLFRAC` values; logged only at debug, no other output changes); stage B: `floatWidelane_`, `addSharedReferenceFloor_` (section 5)
 - **run dirs:** `D:\GnssProcessorSupport\runs_nom\_rap_aru_*`; tools and grades `D:\GnssProcessorSupport\presentation\agu26\fixing_control\`
 - **source:** the live fixing sessions of 2026-11-10 (`D:\GnssProcessorSupport\presentation\agu26\figures\live_fixing_note.md`: 0 fixes in 27 946 searches, wide lane integer for GPS, ionosphere-free narrow lane near uniform under a formal sigma of 0.005 to 0.04 cycles); card [SSR-BIAS-SIGN](../realtime/SSR-BIAS-SIGN.md); the July 2026 wrong integers on ALGO00CAN ([CONSUMER-AR-BLUNDER](../../record/cards/consumer/CONSUMER-AR-BLUNDER.md))
 
@@ -155,3 +155,69 @@ states, default off and identical when off. (2) A narrow-lane covariance with an
 gate evaluated on an inflated covariance. (3) The B1 and B2 bars of section 3, unchanged. Not done here: stage B, the
 stream sessions and their replay, the 14 other test receivers, the CAS Galileo signal mapping, a wide-lane source
 on stream biases, the Debug unit suite on this branch (the change is one debug log line).
+
+## 5. Stage B set-up, frozen before the graded runs (2026-11-11)
+
+**Entry.** Stage A did not pass as frozen (bar A3, section 4.1). On 2026-11-11 the author decided to build the two
+changes of section 4.5 and to run stage B. With the floor of 0.04 cycle added to the formal narrow-lane sigma, A3
+reads 14 of 15 (estimated, GPS), 15 of 15 (estimated, Galileo), 15 of 15 (held, GPS) and 14 of 15 (held, Galileo),
+median miss over sigma 0.89, 1.01, 0.82 and 0.88 (`fixing_control\grade_a3_floor004.{txt,json}`,
+`tools\a3_floor.py`). This is not a pass of A3: the floor was chosen from the same runs (section 4.3). Stage B is
+the test.
+
+**Code** (branch `ar/user-control`; both keys default off, ledger rows UNVALIDATED):
+
+- `estimation.ambiguity_resolution.wl_from_float`: the WL-constrained search rounds the float states' DD wide lane
+  w = DD_1/lambda_1 - DD_2/lambda_2 instead of imposing the MW detector's integer. A candidate enters only if
+  |w - round(w)| + 3 sigma_w <= `wl_max_frac` (0.40, the form the MW path uses), sigma_w from the filter
+  covariance. The route also runs with no MW integer (no .BIA file, as on streams). Log line `WLFLOAT` per
+  candidate.
+- `estimation.ambiguity_resolution.nl_sigma_floor_cyc`: the searched N_1 covariance becomes
+  Q + f^2/2 (I + M), M the block of candidates sharing a reference satellite (each DD gains f^2, DDs on one
+  reference correlate by f^2/2). The ratio test, the bootstrap success rate, the per-pair cap and the partial
+  search all use it; the filter and the fix's pseudo-observation do not.
+- `src/core/filter/AmbiguityResolver.cpp` (`floatWidelane_`, `addSharedReferenceFloor_`), config plumbing,
+  `tests/test_ar_float_widelane.cpp` (suite `ArFloatWidelaneTest`), two fields in
+  `tests/test_ambiguity_resolver_setup.cpp`.
+- Identity with both keys absent: `_rap_aru_idchk_arub_145_wtzz` (new executable) against
+  `_rap_aru_a1_est_145_wtzz` (stage A executable): `state_trace.csv`, `ambiguity_trace.csv` and
+  `measurement_residuals.csv` byte-identical, resolver log identical apart from time stamps.
+- Executable `D:\GnssProcessorSupport\gates\exe_arub\gnss_processor_arub.exe`, Release, sha256
+  21caae183dd496d9a14bf5ac783f6b0f909a25fa401f6dd7319430044c123dac.
+
+**Runs** (`fixing_control\tools\make_ctl.py`, variant `est`, 6 h, static, GPS + Galileo):
+
+- Fixed, `_rap_aru_b6fix_est_<doy>_<site>`, from 00:00: the stage A estimated configuration with
+  `ratio_threshold` 5.0 (the base configuration's value, written out because the generator's stage A default is
+  1e9), `hold_variance` 1e-7, `wl_from_float` true, `nl_sigma_floor_cyc` 0.04, `nl_iono_free_row` true (the row
+  graded in stage A), `enable_partial_ar` true. Unchanged: `min_success_rate` 0.999, `nl_max_per_pair_frac` 0.15,
+  `ratio_upper_bound` 1e4, `min_epochs` 10, `max_position_sigma_m` 0.05, fixing elevation mask 20 degrees, resolver
+  log at debug.
+- Float, `_rap_aru_b6flt_est_<doy>_<site>`: the same with fixing `mode` 0.
+- Late, `_rap_aru_b6late_est_<doy>_<site>`: the fixed configuration on a copy of the RINEX file without the epochs
+  before 01:00 (in the run folder, same file name), 6 h.
+- Order: the three stage A receivers on the 5 days first. The 14 other test receivers run only if those 15
+  receiver-days pass B1 and B2; otherwise stage B has failed and the rest is not run.
+
+**Grading** (`fixing_control\tools\grade_b.py`):
+
+- B1: the fixed integers (L1 and L2) of the run from 00:00 and the run from 01:00, per satellite pair and arc. An
+  arc ends where either satellite's ambiguity is re-seeded in either run (formal sigma up by more than a factor 2
+  above 5 cm, or a gap over 60 s, in `ambiguity_trace.csv`). The late run's integers are re-expressed against the
+  early run's reference satellite through the same epoch's fix when the two differ. Pass: at least one pair-arc
+  compared and none fixed to different integers in the two runs, or to two values in one run.
+- B2: median 3D error against the antenna reference point over minutes 60 to 360, fixed run at most equal to the
+  float run, at every receiver-day. No tolerance was frozen in section 3, so none is applied; the difference is
+  reported in mm.
+- B3 (reported): time to 10 cm (the first epoch after which the 3D error stays below 0.10 m to the end of the
+  run) and the 3D error at minute 60, fixed and float.
+- Fix events: the per-pair lines of an accepted full-set fix (`NL pair ... N_1_fixed= dd_wl=`) or partial fix
+  (`[PAR] NL pair ...`) at debug, kept only when the same epoch logs a success and no upper-bound rejection.
+
+**Mechanics check before freezing.** No spare day carries both observations and a bias file, so one receiver-day
+of the graded set was used, WTZZ00DEU on DOY 143, 2 h: `_rap_aru_bdev_est_143_wtzz`, `_rap_aru_bdev1h_est_143_wtzz`,
+`_rap_aru_bdevflt_est_143_wtzz` (`fixing_control\grade_bdev.json`). Its purpose was to see fixes accepted, logged
+and parsed. The first attempt still carried the stage A threshold 1e9 (0 fixes); the threshold was then written
+out as 5.0. Result, not graded: first fix at 16.5 minutes in both runs, 18 pair-arcs compared, none different;
+median 3D error over minutes 60 to 120, 8.1 mm fixed and 13.6 mm float. No setting was changed in response to these
+numbers.

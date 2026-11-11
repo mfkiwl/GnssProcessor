@@ -229,6 +229,51 @@ struct AmbiguityResolverConfig {
         ///< bias for amplified widelane error and noise, and pays off only with a
         ///< near-perfect widelane; arm it together with WL hardening, not alone.
         ///< Byte-identical to legacy when off.
+    /**
+     * @brief Take the WL-constrained search's widelane integers from the float
+     *        states instead of the MW detector.
+     *
+     * With this off (default) @ref AmbiguityResolver::resolveWlConstrained imposes
+     * the MW detector's DD widelane integer.  The MW detector works on raw
+     * observables corrected only by the satellite biases, so it omits every term
+     * that differs between the two frequencies and is not in the bias file: the
+     * satellite antenna offset per frequency above all.  For a GPS Block III
+     * satellite (L1 and L2 z offsets 1.116 m and 0.612 m in igs20.atx) that term
+     * moves the MW widelane by about 2.3 cycles, so the imposed integer is 2
+     * cycles wrong on every pair with such a satellite, and the narrow-lane search
+     * cannot see it (a 2-cycle WL error moves the N_1 target by 7.06 cycles on the
+     * iono-free row, a fraction of 0.06).
+     *
+     * With this on, each candidate's widelane is the float states' own
+     * @f$w = DD_1/\lambda_1 - DD_2/\lambda_2@f$, with its formal sigma
+     * @f$\sigma_w@f$ from the same covariance; it carries every model term the
+     * filter applies.  A candidate enters only if
+     * @f$|w - \mathrm{round}(w)| + 3\sigma_w \le@f$ @ref wl_max_frac (the same
+     * worst-case form the MW path uses), and then with @f$\mathrm{round}(w)@f$.
+     * The route also runs when the MW detector supplies no integers (no .BIA
+     * file, as on correction streams).  Byte-identical when off.
+     */
+    bool   wl_from_float{ false };
+    /**
+     * @brief Error floor (narrow-lane cycles) added to the covariance the
+     *        WL-constrained N_1 search uses.  0 disables it (default).
+     *
+     * The filter's formal narrow-lane sigma keeps shrinking as if every epoch
+     * brought independent information, while the actual miss levels off at the
+     * size of the time-correlated phase errors (multipath, troposphere and
+     * antenna mismodelling, product residuals).  On CODE final products the miss
+     * levels at about 0.045 cycle with the position estimated while the formal
+     * sigma falls to 0.022, so the ratio test, the bootstrap success rate and the
+     * per-pair cap all see an over-confident covariance.
+     *
+     * With a floor f > 0 the searched covariance becomes
+     * @f$Q + \tfrac{f^2}{2}(I + M)@f$, where @f$M_{kl} = 1@f$ when candidates k
+     * and l share their reference satellite: one per-satellite error of variance
+     * @f$f^2/2@f$, so each DD gets @f$f^2@f$ and DDs on a common reference
+     * correlate as the reference's error does.  Applied to the search only; the
+     * filter state and the fix's pseudo-observation are unchanged.
+     */
+    double nl_sigma_floor_cyc{ 0.0 };
     bool   enable_partial_ar{ false };   ///< If true, when the full-set LAMBDA fix fails its
         ///< acceptance gates, retry by greedy backward elimination (drop the least
         ///< fixable ambiguity, re-validate ratio/bootstrap/frac) and accept the first
@@ -398,6 +443,9 @@ private:
     /// run can show only that nothing went wrong, not that the WL-only acceptance
     /// gate fails safe, so a unit test pins that behaviour.
     friend struct WlFfrTestAccess;
+    /// Test seam for @ref floatWidelane_ and @ref addSharedReferenceFloor_
+    /// (tests/test_ar_float_widelane.cpp).
+    friend struct ArFloatWlTestAccess;
 
     // -----------------------------------------------------------------------
     // WL-constrained N_1 search functional
@@ -545,6 +593,50 @@ private:
      */
     std::vector<DdPair> buildDdPairs(const StateManager& state_manager,
                                      const std::vector<PppObservation>& observations) const;
+
+    // -----------------------------------------------------------------------
+    // Float widelane and the N_1 search covariance floor
+    // -----------------------------------------------------------------------
+
+    /// The float states' DD widelane of one satellite pair and its formal sigma.
+    struct FloatWidelane {
+        double w;      ///< DD_1/λ_1 − DD_2/λ_2 [WL cycles].
+        double sigma;  ///< Formal sigma of @ref w from the filter covariance [WL cycles].
+    };
+
+    /**
+     * @brief Float DD widelane of one satellite pair
+     *        (@ref AmbiguityResolverConfig::wl_from_float).
+     *
+     * @param p1    DD pair on the higher frequency.
+     * @param p2    DD pair on the lower frequency (same satellites as @p p1).
+     * @param lam1  Wavelength of @p p1's signal [m].
+     * @param lam2  Wavelength of @p p2's signal [m].
+     * @param x     Filter state (DD ambiguities in metres).
+     * @param P     Filter covariance.
+     * @return The widelane and its sigma; NaN in both when an index is out of
+     *         range or the variance is negative.
+     */
+    static FloatWidelane floatWidelane_(const DdPair& p1, const DdPair& p2,
+                                        double lam1, double lam2,
+                                        const Eigen::VectorXd& x,
+                                        const Eigen::MatrixXd& P);
+
+    /**
+     * @brief Add the error floor of @ref AmbiguityResolverConfig::nl_sigma_floor_cyc
+     *        to a search covariance.
+     *
+     * Adds @f$\tfrac{f^2}{2}(I + M)@f$ with @f$M_{kl} = 1@f$ when entries k and l
+     * share a reference satellite (including k = l): each entry's variance grows
+     * by @f$f^2@f$, and entries on a common reference correlate by @f$f^2/2@f$.
+     *
+     * @param[in,out] Q        Search covariance [cycles²], n × n.
+     * @param ref_of           Reference satellite of each entry (size n).
+     * @param floor_cyc        The floor f [cycles], > 0.
+     */
+    static void addSharedReferenceFloor_(Eigen::MatrixXd& Q,
+                                         const std::vector<std::string>& ref_of,
+                                         double floor_cyc);
 
     // -----------------------------------------------------------------------
     // Partial ambiguity resolution (subset selection)

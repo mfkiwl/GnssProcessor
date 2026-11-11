@@ -550,8 +550,10 @@ AmbiguityResolution AmbiguityResolver::resolve(
         return wl_only_result;
     }
 
-    // Try WL-constrained NL resolution first when WL integers are available
-    if (!wl_ambiguities.empty()) {
+    // Try WL-constrained NL resolution first when WL integers are available:
+    // from the MW detector, or from the float states themselves (wl_from_float,
+    // which needs no MW integer and so also runs on correction streams).
+    if (config_.wl_from_float || !wl_ambiguities.empty()) {
         auto wl_result = resolveWlConstrained(pairs, x, P, wl_ambiguities, observations);
         if (wl_result.success) {
             // Upper-bound ratio check: a ratio above this indicates a
@@ -1175,6 +1177,44 @@ AmbiguityResolution AmbiguityResolver::resolveDd(
 }
 
 // ===========================================================================
+// Float widelane and the N_1 search covariance floor
+// ===========================================================================
+
+AmbiguityResolver::FloatWidelane AmbiguityResolver::floatWidelane_(
+    const DdPair& p1, const DdPair& p2, double lam1, double lam2,
+    const Eigen::VectorXd& x, const Eigen::MatrixXd& P) {
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const Eigen::Index n = x.size();
+    const int idx[4] = { p1.state_idx_i, p1.state_idx_ref, p2.state_idx_i, p2.state_idx_ref };
+    for (const int i : idx) {
+        if (i < 0 || i >= n || i >= P.rows()) return { nan, nan };
+    }
+    // w = g · (a1_i, a1_ref, a2_i, a2_ref) with g = (1/λ1, −1/λ1, −1/λ2, +1/λ2).
+    const double g[4] = { 1.0 / lam1, -1.0 / lam1, -1.0 / lam2, 1.0 / lam2 };
+    double w = 0.0, var = 0.0;
+    for (int a = 0; a < 4; ++a) {
+        w += g[a] * x(idx[a]);
+        for (int b = 0; b < 4; ++b) var += g[a] * g[b] * P(idx[a], idx[b]);
+    }
+    if (!(var >= 0.0)) return { nan, nan };
+    return { w, std::sqrt(var) };
+}
+
+void AmbiguityResolver::addSharedReferenceFloor_(Eigen::MatrixXd& Q,
+                                                 const std::vector<std::string>& ref_of,
+                                                 double floor_cyc) {
+    const double half = 0.5 * floor_cyc * floor_cyc;
+    const Eigen::Index n = Q.rows();
+    for (Eigen::Index k = 0; k < n; ++k) {
+        Q(k, k) += half;                              // the I term
+        for (Eigen::Index l = 0; l < n; ++l) {
+            if (ref_of[k] == ref_of[l]) Q(k, l) += half;   // the M term (k = l included)
+        }
+    }
+}
+
+// ===========================================================================
 // WL-constrained NL resolution (two-step approach)
 // ===========================================================================
 
@@ -1297,15 +1337,38 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
         const auto& hi = a_is_f1 ? a : b;
         const auto& lo = a_is_f1 ? b : a;
 
-        // Look up the DD WL integer from the MW detector's resolved WL map.
-        // WL key format is "SAT_SIG1_SIG2" where SIG1 is on the higher freq.
-        // DD_WL = SD_WL(sat_i) - SD_WL(sat_ref)
-        const std::string wl_key_i   = p_a.sat_i   + "_" + hi.signal + "_" + lo.signal;
-        const std::string wl_key_ref = p_a.sat_ref  + "_" + hi.signal + "_" + lo.signal;
+        // The DD widelane integer: from the float states (wl_from_float) or from
+        // the MW detector's resolved WL map.
+        int wl_int_i = 0, wl_int_ref = 0;   // MW per-satellite integers (MW source only)
+        int dd_wl    = 0;
+        if (config_.wl_from_float) {
+            const FloatWidelane fw = floatWidelane_(pairs[hi.pair_idx], pairs[lo.pair_idx],
+                                                    hi.wavelength, lo.wavelength, x, P);
+            const double frac = fw.w - std::round(fw.w);
+            const bool   ok   = std::isfinite(fw.w) && std::isfinite(fw.sigma)
+                             && std::abs(frac) + 3.0 * fw.sigma <= config_.wl_max_frac;
+            if (!observations.empty()) {
+                log->info("WLFLOAT tow={:.1f} sat_i={} sat_ref={} sig_hi={} sig_lo={} "
+                          "w={:.4f} sigma={:.4f} dd_wl={} admitted={}",
+                          observations.front().time.tow, p_a.sat_i, p_a.sat_ref,
+                          hi.signal, lo.signal, fw.w, fw.sigma,
+                          static_cast<long>(std::lround(fw.w)), ok ? 1 : 0);
+            }
+            if (!ok) continue;
+            dd_wl = static_cast<int>(std::lround(fw.w));
+        } else {
+            // WL key format is "SAT_SIG1_SIG2" where SIG1 is on the higher freq.
+            // DD_WL = SD_WL(sat_i) - SD_WL(sat_ref)
+            const std::string wl_key_i   = p_a.sat_i   + "_" + hi.signal + "_" + lo.signal;
+            const std::string wl_key_ref = p_a.sat_ref  + "_" + hi.signal + "_" + lo.signal;
 
-        auto it_i   = wl_ambiguities.find(wl_key_i);
-        auto it_ref = wl_ambiguities.find(wl_key_ref);
-        if (it_i == wl_ambiguities.end() || it_ref == wl_ambiguities.end()) continue;
+            auto it_i   = wl_ambiguities.find(wl_key_i);
+            auto it_ref = wl_ambiguities.find(wl_key_ref);
+            if (it_i == wl_ambiguities.end() || it_ref == wl_ambiguities.end()) continue;
+            wl_int_i   = it_i->second;
+            wl_int_ref = it_ref->second;
+            dd_wl      = wl_int_i - wl_int_ref;
+        }
 
         // Maturity gate: both constituent arcs (sat_i and sat_ref on the higher
         // frequency) must have accumulated enough elevation-weighted code
@@ -1320,8 +1383,6 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
             }
         }
 
-        const int dd_wl = it_i->second - it_ref->second;
-
         // Diagnostic: log the MW-derived widelane integers (WLDUMP) so they can be
         // scored against the estimator-free census (scripts/mw_census_allpairs.py);
         // tow lets the comparison window-match the census series.  The N1 search
@@ -1329,11 +1390,11 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
         // |shift_coef|, which is f2/(f1+f2) = 0.438 cycles on the narrowlane row
         // and f2/(f1−f2) = 3.53 cycles on the iono-free row (GPS L1/L2).  Either
         // way a wrong WL yields a wrong N1.
-        if (!observations.empty()) {
+        if (!config_.wl_from_float && !observations.empty()) {
             log->info("WLDUMP tow={:.1f} sat_i={} sat_ref={} sig_hi={} sig_lo={} "
                       "wl_i={} wl_ref={} dd_wl={}",
                       observations.front().time.tow, p_a.sat_i, p_a.sat_ref,
-                      hi.signal, lo.signal, it_i->second, it_ref->second, dd_wl);
+                      hi.signal, lo.signal, wl_int_i, wl_int_ref, dd_wl);
         }
 
         const double f1 = hi.freq;
@@ -1449,6 +1510,15 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
     Eigen::VectorXd y_reduced = T * y_dd;           // [n_NL cycles]
     Eigen::MatrixXd Q_reduced = T * Qdd * T.transpose();
     Q_reduced = 0.5 * (Q_reduced + Q_reduced.transpose());
+
+    // Error floor on the searched covariance (nl_sigma_floor_cyc): the formal
+    // sigma omits the time-correlated phase errors, so the search, the ratio,
+    // the success rate and the per-pair cap all run on the floored matrix.
+    if (config_.nl_sigma_floor_cyc > 0.0) {
+        std::vector<std::string> ref_of(n_nl);
+        for (int k = 0; k < n_nl; ++k) ref_of[k] = pairs[nl_candidates[k].dd_idx_1].sat_ref;
+        addSharedReferenceFloor_(Q_reduced, ref_of, config_.nl_sigma_floor_cyc);
+    }
 
     // Diagnostic: pre-fix conditioning of the NL-space matrix MLAMBDA searches.
     // Compared with the post-fix rebuild at each fix site below, it shows
