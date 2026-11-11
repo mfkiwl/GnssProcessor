@@ -5,14 +5,14 @@
 - **id:** ARU
 - **topic:** user-ar
 - **status:** open
-- **summary:** The user engine has never produced a correct integer fix. Stage A measures, with no fixing, whether the float ambiguities of a single receiver on one analysis centre's final products with published phase biases (CODE MGX final orbit, 30 s clock, OSB code and phase biases) are integer within their own formal covariance, with the position estimated and with the position held at the IGS coordinate. Stage B turns fixing on only if stage A passes, against bars frozen below. Stage A result (2026-11-10, section 4): float integer (A1 26 of 30, A2 30 of 30 system-days with the position estimated), covariance optimistic by a factor of about 2 to 3 (A3 15 of 30), stage A not passed as frozen; the MW wide-lane source of the search is wrong by 2 cycles on GPS III (satellite antenna offset per frequency omitted).
+- **summary:** The user engine has never produced a correct integer fix. Stage A measures, with no fixing, whether the float ambiguities of a single receiver on one analysis centre's final products with published phase biases (CODE MGX final orbit, 30 s clock, OSB code and phase biases) are integer within their own formal covariance, with the position estimated and with the position held at the IGS coordinate. Stage B turns fixing on only if stage A passes, against bars frozen below. Stage A result (2026-11-10, section 4): float integer (A1 26 of 30, A2 30 of 30 system-days with the position estimated), covariance optimistic by a factor of about 2 to 3 (A3 15 of 30), stage A not passed as frozen; the MW wide-lane source of the search is wrong by 2 cycles on pairs with one GPS III satellite (satellite antenna offset per frequency omitted). Correction (section 6): stage A searched the narrowlane row, on which the float misses by 0.26 (GPS) and 0.19 (Galileo) cycle in hour 2; the integer grade holds for the ionosphere-free combination, the row stage B searches.
 - **dates:** 2026-11-10 (pre-registration), 2026-11-11 (stage B set-up frozen, section 5)
 - **knobs / posture:** two new, default off (section 5): `estimation.ambiguity_resolution.wl_from_float`, `estimation.ambiguity_resolution.nl_sigma_floor_cyc`. Stage A runs `estimation.ambiguity_resolution.mode` 1 with `ratio_threshold` 1e9 (the search runs and logs, nothing is accepted) and the resolver log at debug.
 - **code:** `src/core/filter/AmbiguityResolver.cpp` (debug line `CLCOV`: the formal covariance of the double differences beside the existing `CLFRAC` values; logged only at debug, no other output changes); stage B: `floatWidelane_`, `addSharedReferenceFloor_` (section 5)
 - **run dirs:** `D:\GnssProcessorSupport\runs_nom\_rap_aru_*`; tools and grades `D:\GnssProcessorSupport\presentation\agu26\fixing_control\`
 - **source:** the live fixing sessions of 2026-11-10 (`D:\GnssProcessorSupport\presentation\agu26\figures\live_fixing_note.md`: 0 fixes in 27 946 searches, wide lane integer for GPS, ionosphere-free narrow lane near uniform under a formal sigma of 0.005 to 0.04 cycles); card [SSR-BIAS-SIGN](../realtime/SSR-BIAS-SIGN.md); the July 2026 wrong integers on ALGO00CAN ([CONSUMER-AR-BLUNDER](../../record/cards/consumer/CONSUMER-AR-BLUNDER.md))
 
-**Outcome.** Stage A (section 4): on CODE final products the user float IS integer. Narrow lane within 0.10 cycle on 30 of 30 receiver-days (median 0.045 cycle with the position estimated, 0.034 held). The covariance bar A3 fails on most receiver-days: the miss levels off near 5 mm while the formal sigma keeps falling, so stage B was not started. First model term that prevents a correct fix: the MW wide lane fed to the WL-constrained search omits the satellite antenna offset per frequency, 2 cycles wrong on every GPS III pair (5 526 of 5 526 pair-epochs). Open.
+**Outcome.** Stage A (section 4, corrected in section 6): on CODE final products the ionosphere-free combination of the user float IS integer (the narrowlane row that stage A's searches used is not: 0.26 and 0.19 cycle in hour 2). Narrow lane within 0.10 cycle on 30 of 30 receiver-days (median 0.045 cycle with the position estimated, 0.034 held). The covariance bar A3 fails on most receiver-days: the miss levels off near 5 mm while the formal sigma keeps falling, so stage B was not started. First model term that prevents a correct fix: the MW wide lane fed to the WL-constrained search omits the satellite antenna offset per frequency, 2 cycles wrong on every pair with one GPS III satellite (5 526 of 5 526 pair-epochs). Open.
 
 > Results are appended TO THIS FILE, below the text.
 
@@ -221,3 +221,41 @@ and parsed. The first attempt still carried the stage A threshold 1e9 (0 fixes);
 out as 5.0. Result, not graded: first fix at 16.5 minutes in both runs, 18 pair-arcs compared, none different;
 median 3D error over minutes 60 to 120, 8.1 mm fixed and 13.6 mm float. No setting was changed in response to these
 numbers.
+
+## 6. Corrections to section 4 (2026-11-11)
+
+An independent re-check of stage A by another session (a separate parser on the run logs) reproduced the numbers of
+section 4 and raised the points below. Each was checked here against the logs, `igs20.atx` and the code before it was
+written. Section 4 stays as written; this section governs where they differ.
+
+1. **The stage A searches ran on the narrowlane row, not the ionosphere-free row.** `main_log.log` of
+   `_rap_aru_a1_est_143_wtzz` and `_rap_aru_a1gal_est_143_wtzz` reads `nl_row=narrowlane` (`nl_iono_free_row`
+   defaults to false). The grade of sections 4.1 to 4.3 is on the ionosphere-free combination of the float states,
+   so "the float is integer" holds for that combination only. On the narrowlane row the search used, with the float
+   wide lane rounded, the hour-2 median miss is 0.264 cycle for GPS and 0.186 for Galileo (`_rap_aru_a1_est_*`, 447
+   and 483 pair-windows; the re-check: 0.27 and 0.19 against formal sigma 0.18 and 0.16). Consequences:
+   - the search ratios of stage A (section 4.4: the GPS ratio counts, 537 of 1 790 Galileo-only searches) come from
+     a row the float does not support; they are no sign of fixable integers;
+   - on the narrowlane row a 2-cycle wide-lane error moves the N_1 target by 2 x 0.438 = 0.876 cycle; a fix sets L1
+     and L2 one cycle off in opposite directions and the ionosphere-free ambiguity one wide-lane wavelength (0.862
+     m) off. The "7 and 5 cycles, millimetres in the position" of section 4.4 holds for the ionosphere-free row only;
+   - stage B searches on the ionosphere-free row (`nl_iono_free_row` true), frozen in section 5 (commit `eb50158`)
+     before any graded run, so the floor of 0.04 cycle and the 0.15 per-pair cap act on the row that was graded.
+2. **The float wide lane is not an independent source.** It carries no antenna omission (the re-check: float
+   fraction 0.043 on GPS III pairs), but it shares the float's ionosphere error (1.49 wide-lane cycles per metre of L1
+   slant error) and would hide any term per frequency the float model gets wrong. A wide lane from the observations
+   and the bias file with the satellite and receiver antenna offsets per frequency projected on the line of sight is
+   an independent witness; it is reported with stage B where computed, not graded (it was not in the frozen bars).
+3. **Ratio counts, section 4.4.** The WL-constrained ratio reached 3.0 at some epoch in 13 of 30 runs (5 estimated,
+   8 held; `grade_a1.json`, maximum 16.54 at `_rap_aru_a1_hold_144_bake` minute 5), not 10 of 30. In hour 2 alone:
+   5 of 30 runs, 50 of 3 600 searches.
+4. **Which GPS III pairs.** The wide-lane disagreement is on pairs with exactly one GPS III satellite. Pairs of two
+   GPS III satellites agree (307 pair-epochs estimated). The rounded float minus the MW integer is +2 when the first
+   satellite is GPS III (3 944 pair-epochs) and -2 when the reference is (1 582).
+5. **Galileo size.** The 125 mm difference of E1 minus E5a offsets between E21 and E28 is 0.56 Galileo wide-lane
+   cycle (coefficient f1/(f1-f5) - f1/(f1+f5) = 3.38, wavelength 0.751 m), not 0.66 (the GPS coefficient was used).
+   Between a satellite with nearly equal offsets and a large-offset one it reaches 0.71 cycle (E11 at 19.9 mm against
+   E21 at 177.0 mm, `igs20.atx`), so on Galileo the term can round either way, not only as a smaller GPS case.
+6. **Galileo-only search, whole run against hour 2.** "At some epoch in 12 of 15 runs" and "maximum 5 206" are over
+   the whole run; the maximum is at minute 50.5 (`_rap_aru_a1gal_est_147_wtzz`). In hour 2 the ratio passed 3.0 in 11
+   of 15 runs (537 of 1 790 searches, unchanged). By point 1 these are narrowlane-row ratios.
