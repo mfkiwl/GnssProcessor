@@ -334,3 +334,6 @@ narrow lane has no independent check here: B1 tests repeatability, not truth.
 `realtime_tools\replay_relay.py` is written (time-faithful, per-stream ports, a later engine connects as a cold
 start) but not run, and no stream configuration with the two keys exists. The CAS Galileo signal mapping. A slip
 test or release rule for held integers (7.2). The STPM00SPM height offset (7.3).
+
+**7.6 Unit suite.** Debug `gnss_tests.exe` at commit `eb50158`: 4 261 tests in 562 suites, 4 224 passed, 37 skipped,
+0 failed (`fixing_control\gtest_debug_eb50158.txt`), the new suite `ArFloatWidelaneTest` included.
