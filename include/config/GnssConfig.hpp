@@ -8719,6 +8719,27 @@ namespace GnssProcessor {
         double getArNlSigmaFloorCyc() const { return ar_nl_sigma_floor_cyc_; }
 
         /**
+         * @brief Release threshold for a held satellite pair
+         *        (@c estimation.ambiguity_resolution.hold_release_cyc).
+         *
+         * See AmbiguityResolverConfig::hold_release_cyc.
+         *
+         * @return The threshold in cycles (widelane and ionosphere-free narrow
+         *         lane); 0 (default) disables the release.
+         */
+        double getArHoldReleaseCyc() const { return ar_hold_release_cyc_; }
+
+        /**
+         * @brief Refloat the other signal of a satellite when one signal's arc
+         *        restarts (@c estimation.ambiguity_resolution.refloat_partner_signal).
+         *
+         * See AmbiguityResolverConfig::refloat_partner_signal.
+         *
+         * @return true to refloat all signals of the satellite; false (default).
+         */
+        bool getArRefloatPartnerSignal() const { return ar_refloat_partner_signal_; }
+
+        /**
          * @brief Get the list of constellations eligible for AR.
          *
          * Empty list = all active systems are eligible (default).
@@ -9542,6 +9563,8 @@ namespace GnssProcessor {
         bool   ar_nl_iono_free_row_{ false }; ///< WL-constrained N_1 search runs on the exact iono-free row instead of the narrowlane row. Default off (byte-identical); see AmbiguityResolverConfig::nl_iono_free_row for the 8.06× WL-sensitivity trade.
         bool   ar_wl_from_float_{ false };   ///< WL-constrained search takes its widelane integers from the float states, not the MW detector. Default off (byte-identical).
         double ar_nl_sigma_floor_cyc_{ 0.0 }; ///< Error floor (NL cycles) added to the WL-constrained N_1 search covariance. 0 = off (byte-identical).
+        double ar_hold_release_cyc_{ 0.0 };   ///< Release threshold (cycles) for a held pair the float contradicts. 0 = off.
+        bool   ar_refloat_partner_signal_{ false }; ///< Refloat all signals of a satellite when one signal's arc restarts alone.
         bool   ar_enable_partial_ar_;    ///< Partial AR: on full-set fix failure, retry on the largest gate-passing subset.
         std::vector<std::string> ar_active_systems_; ///< Constellations eligible for AR (empty = all).
 

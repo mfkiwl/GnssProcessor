@@ -634,6 +634,18 @@ void Application::resolveEpochAmbiguities_(const PppEpochWork& w) {
             epoch_prefix, ar_result.num_fixed, ar_result.num_candidates,
             ar_result.ratio);
     }
+
+    // Held-pair release and partner refloat: after the fix is installed, so the
+    // refloat is not overwritten by fixed_covariance.
+    if (!ar_result.release_satellites.empty()) {
+        const int n_keys = ambiguity_resolver_->refloatSatellites(
+            *state_manager_, ar_result.release_satellites, config_.getInitialStd().ambiguity);
+        log_manager_.getLogger("main_log")->info(
+            "{}AR release: {} satellite(s), {} ambiguity key(s) refloated "
+            "(run totals: hold release {}, partner refloat {})",
+            epoch_prefix, ar_result.release_satellites.size(), n_keys,
+            ambiguity_resolver_->holdReleaseCount(), ambiguity_resolver_->partnerReleaseCount());
+    }
 }
 
 // ---------------------------------------------------------------------------

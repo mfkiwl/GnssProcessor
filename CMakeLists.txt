@@ -732,6 +732,7 @@ add_executable(gnss_tests
     tests/test_wl_only_ffr.cpp
     tests/test_nl_search_row.cpp
     tests/test_ar_float_widelane.cpp
+    tests/test_ar_hold_release.cpp
     tests/test_fix_and_hold.cpp
     tests/test_signal_math.cpp
     tests/test_geometry.cpp

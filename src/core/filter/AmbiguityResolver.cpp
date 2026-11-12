@@ -228,8 +228,46 @@ void AmbiguityResolver::refreshArcAges_(const StateManager& state_manager,
     }
     // Keys that left the state vector are dropped: a re-acquired ambiguity
     // starts a new arc instead of resuming its pre-gap count.
-    for (auto it = arcs_.begin(); it != arcs_.end();)
-        it = present.count(it->first) ? std::next(it) : arcs_.erase(it);
+    std::set<std::string> restarted_sats;   // a satellite with an arc that ended or began
+    for (auto it = arcs_.begin(); it != arcs_.end();) {
+        if (present.count(it->first)) { ++it; continue; }
+        restarted_sats.insert(it->first.substr(0, it->first.find('|')));
+        it = arcs_.erase(it);
+    }
+
+    // Per satellite: does one signal start an arc this epoch while another has
+    // carried on for at least three epochs?  The three-epoch bar keeps the partner
+    // refloat from answering itself: the signal it refloats starts one epoch after
+    // the first, when the first is two epochs old.
+    partner_release_.clear();
+    std::map<std::string, std::pair<bool, bool>> starts_and_older;   // sat -> (start, older)
+    for (const auto& [k, a] : arcs_) {
+        const std::string sat = k.substr(0, k.find('|'));
+        auto& so = starts_and_older[sat];
+        if (a.epochs == 1) { so.first = true; restarted_sats.insert(sat); }
+        if (a.epochs >= 3) so.second = true;
+    }
+    if (config_.refloat_partner_signal) {
+        auto log = log_manager_.getLogger("ambiguity_resolver");
+        const double tow = observations.empty() ? 0.0 : observations.front().time.tow;
+        for (const auto& [sat, so] : starts_and_older) {
+            if (!(so.first && so.second)) continue;
+            partner_release_.push_back(sat);
+            ++n_partner_releases_;
+            log->info("PARTNERREL tow={:.1f} sat={}: one signal restarted while another "
+                      "carried on; refloating all signals (total {})",
+                      tow, sat, n_partner_releases_);
+        }
+    }
+
+    // A hold is forgotten when an arc of either of its satellites ends or begins.
+    if (!held_pairs_.empty()) {
+        for (auto it = held_pairs_.begin(); it != held_pairs_.end();) {
+            const bool gone = restarted_sats.count(it->second.sat_i)
+                           || restarted_sats.count(it->second.sat_ref);
+            it = gone ? held_pairs_.erase(it) : std::next(it);
+        }
+    }
 }
 
 int AmbiguityResolver::arcAgeOf_(const std::string& sat,
@@ -242,6 +280,54 @@ double AmbiguityResolver::arcInfoOf_(const std::string& sat,
                                      const std::string& signal) const {
     const auto it = arcs_.find(sat + "|" + signal);
     return (it == arcs_.end()) ? 0.0 : it->second.info;
+}
+
+// ===========================================================================
+// Held-pair release (AmbiguityResolverConfig::hold_release_cyc)
+// ===========================================================================
+
+AmbiguityResolver::HoldMisfit AmbiguityResolver::holdMisfit_(
+    const AmbiguityResolution::HeldPairFix& h, double dd1, double dd2) {
+    const double held1 = h.n1 * h.lam1;
+    const double held2 = (h.n1 - h.wl) * h.lam2;
+    const double d_wl  = (dd1 / h.lam1 - dd2 / h.lam2) - h.wl;
+    const double g1    = h.f1 * h.f1;
+    const double g2    = h.f2 * h.f2;
+    const double lam_nl = Constants::SPEED_OF_LIGHT / (h.f1 + h.f2);
+    const double d_if_m = (g1 * (dd1 - held1) - g2 * (dd2 - held2)) / (g1 - g2);
+    return { d_wl, d_if_m / lam_nl };
+}
+
+std::vector<std::string> AmbiguityResolver::chooseReleaseSatellites_(
+    const std::vector<std::pair<std::string, std::string>>& held,
+    const std::vector<std::pair<std::string, std::string>>& contradicted) {
+    std::map<std::string, int> n_held_as_ref, n_bad_as_ref;
+    for (const auto& [i, r] : held) ++n_held_as_ref[r];
+    for (const auto& [i, r] : contradicted) ++n_bad_as_ref[r];
+    std::set<std::string> out;
+    for (const auto& [i, r] : contradicted) {
+        const int bad = n_bad_as_ref[r];
+        const bool ref_at_fault = bad >= 2 && 2 * bad > n_held_as_ref[r];
+        out.insert(ref_at_fault ? r : i);
+    }
+    return { out.begin(), out.end() };
+}
+
+int AmbiguityResolver::refloatSatellites(StateManager& state_manager,
+                                         const std::vector<std::string>& satellites,
+                                         double std_m) const {
+    if (satellites.empty()) return 0;
+    const std::set<std::string> want(satellites.begin(), satellites.end());
+    std::vector<std::string> keys;
+    for (const auto& [key, idx] : state_manager.getAmbiguities()) {
+        (void)idx;
+        const auto parts = StateKeys::parseAmbiguityKey(key);
+        if (parts && want.count(parts->satellite)) keys.push_back(key);
+    }
+    int n = 0;
+    for (const auto& key : keys)
+        if (state_manager.resetAmbiguity(key, std_m)) ++n;
+    return n;
 }
 
 // ===========================================================================
@@ -391,6 +477,30 @@ AmbiguityResolution AmbiguityResolver::resolve(
 // ===========================================================================
 
 AmbiguityResolution AmbiguityResolver::resolve(
+    const StateManager& state_manager,
+    const std::vector<PppObservation>& observations,
+    const std::map<std::string, int>& wl_ambiguities,
+    const std::map<std::string, double>& wl_fractions,
+    const std::map<std::string, WlArcQuality>& wl_quality) {
+
+    AmbiguityResolution result = resolveCore_(state_manager, observations, wl_ambiguities,
+                                              wl_fractions, wl_quality);
+
+    // The held-pair memory takes the fix only once it is final (after the
+    // ratio upper bound), so a rejected fix is never remembered as held.
+    if (result.success && config_.hold_release_cyc > 0.0) {
+        for (const auto& h : result.held_pairs)
+            held_pairs_[h.sat_i + "|" + h.sat_ref + "|" + h.sig_hi + "|" + h.sig_lo] = h;
+    }
+    for (const auto& sat : partner_release_) {
+        if (std::find(result.release_satellites.begin(), result.release_satellites.end(), sat)
+                == result.release_satellites.end())
+            result.release_satellites.push_back(sat);
+    }
+    return result;
+}
+
+AmbiguityResolution AmbiguityResolver::resolveCore_(
     const StateManager& state_manager,
     const std::vector<PppObservation>& observations,
     const std::map<std::string, int>& wl_ambiguities,
@@ -1324,6 +1434,59 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
     std::set<int> consumed_dd;
     int n_skipped_immature = 0;   ///< candidates dropped by the min_arc_info gate
 
+    // Satellites that sit out this epoch's search: refloated by the partner rule in
+    // refreshArcAges_, or released below for contradicting a held pair.
+    std::set<std::string> released(partner_release_.begin(), partner_release_.end());
+
+    // Held-pair release: compare each remembered hold with the float state.
+    if (config_.hold_release_cyc > 0.0 && !held_pairs_.empty()) {
+        std::vector<std::pair<std::string, std::string>> held_seen, contradicted;
+        const double tow = observations.empty() ? 0.0 : observations.front().time.tow;
+        const int nx = static_cast<int>(x.size());
+        for (const auto& [spkey, infos] : sat_pair_groups) {
+            if (infos.size() != 2) continue;
+            const bool a_hi = infos[0].freq > infos[1].freq;
+            const auto& hi = a_hi ? infos[0] : infos[1];
+            const auto& lo = a_hi ? infos[1] : infos[0];
+            const auto& p1 = pairs[hi.pair_idx];
+            const auto& p2 = pairs[lo.pair_idx];
+            const auto it = held_pairs_.find(p1.sat_i + "|" + p1.sat_ref + "|" + hi.signal
+                                             + "|" + lo.signal);
+            if (it == held_pairs_.end()) continue;
+            if (p1.state_idx_i < 0 || p1.state_idx_i >= nx || p1.state_idx_ref < 0
+                || p1.state_idx_ref >= nx || p2.state_idx_i < 0 || p2.state_idx_i >= nx
+                || p2.state_idx_ref < 0 || p2.state_idx_ref >= nx) continue;
+            const double dd1 = x(p1.state_idx_i) - x(p1.state_idx_ref);
+            const double dd2 = x(p2.state_idx_i) - x(p2.state_idx_ref);
+            const HoldMisfit m = holdMisfit_(it->second, dd1, dd2);
+            held_seen.emplace_back(p1.sat_i, p1.sat_ref);
+            if (std::abs(m.d_wl) > config_.hold_release_cyc
+                || std::abs(m.d_if) > config_.hold_release_cyc) {
+                contradicted.emplace_back(p1.sat_i, p1.sat_ref);
+                log->info("HOLDREL tow={:.1f} pair={}-{} {}/{} held_n1={} held_wl={} "
+                          "d_wl={:+.3f} d_if={:+.3f} threshold={:.3f}",
+                          tow, p1.sat_i, p1.sat_ref, hi.signal, lo.signal,
+                          it->second.n1, it->second.wl, m.d_wl, m.d_if,
+                          config_.hold_release_cyc);
+            }
+        }
+        if (!contradicted.empty()) {
+            const auto sats = chooseReleaseSatellites_(held_seen, contradicted);
+            for (const auto& sat : sats) {
+                released.insert(sat);
+                result.release_satellites.push_back(sat);
+                ++n_hold_releases_;
+                log->info("HOLDREL tow={:.1f} refloat sat={} (total {})", tow, sat,
+                          n_hold_releases_);
+            }
+            for (auto it = held_pairs_.begin(); it != held_pairs_.end();) {
+                const bool gone = released.count(it->second.sat_i)
+                               || released.count(it->second.sat_ref);
+                it = gone ? held_pairs_.erase(it) : std::next(it);
+            }
+        }
+    }
+
     for (const auto& [spkey, infos] : sat_pair_groups) {
         if (infos.size() != 2) continue;  // need exactly two frequencies
 
@@ -1331,6 +1494,8 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
         const auto& b = infos[1];
         const auto& p_a = pairs[a.pair_idx];
         const auto& p_b = pairs[b.pair_idx];
+        if (!released.empty() && (released.count(p_a.sat_i) || released.count(p_a.sat_ref)))
+            continue;
 
         // Determine which is f1 (higher) and f2 (lower)
         const bool a_is_f1 = a.freq > b.freq;
@@ -1370,13 +1535,17 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
             dd_wl      = wl_int_i - wl_int_ref;
         }
 
-        // Maturity gate: both constituent arcs (sat_i and sat_ref on the higher
-        // frequency) must have accumulated enough elevation-weighted code
+        // Maturity gate: the constituent arcs (sat_i and sat_ref, on both
+        // frequencies) must have accumulated enough elevation-weighted code
         // information.  A single immature arc fails the ratio test for the whole
-        // set, so the gate acts per candidate, not per set.
+        // set, so the gate acts per candidate, not per set.  Both frequencies
+        // count: a refloat of the lower-frequency signal alone restarts that arc
+        // only, and the pair's widelane then rests on it.
         if (config_.min_arc_info > 0.0) {
-            const double info_i = arcInfoOf_(p_a.sat_i,   hi.signal);
-            const double info_r = arcInfoOf_(p_a.sat_ref, hi.signal);
+            const double info_i = std::min(arcInfoOf_(p_a.sat_i,   hi.signal),
+                                           arcInfoOf_(p_a.sat_i,   lo.signal));
+            const double info_r = std::min(arcInfoOf_(p_a.sat_ref, hi.signal),
+                                           arcInfoOf_(p_a.sat_ref, lo.signal));
             if (std::min(info_i, info_r) < config_.min_arc_info) {
                 ++n_skipped_immature;
                 continue;
@@ -1696,6 +1865,12 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
             v(2 * a + 1) = dd2 - (x(p2.state_idx_i) - x(p2.state_idx_ref));
             result.fixed_dd_rows.push_back({ p1.state_idx_i, p1.state_idx_ref });
             result.fixed_dd_rows.push_back({ p2.state_idx_i, p2.state_idx_ref });
+            if (config_.hold_release_cyc > 0.0) {
+                result.held_pairs.push_back({ p1.sat_i, p1.sat_ref, p1.signal, p2.signal,
+                                              nlc.f1, nlc.f2, nlc.lam1, nlc.lam2,
+                                              static_cast<int>(std::lround(pf.afix_cycles(a))),
+                                              nlc.dd_wl });
+            }
             if (log->should_log(spdlog::level::debug)) {
                 log->debug("  [PAR] NL pair {}-{} {}/{}: N_1_fixed={} dd_wl={}, DD1={:.3f}m DD2={:.3f}m",
                            p1.sat_i, p1.sat_ref, p1.signal, p2.signal,
@@ -1797,6 +1972,12 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
         v(2 * k + 1) = afix_orig(nlc.dd_idx_2) - (x(p2.state_idx_i) - x(p2.state_idx_ref));
         result.fixed_dd_rows.push_back({ p1.state_idx_i, p1.state_idx_ref });
         result.fixed_dd_rows.push_back({ p2.state_idx_i, p2.state_idx_ref });
+        if (config_.hold_release_cyc > 0.0) {
+            result.held_pairs.push_back({ p1.sat_i, p1.sat_ref, p1.signal, p2.signal,
+                                          nlc.f1, nlc.f2, nlc.lam1, nlc.lam2,
+                                          static_cast<int>(std::lround(afix_n1(k))),
+                                          nlc.dd_wl });
+        }
     }
 
     Eigen::MatrixXd R   = Eigen::MatrixXd::Identity(n_fixed_dd, n_fixed_dd) * config_.hold_variance;

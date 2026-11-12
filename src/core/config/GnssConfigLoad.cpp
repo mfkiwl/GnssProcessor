@@ -1983,6 +1983,23 @@ namespace GnssProcessor {
                       ar_nl_sigma_floor_cyc_);
             ar_nl_sigma_floor_cyc_ = 0.0;
         }
+        ar_hold_release_cyc_       = jval<double>(json, "estimation.ambiguity_resolution.hold_release_cyc",
+                                                   "ar_hold_release_cyc", 0.0);
+        ar_refloat_partner_signal_ = jval<bool>(json, "estimation.ambiguity_resolution.refloat_partner_signal",
+                                                 "ar_refloat_partner_signal", false);
+        if (ar_hold_release_cyc_ > 0.0) {
+            log->info("AR: a held pair whose float moves more than {:.3f} cycle from its integers "
+                      "is released and its satellite refloated (hold_release_cyc)",
+                      ar_hold_release_cyc_);
+        } else if (ar_hold_release_cyc_ < 0.0) {
+            log->warn("AR: hold_release_cyc = {:.3f} is negative; treated as 0 (off)",
+                      ar_hold_release_cyc_);
+            ar_hold_release_cyc_ = 0.0;
+        }
+        if (ar_refloat_partner_signal_) {
+            log->info("AR: a satellite whose one signal restarts an arc alone has all its "
+                      "signals refloated (refloat_partner_signal)");
+        }
 
         // estimation.ambiguity_resolution.active_systems = ["GPS","Galileo",...]
         // Empty / missing → all active systems are eligible for AR.

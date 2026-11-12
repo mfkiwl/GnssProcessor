@@ -111,6 +111,36 @@ struct AmbiguityResolution {
      * observations nor a second pair election.
      */
     std::vector<FixedDdRow> fixed_dd_rows;
+
+    /**
+     * @brief Satellites whose ambiguities the caller refloats after this epoch's
+     *        fix is applied (@ref AmbiguityResolver::refloatSatellites).
+     *
+     * Filled by @ref AmbiguityResolverConfig::hold_release_cyc (a held pair the
+     * float contradicts) and @ref AmbiguityResolverConfig::refloat_partner_signal
+     * (one signal of a satellite restarted while the other carried on), whether or
+     * not a fix was accepted.  Empty with both off.
+     */
+    std::vector<std::string> release_satellites;
+
+    /// One satellite pair the accepted WL-constrained fix held, as the integers
+    /// @ref AmbiguityResolver remembers for @ref AmbiguityResolverConfig::hold_release_cyc.
+    struct HeldPairFix {
+        std::string sat_i;      ///< Non-reference satellite.
+        std::string sat_ref;    ///< Reference satellite.
+        std::string sig_hi;     ///< Signal on the higher frequency.
+        std::string sig_lo;     ///< Signal on the lower frequency.
+        double f1{ 0.0 };       ///< Frequency of @c sig_hi [Hz].
+        double f2{ 0.0 };       ///< Frequency of @c sig_lo [Hz].
+        double lam1{ 0.0 };     ///< Wavelength of @c sig_hi [m].
+        double lam2{ 0.0 };     ///< Wavelength of @c sig_lo [m].
+        int n1{ 0 };            ///< DD integer on the higher frequency.
+        int wl{ 0 };            ///< DD widelane integer (N_1 - N_2).
+    };
+    /// Pairs the accepted fix held (filled by the WL-constrained path only when
+    /// @ref AmbiguityResolverConfig::hold_release_cyc > 0; committed to memory by
+    /// @ref AmbiguityResolver::resolve once the fix is final).
+    std::vector<HeldPairFix> held_pairs;
 };
 
 /**
@@ -274,6 +304,52 @@ struct AmbiguityResolverConfig {
      * filter state and the fix's pseudo-observation are unchanged.
      */
     double nl_sigma_floor_cyc{ 0.0 };
+    /**
+     * @brief Release threshold for a held satellite pair [cycles].  0 disables it
+     *        (default).
+     *
+     * An accepted WL-constrained fix is held: its pseudo-observation (variance
+     * @ref hold_variance) stays in the filter state, and nothing released it when
+     * the data later disagreed.  On BAKE00CAN, 25 May 2026, a pair fixed to the
+     * wrong widelane after a single-signal refloat stayed held while the float sat
+     * 0.7 to 0.9 widelane cycle from it for half an hour.
+     *
+     * With a threshold t > 0 the resolver remembers each held pair's integers
+     * (N_1 and the widelane) and, every epoch the search runs, compares them with
+     * the float state: the widelane DD_1/lambda_1 - DD_2/lambda_2 against the held
+     * widelane, and the ionosphere-free combination against the held one in
+     * narrow-lane cycles (lambda_NL = c/(f_1+f_2)).  Either difference above t
+     * contradicts the hold.  The satellite at fault is refloated (both signals,
+     * through @ref AmbiguityResolution::release_satellites): the reference when at
+     * least two of its held pairs and more than half of them contradict, else the
+     * pair's non-reference satellite.  Its pairs leave this epoch's search and their
+     * holds are forgotten.  A hold is also forgotten when an arc of either
+     * satellite on either signal restarts.  Each release is logged (HOLDREL) and
+     * counted.
+     */
+    double hold_release_cyc{ 0.0 };
+    /**
+     * @brief Refloat the other signal of a satellite when one signal's arc
+     *        restarts while the other carries on.  Off by default.
+     *
+     * The filter's phase-outlier response refloats the flagged row only.  With a
+     * free slant ionosphere and the satellite's other signal held tight, the next
+     * epochs re-determine the refloated ambiguity through the ionosphere from the
+     * kept signal, so a slip on the kept signal (or one common to both) lands in
+     * the refloated ambiguity as a non-integer offset with a millimetre sigma.  On
+     * BAKE00CAN, 25 May 2026 03:37, G31 L1W was refloated alone and re-settled
+     * 0.155 m away at a 3 mm sigma one epoch later; both runs then fixed the pair
+     * G06-G31 to widelane 3 against an independent widelane of 4.
+     *
+     * With this on, an arc that restarts on one signal of a satellite (the first
+     * epoch of a new or refloated arc) while another signal of that satellite has
+     * an older arc puts the satellite in
+     * @ref AmbiguityResolution::release_satellites, so both signals restart
+     * together.  Satellites whose signals start together (a rising satellite, the
+     * start of the run) are untouched.  Each refloat is logged (PARTNERREL) and
+     * counted.
+     */
+    bool   refloat_partner_signal{ false };
     bool   enable_partial_ar{ false };   ///< If true, when the full-set LAMBDA fix fails its
         ///< acceptance gates, retry by greedy backward elimination (drop the least
         ///< fixable ambiguity, re-validate ratio/bootstrap/frac) and accept the first
@@ -424,6 +500,30 @@ public:
     void holdAmbiguitiesDd(StateManager& state_manager,
                            const AmbiguityResolution& resolution);
 
+    /**
+     * @brief Refloat every ambiguity of the listed satellites.
+     *
+     * Calls @c StateManager::resetAmbiguity on each ambiguity key whose satellite is
+     * in @p satellites (all signals), so the filter re-seeds them as new arcs.  The
+     * PPP callers apply it to @ref AmbiguityResolution::release_satellites after
+     * the epoch's fix is installed, so the refloat is not overwritten by
+     * @c fixed_covariance.  A satellite without ambiguity states (a pivot) is
+     * skipped.
+     *
+     * @param state_manager  Filter state (modified in place).
+     * @param satellites     Satellites to refloat.
+     * @param std_m          Ambiguity sigma after the refloat [m].
+     * @return Number of ambiguity keys reset.
+     */
+    int refloatSatellites(StateManager& state_manager,
+                          const std::vector<std::string>& satellites,
+                          double std_m) const;
+
+    /// Satellites refloated so far by @ref AmbiguityResolverConfig::hold_release_cyc.
+    int holdReleaseCount() const { return n_hold_releases_; }
+    /// Satellites refloated so far by @ref AmbiguityResolverConfig::refloat_partner_signal.
+    int partnerReleaseCount() const { return n_partner_releases_; }
+
     /// Get the current AR configuration.
     const AmbiguityResolverConfig& getConfig() const { return config_; }
 
@@ -446,6 +546,8 @@ private:
     /// Test seam for @ref floatWidelane_ and @ref addSharedReferenceFloor_
     /// (tests/test_ar_float_widelane.cpp).
     friend struct ArFloatWlTestAccess;
+    /// Test seam for the held-pair release (tests/test_ar_hold_release.cpp).
+    friend struct ArHoldReleaseTestAccess;
 
     // -----------------------------------------------------------------------
     // WL-constrained N_1 search functional
@@ -637,6 +739,63 @@ private:
     static void addSharedReferenceFloor_(Eigen::MatrixXd& Q,
                                          const std::vector<std::string>& ref_of,
                                          double floor_cyc);
+
+    /**
+     * @brief The body of @ref resolve: gates, pair election and the searches.
+     *
+     * @ref resolve wraps it to commit an accepted fix to the held-pair memory and
+     * to append the partner-refloat satellites, which every return path must carry.
+     * Parameters as for @ref resolve.
+     */
+    AmbiguityResolution resolveCore_(const StateManager& state_manager,
+                                     const std::vector<PppObservation>& observations,
+                                     const std::map<std::string, int>& wl_ambiguities,
+                                     const std::map<std::string, double>& wl_fractions,
+                                     const std::map<std::string, WlArcQuality>& wl_quality);
+
+    // -----------------------------------------------------------------------
+    // Held-pair release (AmbiguityResolverConfig::hold_release_cyc)
+    // -----------------------------------------------------------------------
+
+    /// How far the float state of one satellite pair sits from its held integers.
+    struct HoldMisfit {
+        double d_wl;   ///< Float widelane minus the held widelane [WL cycles].
+        double d_if;   ///< Float minus held ionosphere-free combination [NL cycles].
+    };
+
+    /**
+     * @brief Misfit of a float DD pair against a held fix.
+     *
+     * @param h    The held fix (integers, frequencies, wavelengths).
+     * @param dd1  Float DD on the higher frequency [m].
+     * @param dd2  Float DD on the lower frequency [m].
+     * @return Widelane and ionosphere-free differences; the held DDs are
+     *         N_1 lambda_1 and (N_1 - WL) lambda_2.
+     */
+    static HoldMisfit holdMisfit_(const AmbiguityResolution::HeldPairFix& h,
+                                  double dd1, double dd2);
+
+    /**
+     * @brief Choose the satellites to refloat from the contradicted held pairs.
+     *
+     * A reference is chosen when at least two of its held pairs and more than half
+     * of them are contradicted; otherwise each contradicted pair's non-reference
+     * satellite.
+     *
+     * @param held          (sat_i, sat_ref) of every held pair checked this epoch.
+     * @param contradicted  (sat_i, sat_ref) of the contradicted ones.
+     * @return The satellites to refloat, sorted, without duplicates.
+     */
+    static std::vector<std::string> chooseReleaseSatellites_(
+        const std::vector<std::pair<std::string, std::string>>& held,
+        const std::vector<std::pair<std::string, std::string>>& contradicted);
+
+    /// Held pairs by "sat_i|sat_ref|sig_hi|sig_lo" (hold_release_cyc > 0 only).
+    std::map<std::string, AmbiguityResolution::HeldPairFix> held_pairs_;
+    /// Satellites queued by refloat_partner_signal in this epoch's refreshArcAges_.
+    std::vector<std::string> partner_release_;
+    int n_hold_releases_{ 0 };      ///< Satellites refloated by hold_release_cyc.
+    int n_partner_releases_{ 0 };   ///< Satellites refloated by refloat_partner_signal.
 
     // -----------------------------------------------------------------------
     // Partial ambiguity resolution (subset selection)

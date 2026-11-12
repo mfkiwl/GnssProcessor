@@ -6,8 +6,8 @@
 - **topic:** user-ar
 - **status:** open
 - **summary:** The user engine has never produced a correct integer fix. Stage A measures, with no fixing, whether the float ambiguities of a single receiver on one analysis centre's final products with published phase biases (CODE MGX final orbit, 30 s clock, OSB code and phase biases) are integer within their own formal covariance, with the position estimated and with the position held at the IGS coordinate. Stage B turns fixing on only if stage A passes, against bars frozen below. Stage A result (2026-11-10, section 4): float integer (A1 26 of 30, A2 30 of 30 system-days with the position estimated), covariance optimistic by a factor of about 2 to 3 (A3 15 of 30), stage A not passed as frozen; the MW wide-lane source of the search is wrong by 2 cycles on pairs with one GPS III satellite (satellite antenna offset per frequency omitted). Correction (section 6): stage A searched the narrowlane row, on which the float misses by 0.26 (GPS) and 0.19 (Galileo) cycle in hour 2; the integer grade holds for the ionosphere-free combination, the row stage B searches. Stage B (2026-11-11, section 7), first three receivers: fails as frozen (B1 fails on 1 of 15 receiver-days, B2 on 2 of 15); fixed wide lanes independently confirmed; first failing term a held integer with no release or slip test through a disturbed arc (BAKE00CAN DOY 145); the 14 other receivers and the streams not run.
-- **dates:** 2026-11-10 (pre-registration), 2026-11-11 (stage B set-up frozen, section 5; corrections, section 6; stage B results, section 7)
-- **knobs / posture:** two new, default off (section 5): `estimation.ambiguity_resolution.wl_from_float`, `estimation.ambiguity_resolution.nl_sigma_floor_cyc`. Stage A runs `estimation.ambiguity_resolution.mode` 1 with `ratio_threshold` 1e9 (the search runs and logs, nothing is accepted) and the resolver log at debug.
+- **dates:** 2026-11-10 (pre-registration), 2026-11-11 (stage B set-up frozen, section 5; corrections, section 6; stage B results, section 7), 2026-11-12 (B1 failure re-traced and stage B rerun frozen, section 8)
+- **knobs / posture:** four new, default off: `estimation.ambiguity_resolution.wl_from_float`, `estimation.ambiguity_resolution.nl_sigma_floor_cyc` (section 5), `estimation.ambiguity_resolution.hold_release_cyc`, `estimation.ambiguity_resolution.refloat_partner_signal` (section 8). Stage A runs `estimation.ambiguity_resolution.mode` 1 with `ratio_threshold` 1e9 (the search runs and logs, nothing is accepted) and the resolver log at debug.
 - **code:** `src/core/filter/AmbiguityResolver.cpp` (debug line `CLCOV`: the formal covariance of the double differences beside the existing `CLFRAC` values; logged only at debug, no other output changes); stage B: `floatWidelane_`, `addSharedReferenceFloor_` (section 5)
 - **run dirs:** `D:\GnssProcessorSupport\runs_nom\_rap_aru_*`; tools and grades `D:\GnssProcessorSupport\presentation\agu26\fixing_control\`
 - **source:** the live fixing sessions of 2026-11-10 (`D:\GnssProcessorSupport\presentation\agu26\figures\live_fixing_note.md`: 0 fixes in 27 946 searches, wide lane integer for GPS, ionosphere-free narrow lane near uniform under a formal sigma of 0.005 to 0.04 cycles); card [SSR-BIAS-SIGN](../realtime/SSR-BIAS-SIGN.md); the July 2026 wrong integers on ALGO00CAN ([CONSUMER-AR-BLUNDER](../../record/cards/consumer/CONSUMER-AR-BLUNDER.md))
@@ -337,3 +337,91 @@ test or release rule for held integers (7.2). The STPM00SPM height offset (7.3).
 
 **7.6 Unit suite.** Debug `gnss_tests.exe` at commit `eb50158`: 4 261 tests in 562 suites, 4 224 passed, 37 skipped,
 0 failed (`fixing_control\gtest_debug_eb50158.txt`), the new suite `ArFloatWidelaneTest` included.
+
+## 8. Stage B rerun with a release for held pairs, set-up frozen before the graded runs (2026-11-12)
+
+**8.1 Correction to section 7.2: the B1 failure re-traced.** Section 7.2 stays as written; this paragraph governs
+where they differ. Sources: `ambiguity_trace.csv`, `kalman_filter.log`, `main_log.log` and the resolver log of
+`_rap_aru_b6fix_est_145_bake` (from 00:00) and `_rap_aru_b6late_est_145_bake` (from 01:00), and the independent
+wide lane of section 7.4 per epoch (`tools\witness_wl.py --dump-pair G06-G31`).
+
+- The independent wide lane of G06-G31 reads about 3.0 until 03:31, about 4.0 from 03:32 (the GPS pivot of both runs
+  is handed over twice at 03:32:00, G28 to G03 to G25), about 3.0 from 03:37:30 to 03:40:00 (2.68 to 3.47) and about 4.0
+  again from 03:40:30 to the end. The pair's wide lane changed three times in nine minutes.
+- At 03:37:00 the post-fit screen of both runs flagged the L1W rows of G04, G31 and G03 against the pivot G25 and
+  refloated G31 L1W alone; G31 L2W kept a sigma of 0.45 mm. One epoch later G31 L1W re-settled 0.155 m from its
+  old value at a 3.3 mm sigma. A one-cycle slip on L2 that the free slant ionosphere carries into L1 moves the L1
+  ambiguity by lambda_2 / gamma = 0.148 m; the wide-lane drop at 03:37:30 is consistent with such a slip.
+- Both runs fixed G06-G31 to wide lane 3, N_1 0 (03:38:00 and 03:38:30), consistent with the witness at that time.
+- At the pivot handovers of 03:41 (in the run from 01:00, G31 to G03 at 03:41:00 and G03 to G28 at 03:41:30) the
+  runs diverge. The run from 00:00 refloats both G31 signals (sigma 1000 m on L1W and L2W at 03:41:00); they reconverge
+  on the code and the pair fixes wide lane 4, N_1 0 at 03:47:00. The run from 01:00 refloats G31 L1W only; G31 L2W
+  goes from 0.09 m to a 0.2 mm sigma in one epoch, still carrying the wide lane 3 of 03:38:30. Its float wide lane
+  then reads 3.74 to 3.87 at sigma 0.005 to 0.017 from 03:41:30 to 04:10:00 (`WLFLOAT`), 0.7 to 0.9 cycle from the
+  held integer, and nothing releases the hold.
+- At 04:10:30 the run from 01:00 fixes the full set again with wide lane 4, N_1 0. The ambiguity states move only
+  part of the way (DD L1 from +0.447 to +0.040 cycle, DD L2 from -3.420 to -3.607 cycle, `ambiguity_trace.csv`),
+  the next search reads the pair 0.8 cycle from N_1 0, the per-pair cap rejects each full set for 10 minutes, and at
+  04:21:00 the pair re-fixes to N_1 -1, wide lane 4.
+- The (1, 1) slip of G31 at 04:10 proposed in section 7.2 is not supported: in the run from 00:00 the pairs G03-G31,
+  G04-G31 and G26-G31 keep their integers within 0.01 cycle through 04:08 to 04:30.
+
+Two terms, in order: (a) a single-signal refloat by the post-fit screen or the pivot handover, while the
+satellite's other signal stays held, re-determines the refloated ambiguity through the ionosphere from the kept
+signal and gives a wide lane that is neither integer nor honestly uncertain (3.74 to 3.87 at sigma 0.005); (b) a
+held pair has no release when the float contradicts it.
+
+**8.2 Correction to section 7.4.** The witness grade of section 7.4 counted 10-minute windows with one fixed value
+only, so a window in which a pair fixed two different wide lanes was "unclear" and never compared. The rerun adds a
+per-fix grade (B4, 8.5). On the same 30 runs it is reported with the rerun, as the baseline.
+
+**8.3 Code** (branch `ar/user-control`; both keys default off, ledger rows UNVALIDATED):
+
+- `estimation.ambiguity_resolution.hold_release_cyc` (default 0, off): the resolver remembers the integers (N_1 and
+  the wide lane) of every pair an accepted WL-constrained fix held. Each epoch the search runs it compares them
+  with the float state: the wide lane DD_1/lambda_1 - DD_2/lambda_2 against the held one, and the
+  ionosphere-free combination against the held one in narrow-lane cycles. Either difference above the threshold
+  contradicts the hold (log `HOLDREL`). The satellite refloated is the reference when at least two of its held
+  pairs and more than half of them contradict, otherwise the pair's non-reference satellite; all its ambiguities
+  are reset to the initial ambiguity sigma after the epoch's fix is installed, its pairs sit out that epoch's search
+  and their holds are forgotten. A hold is also forgotten when an arc of either satellite on either signal ends or
+  begins.
+- `estimation.ambiguity_resolution.refloat_partner_signal` (default false): an arc that begins on one signal of a
+  satellite (new key or refloat) while another signal of that satellite has carried on for at least three epochs
+  refloats all its signals (log `PARTNERREL`). The three-epoch bar keeps the rule from answering its own refloat.
+- `min_arc_info` now gates on both signals of a pair (it read the higher frequency only). It is 0 in every
+  configuration of this card and in the base configuration, so no run changes.
+- Run totals: the `AR release` line of `main_log.log` (satellites and keys refloated, run totals of both rules).
+- `src/core/filter/AmbiguityResolver.cpp` (`refreshArcAges_`, `resolve` / `resolveCore_`, the release pre-pass of
+  `resolveWlConstrained`, `holdMisfit_`, `chooseReleaseSatellites_`, `refloatSatellites`),
+  `src/core/app/PppEpochUpdate.cpp` and `src/core/realtime/RealTimeEngineEstimate.cpp` (apply the refloat after the
+  fix), config plumbing, `tests/test_ar_hold_release.cpp` (suite `ArHoldReleaseTest`, 6 cases), two fields in
+  `tests/test_ambiguity_resolver_setup.cpp`.
+- Identity with both keys absent: `_rap_aru_idchk_aruc_145_bake` (new executable) against
+  `_rap_aru_b6fix_est_145_bake` (section 5 executable, same configuration): `state_trace.csv`, `ambiguity_trace.csv`
+  and `measurement_residuals.csv` byte-identical, resolver log identical.
+- Executable `D:\GnssProcessorSupport\gates\exe_aruc\gnss_processor_aruc.exe`, Release, sha256
+  7e57946d7c97c05166f2f8f421012abba2a466b78020a29ac1e9d87cc0de6523.
+
+**8.4 Runs** (`fixing_control\tools\make_ctl.py`, variant `est`, 6 h, static, GPS + Galileo): the fixed and late
+configurations of section 5 with `hold_release_cyc` 0.25 and `refloat_partner_signal` true, nothing else changed:
+`_rap_aru_b7fix_est_<doy>_<site>` (from 00:00) and `_rap_aru_b7late_est_<doy>_<site>` (from 01:00). The float runs
+of section 7 (`_rap_aru_b6flt_est_<doy>_<site>`) are the float reference: with fixing off neither key acts, and the
+identity check above covers the executable. Order as in section 5: WTZZ00DEU, BAKE00CAN and STPM00SPM on DOY 143 to
+147 first; the 14 other test receivers only if those 15 receiver-days pass B1, B2 and B4.
+
+**8.5 Bars and grading**, frozen here:
+
+- B1, B2 and B3 exactly as in section 5 (`tools\grade_b.py`), B2 against the section 7 float runs.
+- B4, new: no fix event over minutes 0 to 360 of any fixed run (from 00:00 and from 01:00) whose independent wide
+  lane is clear and more than 0.5 cycle from the fixed wide lane. Clear: at least 10 witness epochs within 300 s of
+  the fix epoch with a standard deviation under 0.25 cycle. Witness as in section 7.4 (RINEX, OSB, satellite and
+  receiver antenna offsets per frequency on the line of sight). Tool: `tools\witness_wl.py --per-fix --from-min 0
+  --to-min 360`. Mechanics check before freezing: on `_rap_aru_bdev_est_143_wtzz` the grade finds 0 disagreeing
+  events with the antenna terms and 15 events in 5 episodes, all on pairs with one GPS III satellite, without them
+  (the stage A error); on the two BAKE00CAN DOY 145 runs of section 7 it finds 0 (the 03:38 events fall in windows
+  that span the wide-lane changes and are not clear).
+- Reported: per run, the satellites refloated by each rule (the run totals of `AR release`). A rule that never acts
+  on the 30 runs is reported as inert, not as passing.
+- A fix count is never evidence of correct integers. B1 tests repeatability, B4 the wide lane; the narrow lane
+  still has no independent check.
