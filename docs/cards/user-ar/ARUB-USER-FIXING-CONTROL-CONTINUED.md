@@ -5,21 +5,20 @@
 - **id:** ARUB
 - **topic:** user-ar
 - **status:** open
-- **summary:** Card ARU's continuation (that file nears the 60 KB bar), from its section 8.10 on; the bars, set-ups and results of stages A and B stay in card ARU sections 1 to 8. Trace of the WTZZ00DEU height with the SIF tide loading (2026-11-13, section 2, diagnostic, not graded): every pair-arc fixed under both tide sources holds the same integers; the base of the comparison, the EOT20 grid as the engine reads it, has every phase sign reversed (`OceanTideModel::parseEot20Load`; 597 SIF stations, all eight main constituents, M2 RMS phasor difference to the SIF 18.8 mm as read and 3.5 mm with the phase negated), and at WTZZ00DEU, M2 phase -89.7 deg, it applies nearly the opposite of the M2 loading. The 14 user configurations in `config/` that name a tide source all name that grid. Removing the diurnal translation from the SIF values (card OTL section 9) raises the WTZZ00DEU fixed height by 3.5 and 2.4 mm on DOY 143 and 144. With the network's three loading keys (b11; the nodal corrections add at most 0.4 mm) the mean absolute up error over hours 3 to 6 is 3.7 mm fixed and 4.0 mm float (EOT20 as read 6.2 and 7.0), the median 3D error 6.5 against 8.1 mm, B1 908 pair-arcs with none different, and B2 fails on 6 of 15 receiver-days, 4 of them at WTZZ00DEU, where a north error of up to 10.8 mm stays under every tide source (reported only). The EOT20 sign is fixed on the branch, and the rerun of the 15 receiver-days is set up and frozen in section 3. Corrects card ARU section 8.10: its WTZZ00DEU "east" values are north.
-- **dates:** 2026-11-13 (registered as the continuation; section 2; section 3, the EOT20 sign fixed and the rerun set up and frozen)
+- **summary:** Card ARU's continuation (that file nears the 60 KB bar), from its section 8.10 on; the bars, set-ups and results of stages A and B stay in card ARU sections 1 to 8. Trace of the WTZZ00DEU height with the SIF tide loading (2026-11-13, section 2, diagnostic, not graded): every pair-arc fixed under both tide sources holds the same integers; the base of the comparison, the EOT20 grid as the engine reads it, has every phase sign reversed (`OceanTideModel::parseEot20Load`; 597 SIF stations, all eight main constituents, M2 RMS phasor difference to the SIF 18.8 mm as read and 3.5 mm with the phase negated), and at WTZZ00DEU, M2 phase -89.7 deg, it applies nearly the opposite of the M2 loading. The 14 user configurations in `config/` that name a tide source all name that grid. Removing the diurnal translation from the SIF values (card OTL section 9) raises the WTZZ00DEU fixed height by 3.5 and 2.4 mm on DOY 143 and 144. With the network's three loading keys (b11; the nodal corrections add at most 0.4 mm) the mean absolute up error over hours 3 to 6 is 3.7 mm fixed and 4.0 mm float (EOT20 as read 6.2 and 7.0), the median 3D error 6.5 against 8.1 mm, B1 908 pair-arcs with none different, and B2 fails on 6 of 15 receiver-days, 4 of them at WTZZ00DEU, where a north error of up to 10.8 mm stays under every tide source (reported only). Section 3 (`4d4dd3a`): the EOT20 sign fixed; F1 and F2 pass; no integer changes (1 137 pair-arcs before and after); the fixed runs move in up alone, by -7.2 to +8.0 mm per receiver-day over hours 3 to 6; the mean absolute up error falls to 4.4 mm fixed and 5.8 mm float; the corrected grid carries the diurnal translation of the SIF values (applied up within 1.3 mm RMS of the SIF with it) and no horizontal loading, so the SIF without the translation stays ahead (3.7 / 3.9 mm). Stage B fails as frozen: B1 passes on 15 of 15 (897 pair-arcs), B2 fails on 2 of 15 (STPM00SPM DOY 144, BAKE00CAN DOY 145), B4 on 8 of 30. Corrects card ARU section 8.10: its WTZZ00DEU "east" values are north.
+- **dates:** 2026-11-13 (registered as the continuation; section 2; section 3, the EOT20 sign fixed and the rerun set up and frozen; section 3.1, its results)
 - **knobs / posture:** none new. The runs of section 2 use the existing `model_corrections.otl_from_sif`, `model_corrections.otl_remove_diurnal_translation` and `model_corrections.otl_nodal_corrections` (ledger RECOMMEND_SCOPED, armed in the network's field configuration; off in every user configuration).
 - **code:** `src/tools/otl_diag.cpp`, `lookup --phases`: the radial amplitude and phase lag of M2, S2, N2, K2, K1, O1, P1 and Q1 from the SIF record and from the EOT20 synthesis (the default output of `lookup` unchanged). Section 3: `OceanTideModel::parseEot20Load` takes the phase lag as atan2(Im, Re) (a defect fix that moves every run on the EOT20 grid), the matching inverse in `src/sim/OtlField.cpp`, and `tests/test_eot20_phase_convention.cpp`.
-- **run dirs:** `D:\GnssProcessorSupport\runs_nom\_rap_aru_{otleot,otlsif,b10fix,b10flt,b11fix,b11late,b11flt}_est_<doy>_<site>`; tools and grades `D:\GnssProcessorSupport\presentation\agu26\fixing_control\` (`tools\`, `otl_phase\`, `grade_b10.json`, `grade_b11.json`)
+- **run dirs:** `D:\GnssProcessorSupport\runs_nom\_rap_aru_{otleot,otlsif,b10fix,b10flt,b11fix,b11late,b11flt,b12fix,b12late,b12flt}_est_<doy>_<site>` and `_rap_aru_b12ctl_est_143_wtzz`; executable `D:\GnssProcessorSupport\gates\exe_arue\gnss_processor_arue.exe`; tools and grades `D:\GnssProcessorSupport\presentation\agu26\fixing_control\` (`tools\`, `otl_phase\`, `grade_b10.json`, `grade_b11.json`, `grade_b12.json`, `grade_b8_vs_otleot.json`, `witness_b4_b12.jsonl`)
 - **source:** card [ARU](ARU-USER-FIXING-CONTROL.md) section 8.10 (the WTZZ00DEU fixed height worse with the SIF loading on DOY 143 and 144); card [OTL](../../record/refound/OTL_ocean_tide_loading_source_2026-10-16.md) sections 4, 8.4 and 9
 
 **Outcome.** Question: why does the WTZZ00DEU fixed height get worse with the SIF tide loading (card ARU section 8.10)?
-Not through the integers: every pair-arc fixed under both sources holds the same integers. The base of the comparison was
-defective: the engine reads every EOT20 phase with the wrong sign (597 SIF stations, all eight main constituents), and at
-WTZZ00DEU it applied nearly the opposite of the M2 loading. With the diurnal translation removed from the SIF values the
-WTZZ00DEU fixed mean absolute up error is 2.9 mm (EOT20 as read 3.4, SIF 4.5). Left: a fixed height 4 to 5 mm low on
-DOY 143 and 144 (no integer error in the hours checked) and a north error of up to 10.8 mm on DOY 147 that the float
-carries too. Standing: open; the EOT20 sign
-is fixed on the branch and its rerun is frozen in section 3.
+Not through the integers. The base of the comparison was defective: the engine read every EOT20 phase with the wrong
+sign (597 SIF stations, all eight main constituents) and at WTZZ00DEU applied nearly the opposite of the M2 loading.
+Fixed on the branch (section 3): the reader matches the SIF phases, no integer changes, the user heights move by up to
+8 mm, and the mean absolute up error over hours 3 to 6 falls from 6.2 to 4.4 mm fixed (7.0 to 5.8 mm float). The grid
+still carries the diurnal translation and no horizontal loading; the SIF without the translation stays best (3.7 / 3.9
+mm). Stage B fails as frozen (B2 on 2 of 15, B4 on 8 of 30). Standing: open.
 
 > Results are appended TO THIS FILE, below the text.
 
@@ -151,3 +150,76 @@ predates this section: the checks below are frozen here, and B1 to B4 are those 
   mean absolute up error should fall from 6.2 / 7.0 mm toward the SIF rows of section 2 (3.7 to 4.2 mm fixed). The
   north error at WTZZ00DEU on DOY 146 and 147 is there under every tide source, and the grid carries no horizontal
   loading, so B2 is expected to fail there.
+
+### 3.1 Results (2026-11-13)
+
+Runs `D:\GnssProcessorSupport\runs_nom\_rap_aru_b12{fix,late,flt}_est_<doy>_<site>` and `_rap_aru_b12ctl_est_143_wtzz`,
+46 runs, all exit 0 (`fixing_control\batch_b12.txt`), executable of section 3 built from the tree of `4d4dd3a`, sha256
+7f605d41cae695911972100b279c6b83f65751e4707954b43c9828c7a0e82f14. Grades: `fixing_control\grade_b12.json`
+(`tools\grade_b.py b12fix b12flt b12late`) and `fixing_control\witness_b4_b12.jsonl`; for the size of the move, the old
+fixed runs graded against the old float with the trace, `fixing_control\grade_b8_vs_otleot.json`. F1 and F2 pass.
+Stage B fails as frozen: B2 on 2 of 15 receiver-days and B4 on 8 of 30 runs; B1 passes on 15 of 15.
+
+- **F1: passed.** `fixing_control\otl_phase\phases_igs20_fixed.csv` and `phase_stats_igs20_fixed.txt`
+  (`gnss_otl_diag_arue.exe lookup --phases`, `tools\otl_phase_stats.py`): median phase difference to the SIF 2.7 (M2),
+  3.6 (S2), 4.0 (N2), 6.0 (K2), 2.3 (K1), 1.9 (O1), 3.8 (P1) and 4.2 deg (Q1); M2 within 20 deg at 84 % of the
+  stations. Every number of the section 2 table, with its two phase columns exchanged.
+- **F2: passed.** `b12ctl` against `_rap_aru_b11fix_est_143_wtzz`: `state_trace.csv`, `ambiguity_trace.csv` and
+  `measurement_residuals.csv` byte-identical.
+- **Unit suites at `4d4dd3a`, Debug:** `gnss_tests` 4 272 tests in 564 suites, 4 235 passed, 37 skipped, 0 failed, both
+  cases of `Eot20PhaseConventionTest` among them (the grid present, so the second ran); `gnss_simulator_selftest` 99
+  of 99 (`fixing_control\gtest_debug_arue.txt`).
+- **B1:** 897 pair-arcs compared, none fixed to different integers. The grader's two-value count at BAKE00CAN DOY 146
+  (4, run from 00:00) is the arc-bound artefact of card ARU 8.8.
+- **B2:** fails at BAKE00CAN DOY 145 (4.0 against 3.5 mm) and STPM00SPM DOY 144 (14.7 against 8.9 mm); passes on the
+  other 13, the five WTZZ00DEU days among them. Median over the 15 receiver-days 7.4 mm fixed, 9.3 mm float (EOT20 as
+  read: 7.3 and 10.9); fixed better on 13 of 15 (12). At WTZZ00DEU the pass comes with a worse float (below), which
+  loosens the bar.
+- **B4:** the same 8 runs and the same episodes (pairs and fixed wide lanes) as in card ARU 8.8, 25 events against 24:
+  fix epochs move by up to 20 min (STPM00SPM DOY 145, run from 01:00: G25-G28 fixed at 03:26:00 and 03:26:30 instead of
+  03:46:00). Beyond 0.6 cycle (reported, not graded): 1, the G12-G28 case at STPM00SPM DOY 146.
+- **B3:** the fixed time to 10 cm is unchanged on 12 of 15 receiver-days (BAKE00CAN DOY 145 14.5 to 15.0 min, DOY 146
+  17.0 to 10.5, STPM00SPM DOY 146 24.5 to 24.0); the fixed 3D error at minute 60 moves by -7.3 to +6.6 mm.
+- **Release rules:** the totals of card ARU 8.8, unchanged: partner refloat in 12 runs (26 satellites), hold release in
+  12 runs (30 satellites).
+- **Integers across the fix** (added after the results, not in the frozen list): the fixed runs from 00:00 before and
+  after the fix hold the same integers on every pair-arc fixed in both (`tools\otl_int_compare.py --a b8fix --b
+  b12fix`: 1 137 pair-arcs on the 15 receiver-days, none different).
+- **Size of the move.** Applied up loading over the 6 h, new against old (`tools\otl_diff_stats.py otleot b12flt`):
+  largest change 9.1 to 10.8 mm at WTZZ00DEU, 10.7 to 13.8 at STPM00SPM and 9.3 to 18.0 at BAKE00CAN; RMS 5.8 to
+  10.9 mm. Means over hours 3 to 6 (`tools\otl_series.py otleot b12flt --pos b8fix:b12fix,otleot:b12flt`), mm, DOY
+  143 to 147:
+
+  | receiver | applied up change | fixed up change | float up change |
+  | --- | --- | --- | --- |
+  | WTZZ00DEU | +6.4, +7.8, +7.1, +4.9, +1.7 | -7.2, -5.0, -1.4, +2.9, +6.2 | -7.3, -4.7, -0.7, +3.2, +6.5 |
+  | STPM00SPM | -10.6, -11.2, -10.6, -9.2, -7.7 | +8.0, +5.8, +4.0, +2.1, +0.9 | +7.9, +5.5, +3.4, +2.2, +1.0 |
+  | BAKE00CAN | -6.0, -7.6, -9.5, -11.1, -12.4 | +0.5, +0.9, +2.2, +2.9, +3.4 | +0.3, +0.9, +1.8, +3.0, +4.0 |
+
+  The fixed east and north move by at most 0.1 mm (the grid carries no horizontal loading), the float east by -1.3 to
+  +1.6 mm and the float north by at most 0.4 mm. As in section 2, a static position does not follow the window mean of
+  the change one for one. B2 median per receiver-day, fixed `b8fix` to `b12fix`: -5.2 to +5.0 mm (WTZZ00DEU +4.9 and
+  +5.0 on DOY 143 and 144, STPM00SPM -4.5, -5.2 and -4.1 on DOY 143 to 145); float `otleot` to `b12flt`: -5.4 to
+  +6.2 mm (`grade_b8_vs_otleot.json` against `grade_b12.json`).
+- **Mean absolute up error over hours 3 to 6** (`tools\abs_up_summary.py`), fixed / float, beside the rows of section
+  2: corrected grid 4.4 / 5.8 mm, BAKE00CAN 4.0 / 2.7, STPM00SPM 5.1 / 5.3, WTZZ00DEU 4.1 / 9.5, fixed closer to zero
+  on 8 of 15 (EOT20 as read 6.2 / 7.0, SIF 4.2 / 4.0, SIF without the translation 3.7 / 3.9).
+- **Against the SIF series** (`tools\otl_diff_stats.py`, over the 6 h): the corrected grid's applied up differs from
+  the SIF without the translation (`b10flt`) by at most 1.9 to 6.2 mm, RMS 1.1 to 3.6 mm; added after the results, from
+  the SIF as distributed (`otlsif`, translation included) by at most 0.3 to 1.8 mm, RMS 0.2 to 1.3 mm. The grid's
+  loading carries the same diurnal translation as the SIF values, the term card OTL section 9 found absent from data
+  built on CODE products. `otl_remove_diurnal_translation` acts on the SIF branch of `ModelGeometry.cpp` only.
+- **The horizontal loading** (added after the results; `tools\otl_series.py otlsif b12flt --pos
+  b9fix:b12fix,otlsif:b12flt`): with the applied up within 1.4 mm of the SIF's in the mean over hours 3 to 6, the
+  WTZZ00DEU float up reads 3.3 to 5.1 mm lower with the grid than with the SIF (b9) and its fixed up moves by -1.3 to
+  +1.4 mm; at STPM00SPM and BAKE00CAN the float up moves by -1.9 to +1.1 mm. The fixed horizontal moves by up to 3.5 mm.
+- **Reading.** The fix acts as built: the reader gives the SIF phases, every run on the grid moves in up alone (here by
+  up to 8 mm in the mean over hours 3 to 6), and no integer changes. The corrected grid stays behind the SIF without
+  the translation (4.4 / 5.8 against 3.7 / 3.9 mm): it carries the diurnal translation and no horizontal loading, and
+  the WTZZ00DEU float is the most sensitive to the missing horizontal loading. Expected against found (section 3): the
+  fixed error reached the SIF rows (4.4 against 3.7 to 4.2 mm), the float did not (5.8, through WTZZ00DEU); B2 at
+  WTZZ00DEU passed on all five days, against the expectation, on a worse float.
+- **Not done.** The 14 other test receivers and the stream replays (stopped by the rule of card ARU section 5). No
+  removal of the diurnal translation from the grid's loading and no horizontal loading for the grid. The user
+  configurations in `config/` still name the grid, and main still reads it with the reversed sign (this fix is on the
+  branch only).
