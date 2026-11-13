@@ -228,25 +228,45 @@ void AmbiguityResolver::refreshArcAges_(const StateManager& state_manager,
     }
     // Keys that left the state vector are dropped: a re-acquired ambiguity
     // starts a new arc instead of resuming its pre-gap count.
-    std::set<std::string> restarted_sats;   // a satellite with an arc that ended or began
-    for (auto it = arcs_.begin(); it != arcs_.end();) {
-        if (present.count(it->first)) { ++it; continue; }
-        restarted_sats.insert(it->first.substr(0, it->first.find('|')));
-        it = arcs_.erase(it);
+    for (auto it = arcs_.begin(); it != arcs_.end();)
+        it = present.count(it->first) ? std::next(it) : arcs_.erase(it);
+
+    partner_release_.clear();
+    if (!(config_.refloat_partner_signal || config_.hold_release_cyc > 0.0)) return;
+
+    // The release rules see every discontinuity of an ambiguity through its
+    // continuity generation: birth, a refloat with the pending-reseed mark, and
+    // also an edit that the post-fit screen or a slip repair makes on its own
+    // copies of x and P and records with noteAmbiguityDiscontinuity only.  The
+    // pending mark alone (arcs_ above) misses that last kind, which is the
+    // single-row reset of the post-fit screen.  key_gen_ holds, per key, the
+    // generation seen last epoch and the epochs since it last changed.
+    std::set<std::string> restarted_sats;   // a satellite with a key that ended or began
+    std::map<std::string, std::pair<bool, bool>> starts_and_older;   // sat -> (start, older)
+    for (const auto& [key, idx] : amb) {
+        (void)idx;
+        const auto parts = StateKeys::parseAmbiguityKey(key);
+        if (!parts) continue;
+        const uint64_t g = state_manager.getAmbiguityGeneration(key);
+        auto it = key_gen_.find(key);
+        if (it == key_gen_.end() || it->second.first != g) key_gen_[key] = { g, 1 };
+        else ++it->second.second;
+        const int stable = key_gen_[key].second;
+        auto& so = starts_and_older[parts->satellite];
+        if (stable == 1) { so.first = true; restarted_sats.insert(parts->satellite); }
+        if (stable >= 3) so.second = true;
+    }
+    for (auto it = key_gen_.begin(); it != key_gen_.end();) {
+        if (amb.count(it->first)) { ++it; continue; }
+        const auto parts = StateKeys::parseAmbiguityKey(it->first);
+        if (parts) restarted_sats.insert(parts->satellite);
+        it = key_gen_.erase(it);
     }
 
-    // Per satellite: does one signal start an arc this epoch while another has
-    // carried on for at least three epochs?  The three-epoch bar keeps the partner
-    // refloat from answering itself: the signal it refloats starts one epoch after
-    // the first, when the first is two epochs old.
-    partner_release_.clear();
-    std::map<std::string, std::pair<bool, bool>> starts_and_older;   // sat -> (start, older)
-    for (const auto& [k, a] : arcs_) {
-        const std::string sat = k.substr(0, k.find('|'));
-        auto& so = starts_and_older[sat];
-        if (a.epochs == 1) { so.first = true; restarted_sats.insert(sat); }
-        if (a.epochs >= 3) so.second = true;
-    }
+    // Per satellite: does one signal begin this epoch while another has carried on
+    // for at least three epochs?  The three-epoch bar keeps the partner refloat from
+    // answering itself: the refloat it requests restarts every signal of the
+    // satellite together one epoch later.
     if (config_.refloat_partner_signal) {
         auto log = log_manager_.getLogger("ambiguity_resolver");
         const double tow = observations.empty() ? 0.0 : observations.front().time.tow;

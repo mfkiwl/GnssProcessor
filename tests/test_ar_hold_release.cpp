@@ -6,7 +6,10 @@
  * The misfit is exact algebra on synthetic DDs built from known integers: a float
  * equal to the held integers gives zero, a widelane slip moves both measures, and
  * a pure ionosphere change moves the widelane but leaves the ionosphere-free
- * combination where it was.  The satellite choice is checked on small held sets.
+ * combination where it was.  The satellite choice is checked on small held sets, and
+ * the partner refloat on a real StateManager: a discontinuity recorded with
+ * noteAmbiguityDiscontinuity alone (the post-fit screen's single-row reset) must
+ * trigger it.
  *
  * Suite name @c ArHoldReleaseTest is owned solely by this file.
  */
@@ -15,6 +18,10 @@
 
 #include "filter/AmbiguityResolver.hpp"
 #include "common/Constants.hpp"
+#include "config/GnssConfig.hpp"
+#include "filter/StateKeySchema.hpp"
+#include "filter/StateManager.hpp"
+#include "logging/LogManager.hpp"
 
 #include <string>
 #include <utility>
@@ -101,4 +108,69 @@ TEST(ArHoldReleaseTest, AMinorityOfAReferencesPairsRefloatsEachSatellite) {
         { "G06", "G31" }, { "G03", "G31" }, { "G04", "G31" }, { "G09", "G31" }, { "G26", "G31" } };
     const auto out = ArHoldReleaseTestAccess::choose(held, { { "G06", "G31" }, { "G03", "G31" } });
     EXPECT_EQ(out, (std::vector<std::string>{ "G03", "G06" }));
+}
+
+namespace {
+
+/// A resolver that only tracks arcs (fixing disabled) with the partner refloat on or off.
+AmbiguityResolverConfig partnerConfig(bool on) {
+    AmbiguityResolverConfig c;
+    c.ar_mode = 0;
+    c.refloat_partner_signal = on;
+    return c;
+}
+
+} // namespace
+
+TEST(ArHoldReleaseTest, PartnerRefloatSeesADiscontinuityRecordedWithoutThePendingMark) {
+    GnssConfig cfg;
+    LogManager log;
+    StateManager sm{ 5, log, cfg };
+    for (const char* sat : { "G01", "G02" })
+        for (const char* sig : { "L1W", "L2W" })
+            sm.addAmbiguity(StateKeys::makeAmbiguityKey(sat, sig), 0.0);
+    AmbiguityResolver resolver(partnerConfig(true), log);
+    const std::vector<PppObservation> none;
+    for (int k = 0; k < 4; ++k)
+        EXPECT_TRUE(resolver.resolve(sm, none).release_satellites.empty()) << "epoch " << k;
+
+    // The post-fit screen resets one row on its own copy and records it this way.
+    ASSERT_TRUE(sm.noteAmbiguityDiscontinuity(StateKeys::makeAmbiguityKey("G01", "L1W")));
+    const auto r = resolver.resolve(sm, none);
+    EXPECT_EQ(r.release_satellites, (std::vector<std::string>{ "G01" }));
+    EXPECT_EQ(resolver.partnerReleaseCount(), 1);
+
+    // The caller refloats both signals; they begin together and the rule stays quiet.
+    EXPECT_EQ(resolver.refloatSatellites(sm, r.release_satellites, 10.0), 2);
+    EXPECT_TRUE(resolver.resolve(sm, none).release_satellites.empty());
+    EXPECT_TRUE(resolver.resolve(sm, none).release_satellites.empty());
+    EXPECT_EQ(resolver.partnerReleaseCount(), 1);
+}
+
+TEST(ArHoldReleaseTest, PartnerRefloatOffRequestsNothing) {
+    GnssConfig cfg;
+    LogManager log;
+    StateManager sm{ 5, log, cfg };
+    for (const char* sig : { "L1W", "L2W" })
+        sm.addAmbiguity(StateKeys::makeAmbiguityKey("G01", sig), 0.0);
+    AmbiguityResolver resolver(partnerConfig(false), log);
+    const std::vector<PppObservation> none;
+    for (int k = 0; k < 4; ++k) resolver.resolve(sm, none);
+    sm.noteAmbiguityDiscontinuity(StateKeys::makeAmbiguityKey("G01", "L1W"));
+    EXPECT_TRUE(resolver.resolve(sm, none).release_satellites.empty());
+    EXPECT_EQ(resolver.partnerReleaseCount(), 0);
+}
+
+TEST(ArHoldReleaseTest, RefloatSatellitesResetsOnlyTheListedSatellite) {
+    GnssConfig cfg;
+    LogManager log;
+    StateManager sm{ 5, log, cfg };
+    const auto i1 = sm.addAmbiguity(StateKeys::makeAmbiguityKey("G01", "L1W"), 0.0, 0.001);
+    const auto i2 = sm.addAmbiguity(StateKeys::makeAmbiguityKey("G01", "L2W"), 0.0, 0.001);
+    const auto i3 = sm.addAmbiguity(StateKeys::makeAmbiguityKey("G02", "L1W"), 0.0, 0.001);
+    AmbiguityResolver resolver(partnerConfig(false), log);
+    EXPECT_EQ(resolver.refloatSatellites(sm, { "G01" }, 10.0), 2);
+    EXPECT_DOUBLE_EQ(sm.getStateVariance(static_cast<int>(i1)), 100.0);
+    EXPECT_DOUBLE_EQ(sm.getStateVariance(static_cast<int>(i2)), 100.0);
+    EXPECT_DOUBLE_EQ(sm.getStateVariance(static_cast<int>(i3)), 1e-6);
 }

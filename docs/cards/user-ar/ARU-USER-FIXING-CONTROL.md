@@ -6,7 +6,7 @@
 - **topic:** user-ar
 - **status:** open
 - **summary:** The user engine has never produced a correct integer fix. Stage A measures, with no fixing, whether the float ambiguities of a single receiver on one analysis centre's final products with published phase biases (CODE MGX final orbit, 30 s clock, OSB code and phase biases) are integer within their own formal covariance, with the position estimated and with the position held at the IGS coordinate. Stage B turns fixing on only if stage A passes, against bars frozen below. Stage A result (2026-11-10, section 4): float integer (A1 26 of 30, A2 30 of 30 system-days with the position estimated), covariance optimistic by a factor of about 2 to 3 (A3 15 of 30), stage A not passed as frozen; the MW wide-lane source of the search is wrong by 2 cycles on pairs with one GPS III satellite (satellite antenna offset per frequency omitted). Correction (section 6): stage A searched the narrowlane row, on which the float misses by 0.26 (GPS) and 0.19 (Galileo) cycle in hour 2; the integer grade holds for the ionosphere-free combination, the row stage B searches. Stage B (2026-11-11, section 7), first three receivers: fails as frozen (B1 fails on 1 of 15 receiver-days, B2 on 2 of 15); fixed wide lanes independently confirmed; first failing term a held integer with no release or slip test through a disturbed arc (BAKE00CAN DOY 145); the 14 other receivers and the streams not run. Rerun (2026-11-12, section 8): the failure re-traced to a single-signal refloat that left the other signal held, plus no release of a held pair; with a release (`hold_release_cyc` 0.25) and a partner refloat, B1 passes 15 of 15, B2 still fails on the same 2 receiver-days, the new wide-lane bar B4 fails on a half-cycle witness offset at STPM00SPM; the partner refloat is blind to the post-fit screen's resets (defect, 8.6).
-- **dates:** 2026-11-10 (pre-registration), 2026-11-11 (stage B set-up frozen, section 5; corrections, section 6; stage B results, section 7), 2026-11-12 (B1 failure re-traced and stage B rerun frozen, section 8)
+- **dates:** 2026-11-10 (pre-registration), 2026-11-11 (stage B set-up frozen, section 5; corrections, section 6; stage B results, section 7), 2026-11-12 (B1 failure re-traced and stage B rerun frozen, section 8; rerun results 8.6; second rerun frozen 8.7)
 - **knobs / posture:** four new, default off: `estimation.ambiguity_resolution.wl_from_float`, `estimation.ambiguity_resolution.nl_sigma_floor_cyc` (section 5), `estimation.ambiguity_resolution.hold_release_cyc`, `estimation.ambiguity_resolution.refloat_partner_signal` (section 8). Stage A runs `estimation.ambiguity_resolution.mode` 1 with `ratio_threshold` 1e9 (the search runs and logs, nothing is accepted) and the resolver log at debug.
 - **code:** `src/core/filter/AmbiguityResolver.cpp` (debug line `CLCOV`: the formal covariance of the double differences beside the existing `CLFRAC` values; logged only at debug, no other output changes); stage B: `floatWidelane_`, `addSharedReferenceFloor_` (section 5)
 - **run dirs:** `D:\GnssProcessorSupport\runs_nom\_rap_aru_*`; tools and grades `D:\GnssProcessorSupport\presentation\agu26\fixing_control\`
@@ -461,3 +461,27 @@ Stage B fails as frozen again: B2 on 2 of 15 receiver-days and B4 on 8 of 30 run
   (`fixing_control\gtest_debug_aruc.txt`).
 - Not done: the 14 other test receivers (stopped by the rule of section 5), the stream replays, the generation-keyed
   arc restart, the STPM00SPM height offset and the half-cycle witness offset at STPM00SPM.
+
+**8.7 Second rerun, set-up frozen before the graded runs (2026-11-12).** Entry: the author decided on 2026-11-12
+to fix the defect of 8.6 and rerun.
+
+- Code: the two release rules now see every discontinuity of an ambiguity through its continuity generation
+  (`StateManager::getAmbiguityGeneration`). `refreshArcAges_` keeps, per key and only while a release key is on,
+  the generation seen last epoch and the epochs since it last changed (`key_gen_`). Partner refloat: a key whose
+  generation changes this epoch (birth, a refloat with the pending-reseed mark, or a `noteAmbiguityDiscontinuity`
+  of the post-fit screen) while another key of the satellite has kept its generation for at least three epochs.
+  A hold is forgotten when any key of either satellite changes generation or leaves the state. `arcs_`, the
+  `ARCAGE` line and `min_arc_info` are unchanged. Three cases added to `ArHoldReleaseTest` (9 in all): a
+  discontinuity recorded with `noteAmbiguityDiscontinuity` alone triggers the partner refloat, which then stays
+  quiet; off requests nothing; `refloatSatellites` resets only the listed satellite.
+- Identity with both keys absent: `_rap_aru_idchk_arud_145_bake` against `_rap_aru_b6fix_est_145_bake`: `state_trace.csv`,
+  `ambiguity_trace.csv` and `measurement_residuals.csv` byte-identical, resolver log identical.
+- Executable `D:\GnssProcessorSupport\gates\exe_arud\gnss_processor_arud.exe`, Release, sha256 97fa08fa9cd66906bc8080fbb52adb645c8c2ea7b2ee53dbafc12ba321723d80.
+- Runs: `_rap_aru_b8fix_est_<doy>_<site>` and `_rap_aru_b8late_est_<doy>_<site>`, the configurations of 8.4
+  unchanged (`hold_release_cyc` 0.25, `refloat_partner_signal` true), the same 3 receivers and 5 days; float
+  reference the section 7 float runs. Order rule of section 5.
+- Bars: B1 to B4 exactly as in 8.5. B4 is kept as frozen although 8.6 showed that it sits on a half-cycle offset
+  of the witness at STPM00SPM. Reported beside it, not graded and added after 8.6: the fix events whose clear
+  witness is more than 0.6 cycle from the fixed wide lane.
+- Mechanics check, reported: the partner refloat acts at BAKE00CAN DOY 145 on G31 at 03:37:00 in both runs (the
+  case it was built for).

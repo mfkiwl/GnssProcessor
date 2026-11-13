@@ -341,9 +341,11 @@ struct AmbiguityResolverConfig {
      * 0.155 m away at a 3 mm sigma one epoch later; both runs then fixed the pair
      * G06-G31 to widelane 3 against an independent widelane of 4.
      *
-     * With this on, an arc that restarts on one signal of a satellite (the first
-     * epoch of a new or refloated arc) while another signal of that satellite has
-     * an older arc puts the satellite in
+     * With this on, a signal of a satellite whose ambiguity begins anew (its
+     * continuity generation changes: birth, a refloat, or a discontinuity that the
+     * post-fit screen records on its own copies of the state) while another signal
+     * of that satellite has kept its generation for at least three epochs puts the
+     * satellite in
      * @ref AmbiguityResolution::release_satellites, so both signals restart
      * together.  Satellites whose signals start together (a rising satellite, the
      * start of the run) are untouched.  Each refloat is logged (PARTNERREL) and
@@ -794,6 +796,9 @@ private:
     std::map<std::string, AmbiguityResolution::HeldPairFix> held_pairs_;
     /// Satellites queued by refloat_partner_signal in this epoch's refreshArcAges_.
     std::vector<std::string> partner_release_;
+    /// Per ambiguity key: the continuity generation seen last epoch and the epochs
+    /// since it last changed (kept only while a release rule is on).
+    std::map<std::string, std::pair<uint64_t, int>> key_gen_;
     int n_hold_releases_{ 0 };      ///< Satellites refloated by hold_release_cyc.
     int n_partner_releases_{ 0 };   ///< Satellites refloated by refloat_partner_signal.
 
