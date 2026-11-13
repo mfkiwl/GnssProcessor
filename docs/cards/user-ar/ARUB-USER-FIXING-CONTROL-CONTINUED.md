@@ -5,20 +5,19 @@
 - **id:** ARUB
 - **topic:** user-ar
 - **status:** open
-- **summary:** Card ARU's continuation (that file nears the 60 KB bar), from its section 8.10 on; the bars, set-ups and results of stages A and B stay in card ARU sections 1 to 8. Trace of the WTZZ00DEU height with the SIF tide loading (2026-11-13, section 2, diagnostic, not graded): every pair-arc fixed under both tide sources holds the same integers; the base of the comparison, the EOT20 grid as the engine reads it, has every phase sign reversed (`OceanTideModel::parseEot20Load`; 597 SIF stations, all eight main constituents, M2 RMS phasor difference to the SIF 18.8 mm as read and 3.5 mm with the phase negated), and at WTZZ00DEU, M2 phase -89.7 deg, it applies nearly the opposite of the M2 loading. The 14 user configurations in `config/` that name a tide source all name that grid. Removing the diurnal translation from the SIF values (card OTL section 9) raises the WTZZ00DEU fixed height by 3.5 and 2.4 mm on DOY 143 and 144. With the network's three loading keys (b11; the nodal corrections add at most 0.4 mm) the mean absolute up error over hours 3 to 6 is 3.7 mm fixed and 4.0 mm float (EOT20 as read 6.2 and 7.0), the median 3D error 6.5 against 8.1 mm, B1 908 pair-arcs with none different, and B2 fails on 6 of 15 receiver-days, 4 of them at WTZZ00DEU, where a north error of up to 10.8 mm stays under every tide source (reported only). Section 3 (`4d4dd3a`): the EOT20 sign fixed; F1 and F2 pass; no integer changes (1 137 pair-arcs before and after); the fixed runs move in up alone, by -7.2 to +8.0 mm per receiver-day over hours 3 to 6; the mean absolute up error falls to 4.4 mm fixed and 5.8 mm float; the corrected grid carries the diurnal translation of the SIF values (applied up within 1.3 mm RMS of the SIF with it) and no horizontal loading, so the SIF without the translation stays ahead (3.7 / 3.9 mm). Stage B fails as frozen: B1 passes on 15 of 15 (897 pair-arcs), B2 fails on 2 of 15 (STPM00SPM DOY 144, BAKE00CAN DOY 145), B4 on 8 of 30. Corrects card ARU section 8.10: its WTZZ00DEU "east" values are north.
-- **dates:** 2026-11-13 (registered as the continuation; section 2; section 3, the EOT20 sign fixed and the rerun set up and frozen; section 3.1, its results)
+- **summary:** Card ARU's continuation (that file nears the 60 KB bar), from its section 8.10 on; the bars, set-ups and results of stages A and B stay in card ARU sections 1 to 8. Trace of the WTZZ00DEU height with the SIF tide loading (2026-11-13, section 2, diagnostic, not graded): every pair-arc fixed under both tide sources holds the same integers; the base of the comparison, the EOT20 grid as the engine reads it, has every phase sign reversed (`OceanTideModel::parseEot20Load`; 597 SIF stations, all eight main constituents, M2 RMS phasor difference to the SIF 18.8 mm as read and 3.5 mm with the phase negated), and at WTZZ00DEU, M2 phase -89.7 deg, it applies nearly the opposite of the M2 loading. The 14 user configurations in `config/` that name a tide source all name that grid. Removing the diurnal translation from the SIF values (card OTL section 9) raises the WTZZ00DEU fixed height by 3.5 and 2.4 mm on DOY 143 and 144. With the network's three loading keys (b11; the nodal corrections add at most 0.4 mm) the mean absolute up error over hours 3 to 6 is 3.7 mm fixed and 4.0 mm float (EOT20 as read 6.2 and 7.0), the median 3D error 6.5 against 8.1 mm, B1 908 pair-arcs with none different, and B2 fails on 6 of 15 receiver-days, 4 of them at WTZZ00DEU, where a north error of up to 10.8 mm stays under every tide source (reported only). Section 3 (`4d4dd3a`): the EOT20 sign fixed; F1 and F2 pass; no integer changes (1 137 pair-arcs before and after); the fixed runs move in up alone, by -7.2 to +8.0 mm per receiver-day over hours 3 to 6; the mean absolute up error falls to 4.4 mm fixed and 5.8 mm float; the corrected grid carries the diurnal translation of the SIF values (applied up within 1.3 mm RMS of the SIF with it) and no horizontal loading, so the SIF without the translation stays ahead (3.7 / 3.9 mm). Stage B fails as frozen: B1 passes on 15 of 15 (897 pair-arcs), B2 fails on 2 of 15 (STPM00SPM DOY 144, BAKE00CAN DOY 145), B4 on 8 of 30. Section 4 (2026-11-13, diagnostic): the B2 failure at STPM00SPM DOY 144 is the float's, not the fix's: every settled solution of hours 2 to 6 reads 9 to 14 mm low, and the combined float reads higher only while its Galileo ambiguities converge (GPS only, fixed 10.7 against float 15.7 mm; Galileo only, 13.9 against 6.1); the low height is local to the receiver and that morning (not at STJO00CAN, not elevation-dependent, not the troposphere states or gradients) and fades over the day, cause not identified. Side finding: BADG00RUS, KOKB00USA and QUIN00USA have no Galileo frequencies in `igs20.atx`, and the receiver cross-system fallback is off in these configurations. Corrects card ARU section 8.10: its WTZZ00DEU "east" values are north.
+- **dates:** 2026-11-13 (registered as the continuation; section 2; section 3, the EOT20 sign fixed and the rerun set up and frozen; section 3.1, its results; section 4, the STPM00SPM DOY 144 trace)
 - **knobs / posture:** none new. The runs of section 2 use the existing `model_corrections.otl_from_sif`, `model_corrections.otl_remove_diurnal_translation` and `model_corrections.otl_nodal_corrections` (ledger RECOMMEND_SCOPED, armed in the network's field configuration; off in every user configuration).
 - **code:** `src/tools/otl_diag.cpp`, `lookup --phases`: the radial amplitude and phase lag of M2, S2, N2, K2, K1, O1, P1 and Q1 from the SIF record and from the EOT20 synthesis (the default output of `lookup` unchanged). Section 3: `OceanTideModel::parseEot20Load` takes the phase lag as atan2(Im, Re) (a defect fix that moves every run on the EOT20 grid), the matching inverse in `src/sim/OtlField.cpp`, and `tests/test_eot20_phase_convention.cpp`.
-- **run dirs:** `D:\GnssProcessorSupport\runs_nom\_rap_aru_{otleot,otlsif,b10fix,b10flt,b11fix,b11late,b11flt,b12fix,b12late,b12flt}_est_<doy>_<site>` and `_rap_aru_b12ctl_est_143_wtzz`; executable `D:\GnssProcessorSupport\gates\exe_arue\gnss_processor_arue.exe`; tools and grades `D:\GnssProcessorSupport\presentation\agu26\fixing_control\` (`tools\`, `otl_phase\`, `grade_b10.json`, `grade_b11.json`, `grade_b12.json`, `grade_b8_vs_otleot.json`, `witness_b4_b12.jsonl`)
+- **run dirs:** `D:\GnssProcessorSupport\runs_nom\_rap_aru_{otleot,otlsif,b10fix,b10flt,b11fix,b11late,b11flt,b12fix,b12late,b12flt}_est_<doy>_<site>` and `_rap_aru_b12ctl_est_143_wtzz`; section 4: `_rap_aru_s144*_est_<doy>_<site>` (37 runs); executable `D:\GnssProcessorSupport\gates\exe_arue\gnss_processor_arue.exe`; tools and grades `D:\GnssProcessorSupport\presentation\agu26\fixing_control\` (`tools\`, `otl_phase\`, `grade_b10.json`, `grade_b11.json`, `grade_b12.json`, `grade_b8_vs_otleot.json`, `witness_b4_b12.jsonl`)
 - **source:** card [ARU](ARU-USER-FIXING-CONTROL.md) section 8.10 (the WTZZ00DEU fixed height worse with the SIF loading on DOY 143 and 144); card [OTL](../../record/refound/OTL_ocean_tide_loading_source_2026-10-16.md) sections 4, 8.4 and 9
 
-**Outcome.** Question: why does the WTZZ00DEU fixed height get worse with the SIF tide loading (card ARU section 8.10)?
-Not through the integers. The base of the comparison was defective: the engine read every EOT20 phase with the wrong
-sign (597 SIF stations, all eight main constituents) and at WTZZ00DEU applied nearly the opposite of the M2 loading.
-Fixed on the branch (section 3): the reader matches the SIF phases, no integer changes, the user heights move by up to
-8 mm, and the mean absolute up error over hours 3 to 6 falls from 6.2 to 4.4 mm fixed (7.0 to 5.8 mm float). The grid
-still carries the diurnal translation and no horizontal loading; the SIF without the translation stays best (3.7 / 3.9
-mm). Stage B fails as frozen (B2 on 2 of 15, B4 on 8 of 30). Standing: open.
+**Outcome.** Two traces of card ARU's open items (2026-11-13). The WTZZ00DEU fixed height with the SIF loading: the
+base of that comparison was defective, the engine reading every EOT20 phase with the wrong sign; fixed on the
+branch (section 3), no integer changes, heights move by up to 8 mm and the mean absolute up error falls to 4.4 / 5.8
+mm (the SIF without the translation stays best, 3.7 / 3.9). The STPM00SPM DOY 144 B2 failure (section 4): every
+settled solution reads 9 to 14 mm low that morning, and the float looks better only while its Galileo ambiguities
+converge; the low height is local to the receiver, cause not identified. Stage B fails as frozen. Standing: open.
 
 > Results are appended TO THIS FILE, below the text.
 
@@ -223,3 +222,60 @@ Stage B fails as frozen: B2 on 2 of 15 receiver-days and B4 on 8 of 30 runs; B1 
   removal of the diurnal translation from the grid's loading and no horizontal loading for the grid. The user
   configurations in `config/` still name the grid, and main still reads it with the reversed sign (this fix is on the
   branch only).
+
+## 4. Trace of the STPM00SPM DOY 144 fixed height (2026-11-13, diagnostic, not graded)
+
+Question: B2 fails at STPM00SPM DOY 144 under every tide model of sections 2 and 3 (median 3D over minutes 60 to 360,
+fixed against float: 19.9 against 14.2 mm in card ARU 8.8, 11.9 against 7.4 with b11, 14.7 against 8.9 with b12). Why
+is the fixed run worse than the float there? Runs `D:\GnssProcessorSupport\runs_nom\_rap_aru_s144*_est_<doy>_<site>`,
+37 runs, all exit 0 (`fixing_control\batch_s144*.txt`), executable of section 3; each is a copy of a b11 configuration
+(SIF loading, translation removed, nodal corrections) with the one change named (builders `tools\make_s144.py`,
+`make_s144b.py`, `make_s144k.py`, `make_s144j.py`, `make_s144jg.py`).
+
+- **The fixed runs agree with every settled solution.** Mean up by hour, hours 2 to 6 (`tools\trace_split.py` positions
+  against the reference of `meta.json`): b11 fixed from 00:00 -10.2, -13.1, -12.1, -12.0 and -11.1 mm, from 01:00
+  (hours 3 to 6) -12.0, -12.0, -11.2 and -9.9, float -0.8, -4.3, -6.5, -8.2 and -6.9. One system at a time
+  (`processing.active_systems`; `s144g`, `s144e`): GPS fixed -12.8, -12.8, -8.7, -9.8 and -10.5, GPS float -14.0,
+  -17.7, -12.7, -13.5 and -12.7; Galileo fixed -11.8, -14.0, -14.3, -12.9 and -11.1, Galileo float +24.8, +10.4, -0.9,
+  -4.5 and -4.3 (+48.6 in hour 1). Median 3D over minutes 60 to 360, fixed / float: GPS 10.7 / 15.7 mm, Galileo
+  13.9 / 6.1, both 11.9 / 7.4. The combined float reads higher than every settled solution while its Galileo part
+  converges from above; the Galileo float passes the reference height in hours 3 and 4, which the median of B2
+  rewards. With GPS alone the fixed run is better than the float.
+- **The whole day** (`s144fix24`, `s144flt24`, `processing.max_duration_s` 86400): the fixed height stays at -13.1 to
+  -11.1 mm through hour 6 and rises to -2.8 mm by hour 24; the float reaches -8.2 mm in hour 5 and -1.7 mm in hour 24;
+  over hours 19 to 24 the two differ by at most 2.1 mm. A kinematic fixed run (`s144kin`, `filter.process_noise.position_q`
+  1e-7 m^2/s, 24 h) reads -11.9 mm on average over hours 2 to 6 and -1.0 mm over hours 7 to 24; its epoch heights
+  scatter by 12.2 mm (standard deviation over hours 2 to 24; STPM00SPM DOY 145 10.0 mm, BAKE00CAN DOY 144 7.0 mm). The
+  height has no consistent tie to the applied tide: regression of the kinematic height on the applied up
+  (`otl_phase\series_b11_<doy>_<site>.csv` from `gnss_otl_diag series`, within 0.09 mm of the engine's trace), -0.35 on
+  DOY 144 and -0.06 on DOY 145.
+- **What the low height of hours 2 to 6 is not.**
+  - The reference: the IGS daily solution of DOY 144 lies 2.6 mm above the five-day mean that is the reference
+    (`IGS0OPSSNX_20261440000_01D_01D_SOL.SNX`).
+  - The troposphere: the fixed and float wet delays agree within 0.5 mm in hours 3 and 4 while the heights differ by 6
+    to 9 mm; with gradients estimated (`s144tg`, `estimation.estimate_tropo_gradients`) the fixed height over hours 3 to
+    6 is -11.1 mm and the float -5.2 mm.
+  - An elevation-dependent error (the a priori hydrostatic delay, from a standard atmosphere with the Niell mapping in
+    this configuration, or multipath): with cutoffs of 15 and 20 deg (`s144m15`, `s144m20`) the fixed height over hours
+    3 to 6 is -12.2 and -16.9 mm against -12.1, while the control day DOY 145 moves by -2.4 and -4.0 mm.
+  - One satellite: the largest mean phase residual of the fixed run over hours 3 to 6 is 3.0 mm (G03-G31 L1C; RMS of
+    the pair means 0.88 mm fixed, 0.70 float), and both systems show the low height.
+  - A regional signal: STJO00CAN (St. John's, about 270 km away), GPS only (`s144jg`, reference the mean of its five
+    IGS daily solutions), reads -6.8, -6.6 and -3.0 mm fixed on DOY 143 to 145, against STPM00SPM -0.3, -10.5 and
+    -3.8 mm (GPS only, `s144g`).
+- **Reading.** At STPM00SPM DOY 144 the fixed solution is not the faulty one: every settled solution of hours 2 to 6
+  (both fixed runs, GPS fixed and float, Galileo fixed) reads 9 to 14 mm low, and the combined float reads higher only
+  while its Galileo ambiguities converge. B2 as frozen counts that crossing against fixing. The low height belongs to
+  this receiver and this morning, is shared by GPS and Galileo, does not depend on the cutoff, and fades over the day.
+  Its physical cause is not identified from the data on disk: STPM00SPM has no meteorological RINEX file, and surface
+  weather at the receiver (water or snow on the radome, a local pressure event) is the next check.
+- **Side finding: Galileo receiver antenna offsets.** The STJO00CAN antenna (TWIVC6150 NONE) has only GPS and GLONASS
+  frequencies in `igs20.atx`. With `model_corrections.enable_receiver_cross_system_atx_fallback` off, as in every
+  configuration of cards ARU and ARUB, its GPS + Galileo runs (`s144j`) carry no Galileo receiver antenna offset and
+  read +26.8, +58.1 and +35.8 mm high over hours 3 to 6. Three of the 17 test receivers have the same gap: BADG00RUS
+  (JAVRINGANT_DM JVDM), KOKB00USA (ASH701945G_M NONE) and QUIN00USA (ASH701945E_M SNOW). None of them has run in stage
+  B; the network-mode runs behind the poster, each with one receiver held out as the user, set the fallback
+  (`_rap_agu26_c144c_<site>`). The 14 other receivers need the fallback, or GPS only, before any graded run.
+- **Not done.** Weather data for St. Pierre on 24 May 2026 (not on disk; a download needs the author's go-ahead). The
+  search restricted to one system with both systems in the float (`estimation.ambiguity_resolution.active_systems`).
+  The 14 other test receivers.
