@@ -5,10 +5,10 @@
 - **id:** ARUB
 - **topic:** user-ar
 - **status:** open
-- **summary:** Card ARU's continuation (that file nears the 60 KB bar), from its section 8.10 on; the bars, set-ups and results of stages A and B stay in card ARU sections 1 to 8. Trace of the WTZZ00DEU height with the SIF tide loading (2026-11-13, section 2, diagnostic, not graded): every pair-arc fixed under both tide sources holds the same integers; the base of the comparison, the EOT20 grid as the engine reads it, has every phase sign reversed (`OceanTideModel::parseEot20Load`; 597 SIF stations, all eight main constituents, M2 RMS phasor difference to the SIF 18.8 mm as read and 3.5 mm with the phase negated), and at WTZZ00DEU, M2 phase -89.7 deg, it applies nearly the opposite of the M2 loading. The 14 user configurations in `config/` that name a tide source all name that grid. Removing the diurnal translation from the SIF values (card OTL section 9) raises the WTZZ00DEU fixed height by 3.5 and 2.4 mm on DOY 143 and 144. With the network's three loading keys (b11; the nodal corrections add at most 0.4 mm) the mean absolute up error over hours 3 to 6 is 3.7 mm fixed and 4.0 mm float (EOT20 as read 6.2 and 7.0), the median 3D error 6.5 against 8.1 mm, B1 908 pair-arcs with none different, and B2 fails on 6 of 15 receiver-days, 4 of them at WTZZ00DEU, where a north error of up to 10.8 mm stays under every tide source (reported only). The EOT20 sign is not corrected. Corrects card ARU section 8.10: its WTZZ00DEU "east" values are north.
-- **dates:** 2026-11-13 (registered as the continuation; section 2)
+- **summary:** Card ARU's continuation (that file nears the 60 KB bar), from its section 8.10 on; the bars, set-ups and results of stages A and B stay in card ARU sections 1 to 8. Trace of the WTZZ00DEU height with the SIF tide loading (2026-11-13, section 2, diagnostic, not graded): every pair-arc fixed under both tide sources holds the same integers; the base of the comparison, the EOT20 grid as the engine reads it, has every phase sign reversed (`OceanTideModel::parseEot20Load`; 597 SIF stations, all eight main constituents, M2 RMS phasor difference to the SIF 18.8 mm as read and 3.5 mm with the phase negated), and at WTZZ00DEU, M2 phase -89.7 deg, it applies nearly the opposite of the M2 loading. The 14 user configurations in `config/` that name a tide source all name that grid. Removing the diurnal translation from the SIF values (card OTL section 9) raises the WTZZ00DEU fixed height by 3.5 and 2.4 mm on DOY 143 and 144. With the network's three loading keys (b11; the nodal corrections add at most 0.4 mm) the mean absolute up error over hours 3 to 6 is 3.7 mm fixed and 4.0 mm float (EOT20 as read 6.2 and 7.0), the median 3D error 6.5 against 8.1 mm, B1 908 pair-arcs with none different, and B2 fails on 6 of 15 receiver-days, 4 of them at WTZZ00DEU, where a north error of up to 10.8 mm stays under every tide source (reported only). The EOT20 sign is fixed on the branch, and the rerun of the 15 receiver-days is set up and frozen in section 3. Corrects card ARU section 8.10: its WTZZ00DEU "east" values are north.
+- **dates:** 2026-11-13 (registered as the continuation; section 2; section 3, the EOT20 sign fixed and the rerun set up and frozen)
 - **knobs / posture:** none new. The runs of section 2 use the existing `model_corrections.otl_from_sif`, `model_corrections.otl_remove_diurnal_translation` and `model_corrections.otl_nodal_corrections` (ledger RECOMMEND_SCOPED, armed in the network's field configuration; off in every user configuration).
-- **code:** `src/tools/otl_diag.cpp`, `lookup --phases`: the radial amplitude and phase lag of M2, S2, N2, K2, K1, O1, P1 and Q1 from the SIF record and from the EOT20 synthesis (the default output of `lookup` unchanged). No engine change.
+- **code:** `src/tools/otl_diag.cpp`, `lookup --phases`: the radial amplitude and phase lag of M2, S2, N2, K2, K1, O1, P1 and Q1 from the SIF record and from the EOT20 synthesis (the default output of `lookup` unchanged). Section 3: `OceanTideModel::parseEot20Load` takes the phase lag as atan2(Im, Re) (a defect fix that moves every run on the EOT20 grid), the matching inverse in `src/sim/OtlField.cpp`, and `tests/test_eot20_phase_convention.cpp`.
 - **run dirs:** `D:\GnssProcessorSupport\runs_nom\_rap_aru_{otleot,otlsif,b10fix,b10flt,b11fix,b11late,b11flt}_est_<doy>_<site>`; tools and grades `D:\GnssProcessorSupport\presentation\agu26\fixing_control\` (`tools\`, `otl_phase\`, `grade_b10.json`, `grade_b11.json`)
 - **source:** card [ARU](ARU-USER-FIXING-CONTROL.md) section 8.10 (the WTZZ00DEU fixed height worse with the SIF loading on DOY 143 and 144); card [OTL](../../record/refound/OTL_ocean_tide_loading_source_2026-10-16.md) sections 4, 8.4 and 9
 
@@ -19,7 +19,7 @@ WTZZ00DEU it applied nearly the opposite of the M2 loading. With the diurnal tra
 WTZZ00DEU fixed mean absolute up error is 2.9 mm (EOT20 as read 3.4, SIF 4.5). Left: a fixed height 4 to 5 mm low on
 DOY 143 and 144 (no integer error in the hours checked) and a north error of up to 10.8 mm on DOY 147 that the float
 carries too. Standing: open; the EOT20 sign
-is not corrected.
+is fixed on the branch and its rerun is frozen in section 3.
 
 > Results are appended TO THIS FILE, below the text.
 
@@ -112,3 +112,42 @@ worse on DOY 143 and 144 (mean up over hours 3 to 6, +0.5 to -8.1 and -1.9 to -7
 - **Not done.** The EOT20 sign is not corrected: a one-sign change to the default tide source of every user
   configuration that moves every run with the EOT20 grid, the author's decision. No run uses corrected EOT20 phases.
   The 14 other receivers and the streams were not run.
+
+## 3. The EOT20 phase sign fixed: rerun set-up, frozen before the graded runs (2026-11-13)
+
+Entry: the author decided on 2026-11-13 to fix the sign found in section 2 and rerun the 15 receiver-days. Section 1
+predates this section: the checks below are frozen here, and B1 to B4 are those of card ARU 8.5.
+
+- **Code** (branch `ar/user-control`, no new key): `OceanTideModel::parseEot20Load` takes the Greenwich phase lag as
+  atan2(Im, Re) of the interpolated grid value, so the radial signal is Re cos(chi) + Im sin(chi). The simulator's blend
+  between anchor points (`src/sim/OtlField.cpp`, `toComplex` and `fromComplex`) takes the matching inverse; the blend
+  of conjugates is the conjugate of the blend, so that edit alone changes no output, while the anchor values it blends
+  change with the reader. New test file `tests/test_eot20_phase_convention.cpp`, suite `Eot20PhaseConventionTest`: on
+  a synthetic two-by-two grid written by the test the reader returns |Z| and atan2(Im, Re) for every BLQ constituent;
+  when the EOT20 file is present (skipped otherwise) the M2, K1 and O1 up phasors at WTZZ00DEU, STPM00SPM and BAKE00CAN
+  agree with the SIF values to within 30 % of the SIF amplitude plus 0.3 mm (from the section 2 values: largest
+  difference 1.35 mm, BAKE00CAN M2, with the fixed sign; every one of the nine cases fails with the reversed sign).
+- **What moves.** Every run that takes its loading from the EOT20 grid: the 14 user configurations of section 2, and
+  the simulator with `corrections.ocean_tide` (default off). Not the three network configurations (`otl_from_sif` or
+  tide loading off, no grid path set) and not the sim fixture `simnet60_quiet_col_24h` (no tide loading).
+- **Executable** `D:\GnssProcessorSupport\gates\exe_arue\gnss_processor_arue.exe`, Release, built from `d6a4696` plus
+  this change. The engine sources of `arud` (card ARU 8.7) and `d6a4696` are the same: the one source change between
+  them, `src/tools/otl_diag.cpp`, is another target.
+- **Runs**, 45, in the order of card ARU section 5: `_rap_aru_b12fix_est_<doy>_<site>` and
+  `_rap_aru_b12late_est_<doy>_<site>`, copies of the b8 configurations (card ARU 8.7) with only the run paths changed;
+  `_rap_aru_b12flt_est_<doy>_<site>`, copies of the EOT20 float runs with the tide trace of section 2 (`otleot`, the
+  card ARU section 7 float plus the `ocean_tide` logger) with only the run paths changed. Control
+  `_rap_aru_b12ctl_est_143_wtzz`, a copy of `_rap_aru_b11fix_est_143_wtzz` (SIF loading).
+- **Checks, frozen here.** F1, the reader: `gnss_otl_diag lookup --phases` built with the change, over the 597
+  stations of section 2, gives a median phase difference to the SIF of at most 10 deg for each of the eight main
+  constituents, and at least 80 % of the stations within 20 deg for M2 (as read in section 2: 69 to 128 deg, and
+  6 %). F2, the identity: `b12ctl` writes `state_trace.csv`, `ambiguity_trace.csv` and `measurement_residuals.csv`
+  byte-identical to `_rap_aru_b11fix_est_143_wtzz`. B1 to B4 exactly as in card ARU 8.5, on b12, B2 against `b12flt`.
+- **Reported, no rule.** The size of the move, `b12fix` against `b8fix` and `b12flt` against `otleot`: per
+  receiver-day the change of the mean east, north and up over hours 3 to 6 and of the B2 median; the change of the
+  applied up loading (largest and RMS over the 6 h); the applied up against the SIF series (`b10flt`); the mean
+  absolute up error over hours 3 to 6 beside the rows of the section 2 table; the totals of the release rules.
+- **Expected, not a rule.** The corrected grid's applied up follows the SIF series to within a few millimetres, so the
+  mean absolute up error should fall from 6.2 / 7.0 mm toward the SIF rows of section 2 (3.7 to 4.2 mm fixed). The
+  north error at WTZZ00DEU on DOY 146 and 147 is there under every tide source, and the grid carries no horizontal
+  loading, so B2 is expected to fail there.
