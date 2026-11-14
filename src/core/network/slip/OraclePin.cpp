@@ -255,6 +255,137 @@ int networkOraclePinTrueN(const NetworkOraclePin::Truth& t, double now_s) {
 }
 
 // ===========================================================================
+// The chain-frame targets (card IRDU section 12)
+// ===========================================================================
+
+std::map<std::tuple<std::string, std::string, std::string>, NetworkOraclePin::FrameTarget>
+networkOraclePinParseFrameCsv(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) throw std::runtime_error("oracle_pin frame file: cannot open '" + path + "'");
+    std::string line;
+    if (!std::getline(f, line)) throw std::runtime_error("oracle_pin frame file '" + path + "' is empty");
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    const std::string head = "station,sat,signal,frame_int,role";
+    if (line.compare(0, head.size(), head) != 0)
+        throw std::runtime_error("oracle_pin frame file '" + path + "': the header must begin '" + head
+                                 + "', read '" + line + "'");
+    std::map<std::tuple<std::string, std::string, std::string>, NetworkOraclePin::FrameTarget> out;
+    long long row = 1;
+    while (std::getline(f, line)) {
+        ++row;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (opinTrim(line).empty()) continue;
+        std::vector<std::string> c;
+        std::stringstream ss(line);
+        std::string cell;
+        while (std::getline(ss, cell, ',')) c.push_back(opinTrim(cell));
+        if (c.size() < 5 || c[0].empty() || c[1].empty() || c[2].empty())
+            throw std::runtime_error("oracle_pin frame file '" + path + "' row " + std::to_string(row)
+                                     + ": five columns expected, read '" + line + "'");
+        NetworkOraclePin::FrameTarget t;
+        std::size_t used = 0;
+        try {
+            t.frame_int = std::stoll(c[3], &used);
+        } catch (const std::exception&) {
+            used = 0;
+        }
+        if (used == 0 || used != c[3].size())
+            throw std::runtime_error("oracle_pin frame file '" + path + "' row " + std::to_string(row)
+                                     + ": frame_int '" + c[3] + "' is not an integer");
+        if (c[4] == "tree") t.tree = true;
+        else if (c[4] != "chord")
+            throw std::runtime_error("oracle_pin frame file '" + path + "' row " + std::to_string(row)
+                                     + ": role '" + c[4] + "' is neither tree nor chord");
+        if (!out.emplace(std::make_tuple(c[0], c[1], c[2]), t).second)
+            throw std::runtime_error("oracle_pin frame file '" + path + "' row " + std::to_string(row)
+                                     + ": the arc " + c[0] + " " + c[1] + " " + c[2] + " is listed twice");
+    }
+    return out;
+}
+
+int networkOraclePinFrameTable(NetworkOraclePin& pin,
+                               const std::vector<NetStation>& stations,
+                               const net::ArcTable& arcs,
+                               double now_s, double tow,
+                               const std::vector<std::size_t>& active) {
+    pin.table.clear();
+    pin.fit_iters_last = 0;
+    if (active.empty() || pin.frame_changed_tow >= 0.0) return 0;
+
+    // ---- the frame: every pin the chain holds on a listed link must be the file's integer -------------
+    // The chain's pins are this epoch's tree (ChainDatum writes pinned_amb_targets).  A listed link the chain pins
+    // at the file's integer is a checked tree link, whatever role the file gave it (a re-host onto a link already at
+    // its integer keeps the frame); one pinned at any other value means the frame has stepped, which the file cannot
+    // follow, so every frame pin is released for good from this epoch on.
+    std::set<std::tuple<int, std::string, std::string>> chain_pinned;
+    for (const auto& [key, ft] : pin.frame) {
+        const auto& [sta, sat, sig] = key;
+        const auto& pins = stations[static_cast<std::size_t>(sta)].pinned_amb_targets;
+        const auto pit = pins.find(StateKeys::makeAmbiguityKey(sat, sig));
+        if (pit == pins.end()) continue;
+        const auto tit = pin.truth.find(key);
+        const double lam = (tit != pin.truth.end()) ? tit->second.lambda_m : 0.0;
+        if (!(lam > 0.0) || std::abs(pit->second - lam * static_cast<double>(ft.frame_int)) > 1e-6) {
+            pin.frame_changed_tow  = tow;
+            pin.frame_changed_what = fmt::format("{} {} {}: the chain pins it at {:.6f} m, the file's integer is {} "
+                                                 "cyc ({})", stations[static_cast<std::size_t>(sta)].name, sat, sig,
+                                                 pit->second, ft.frame_int, ft.tree ? "a tree link of the file"
+                                                                                    : "a chord of the file");
+            return 0;
+        }
+        ++pin.frame_tree_checked;
+        chain_pinned.insert(key);
+    }
+
+    // ---- every listed link the chain does not pin: held at its frame integer --------------------------
+    // (a chord of the file; or a tree link of the file that the chain no longer pins and that is still in scope)
+    for (const auto& [key, ft] : pin.frame) {
+        if (chain_pinned.count(key) || pin.frame_released.count(key)) continue;
+        if (ft.tree) ++pin.frame_tree_unpinned;
+        const auto& [sta, sat, sig] = key;
+        const std::string& sta_name = stations[static_cast<std::size_t>(sta)].name;
+        const NetworkOraclePin::Armed* owner = nullptr;
+        for (std::size_t ai : active)
+            if (pin.scopes[ai].scope.covers(sta_name, sat, sig)) { owner = &pin.scopes[ai]; break; }
+        if (!owner) continue;
+        const auto tit = pin.truth.find(key);
+        if (tit == pin.truth.end() || !(tit->second.lambda_m > 0.0)) { ++pin.no_truth; continue; }
+        // A true slip moves the arc's integer and with it the frame integer the file holds: release for good.
+        const int n_now = networkOraclePinTrueN(tit->second, now_s);
+        const auto oit = pin.frame_onset_n.find(key);
+        if (oit == pin.frame_onset_n.end()) {
+            pin.frame_onset_n.emplace(key, n_now);
+        } else if (oit->second != n_now) {
+            pin.frame_released.insert(key);
+            ++pin.frame_released_slip;
+            continue;
+        }
+        NetworkOraclePin::Pin p;
+        p.n_true   = static_cast<int>(ft.frame_int);
+        p.value_m  = tit->second.lambda_m * static_cast<double>(ft.frame_int);
+        p.sigma_m  = owner->sigma_m;
+        p.ev_index = owner->ev_index;
+        pin.table.emplace(key, p);
+    }
+
+    // ---- the residual: what the pins are about to move (as the fit reports it) --
+    double sum2 = 0.0, mx = 0.0;
+    long long n = 0;
+    for (const auto& [key, p] : pin.table) {
+        const LocalCarry* cit = net::getArc(arcs, key, &net::ArcState::amb);
+        if (cit == nullptr || !std::isfinite(cit->value_abs)) { ++pin.frame_not_carried; continue; }
+        const double d = (cit->value_abs - p.value_m) / pin.truth.at(key).lambda_m;
+        sum2 += d * d;
+        mx = std::max(mx, std::abs(d));
+        ++n;
+    }
+    pin.fit_resid_n       = n;
+    pin.fit_resid_rms_cyc = (n > 0) ? std::sqrt(sum2 / static_cast<double>(n)) : 0.0;
+    pin.fit_resid_max_cyc = mx;
+    return static_cast<int>(pin.table.size());
+}
+
+// ===========================================================================
 // Load
 // ===========================================================================
 
@@ -344,6 +475,32 @@ std::unique_ptr<NetworkOraclePin> networkOraclePinLoad(
             pin->truth[{i, key.first, key.second}] = std::move(t);
             ++n_arcs;
         }
+    }
+
+    // ---- chain-frame mode (card IRDU section 12) ----------------------------
+    pin->frame_file = nc.slip_qc.oracle_pin_frame_file;
+    if (!pin->frame_file.empty()) {
+        pin->frame_mode = true;
+        std::map<std::string, int> idx_of;
+        for (int i = 0; i < static_cast<int>(stations.size()); ++i) idx_of[stations[static_cast<std::size_t>(i)].name] = i;
+        for (const auto& [arc, ft] : networkOraclePinParseFrameCsv(pin->frame_file)) {
+            const auto& [sta_name, sat, sig] = arc;
+            const auto iit = idx_of.find(sta_name);
+            if (iit == idx_of.end())
+                throw std::runtime_error("oracle_pin frame file '" + pin->frame_file + "' names station '"
+                                         + sta_name + "', which is not in the roster");
+            const auto key = std::make_tuple(iit->second, sat, sig);
+            if (!pin->truth.count(key))
+                throw std::runtime_error("oracle_pin frame file '" + pin->frame_file + "' lists " + sta_name + " "
+                                         + sat + " " + sig + ", which has no truth under the truth root");
+            pin->frame.emplace(key, ft);
+            ++(ft.tree ? pin->frame_tree_links : pin->frame_chords);
+        }
+        log->warn("Network (ORACLE PIN): CHAIN-FRAME MODE from '{}': {} chord(s) and {} tree link(s); every listed "
+                  "link the chain does not pin is held at lambda times its integer in the chain's frame, every one "
+                  "it pins is checked at that integer (a pin elsewhere releases every frame pin for good), and a "
+                  "link is released at its first true slip.  SIM-ONLY, card IRDU section 12.",
+                  pin->frame_file, pin->frame_chords, pin->frame_tree_links);
     }
 
     std::string list;
@@ -611,8 +768,20 @@ void networkOraclePinEpoch(NetworkRun& run, const NetworkEpoch& ep) {
     }
     ++pin->epochs_active;
 
-    networkOraclePinFit(*pin, stations, ctx.entities.arcs,
-                        this_epoch_anchor, now_s, active);
+    if (pin->frame_mode) {
+        const bool was_on = pin->frame_changed_tow < 0.0;
+        const long long released_before = pin->frame_released_slip;
+        networkOraclePinFrameTable(*pin, stations, ctx.entities.arcs, now_s, tow, active);
+        if (was_on && pin->frame_changed_tow >= 0.0)
+            log->warn("Network (ORACLE PIN): TOW {:.1f} — the chain's frame STEPPED off the frame file's integers "
+                      "({}); every frame pin is released for good.", tow, pin->frame_changed_what);
+        if (pin->frame_released_slip > released_before)
+            log->warn("Network (ORACLE PIN): TOW {:.1f} — {} chord(s) released for good at a true slip.", tow,
+                      pin->frame_released_slip - released_before);
+    } else {
+        networkOraclePinFit(*pin, stations, ctx.entities.arcs,
+                            this_epoch_anchor, now_s, active);
+    }
 
     // --- the two edges of invariant #7, counted and identified ----------------
     // Both edges get a per-arc event row as well as a counter.  Counters alone are
@@ -733,6 +902,17 @@ int networkOraclePinRunEnd(const NetworkOraclePin* pin,
                   : "  ⚠ ARMED AND INERT: ZERO prior rows were folded — this is dead "
                     "wiring, not a quiet run, and the arm measures NOTHING.  Do NOT read "
                     "its parameter errors as a ceiling.");
+    if (pin->frame_mode)
+        log->warn("Network (ORACLE PIN, chain-frame mode): file '{}' with {} chord(s) and {} tree link(s); tree-link "
+                  "checks at the file's target {} (arc-epochs: links the chain pins at the file's integer); tree links "
+                  "of the file the chain no longer pins, held by the oracle instead {} (arc-epochs); links released "
+                  "at a true slip {}; links pinned without a carried ambiguity {} (arc-epochs); the chain's frame {}.",
+                  pin->frame_file, pin->frame_chords, pin->frame_tree_links, pin->frame_tree_checked,
+                  pin->frame_tree_unpinned, pin->frame_released_slip, pin->frame_not_carried,
+                  pin->frame_changed_tow < 0.0
+                      ? std::string("stayed the file's for the whole run")
+                      : fmt::format("stepped off the file's integers at TOW {:.1f} ({})", pin->frame_changed_tow,
+                                    pin->frame_changed_what));
     return 0;
 }
 

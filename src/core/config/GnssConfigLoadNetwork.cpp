@@ -6172,6 +6172,9 @@ namespace GnssProcessor {
             sq.oracle_truth_root =
                 jval<std::string>(json, "network.cycle_slip.oracle_truth_root",
                                   "network_cycle_slip_oracle_truth_root", std::string{});
+            sq.oracle_pin_frame_file =
+                jval<std::string>(json, "network.cycle_slip.oracle_pin_frame_file",
+                                  "network_cycle_slip_oracle_pin_frame_file", std::string{});
             sq.oracle_noise_cyc =
                 jval<double>(json, "network.cycle_slip.oracle_noise_cyc",
                              "network_cycle_slip_oracle_noise_cyc", 0.0);
@@ -13740,6 +13743,23 @@ namespace GnssProcessor {
                                   if (e.kind == "oracle_pin") ++n;
                               return n;
                           }(), root);
+            }
+            // The chain-frame targets (card IRDU section 12) are read by the oracle pin alone: without an armed
+            // event they would be read by nothing (armed and inert, invariant 4), and a missing file is a
+            // mis-pointed path, not an empty target set.
+            const auto& frame_file = network_config_.slip_qc.oracle_pin_frame_file;
+            if (!frame_file.empty()) {
+                if (!(any_pin && ic.enable))
+                    throw std::runtime_error(
+                        "network.cycle_slip.oracle_pin_frame_file ('" + frame_file
+                        + "') is set but no 'oracle_pin' event is armed in network.inject: the frame targets "
+                          "would be read by nothing.");
+                if (!std::filesystem::exists(frame_file))
+                    throw std::runtime_error(
+                        "network.cycle_slip.oracle_pin_frame_file ('" + frame_file + "') does not exist.");
+                log->warn("Config: network.cycle_slip.oracle_pin_frame_file '{}' — the oracle pin holds the "
+                          "chords it lists at their integers in the chain's frame (SIM-ONLY, card IRDU "
+                          "section 12).", frame_file);
             }
         }
         return true;

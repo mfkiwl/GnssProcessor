@@ -843,6 +843,7 @@ add_executable(gnss_tests
     tests/network/test_canonical_pair_admission.cpp
     tests/network/test_second_band_admission.cpp
     tests/network/test_oracle_pin.cpp
+    tests/network/test_oracle_pin_frame.cpp
     tests/test_warm_resume_require.cpp
     tests/test_anchor_slip_handover.cpp
     tests/network/test_phase_gate_drop_edge.cpp

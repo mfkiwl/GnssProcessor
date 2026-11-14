@@ -433,6 +433,19 @@ KNOB_GROUPS = {
     # "arm the three keys together, never this link alone")
     "zwd_set": list(ZWD_SET),
 }
+# Card IRDU section 12: the simulation-only oracle pin in the chain's frame on the bed without re-seats, one group per
+# case: an `oracle_pin` event from the run's first epoch (scope all, sigma 1e-4 m), the fixture as the truth root and
+# the case's frame-target file (scripts/irdu_frame_targets.py: every tree link, and the chords of the rings named).
+# The three keys work only together (the loader refuses the file without the event and the event without the root).
+IRDU_FRAME_PIN_TOW = 261030
+IRDU_FRAME_PIN_FILES = {"all": "fpin_nr3_all.csv", "r2": "fpin_nr3_r2.csv", "r23": "fpin_nr3_r23.csv",
+                        "r234": "fpin_nr3_r234.csv"}
+for _case, _file in IRDU_FRAME_PIN_FILES.items():
+    KNOB_GROUPS["fpin_nr3_" + _case] = [
+        'network.inject={"enable": true, "events": [{"kind": "oracle_pin", "tow": %d, "scope": "all", '
+        '"sigma_m": 0.0001}]}' % IRDU_FRAME_PIN_TOW,
+        "network.cycle_slip.oracle_truth_root=" + os.path.realpath(ROOT + "/runs/simarl_r3c").replace(os.sep, "/"),
+        "network.cycle_slip.oracle_pin_frame_file=" + ROOT + "/config/sim/irdu/" + _file]
 
 
 def sha256_bytes(b):
@@ -766,6 +779,10 @@ def selftest():
         and g[:-4] == compose("A1krhRsmh_nozwd", "r3c") and g == compose("A1krhRsmh", "r3c"),
         "a setting group is appended once to the unchanged arm, and the wet-delay group on A1krhRsmh_nozwd is the "
         "adopted A1krhRsmh key for key (the cases of card IRDU section 11.3 are the adopted arm)")
+    chk(all(os.path.isfile(KNOB_GROUPS["fpin_nr3_" + c][2].split("=", 1)[1]) for c in IRDU_FRAME_PIN_FILES)
+        and all(compose("A1krhRsmh", "irdu_nr", KNOB_GROUPS["fpin_nr3_" + c]) != compose("A1krhRsmh", "irdu_nr")
+                for c in IRDU_FRAME_PIN_FILES),
+        "card IRDU section 12's frame-pin groups name existing frame files and change the adopted arm")
     try:
         make(argparse.Namespace(bed="r3c", arm="A1krhRsmh", knob=None, knob_group="zwd_set", tag="_selftest_noop",
                                 hours=0.1, run_set=[], drop_station=[], dry_run=True))

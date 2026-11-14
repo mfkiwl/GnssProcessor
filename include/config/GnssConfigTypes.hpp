@@ -872,6 +872,13 @@ namespace GnssProcessor {
         /// @ref oracle_relevel is on and the directory does not exist; that error is
         /// what keeps the oracle inert on field data.
         std::string oracle_truth_root{};
+        /// Simulation only (card IRDU section 12): the chain-frame target file of the oracle pin
+        /// (@c network.cycle_slip.oracle_pin_frame_file, default empty).  When it names a file, every armed
+        /// @c oracle_pin event holds every link the file lists that the chain does not pin at lambda times its
+        /// integer in the chain's frame (columns station, sat, signal, frame_int, role), and checks every listed
+        /// link the chain pins at that integer, in place of the anchor-frame fit; empty keeps the fit.  The loader
+        /// refuses it without an armed @c oracle_pin event or when the file does not exist.
+        std::string oracle_pin_frame_file{};
         /// 1-sigma (cycles) of a deterministic zero-mean Gaussian added to each
         /// applied sum d (@c network.cycle_slip.oracle_noise_cyc, default 0 = the
         /// exact ceiling).  Seeded from (station, satellite, signal, epoch), so a
