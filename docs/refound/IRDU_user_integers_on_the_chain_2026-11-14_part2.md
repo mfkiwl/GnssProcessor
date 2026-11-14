@@ -5,7 +5,7 @@
 - **id:** IRDU-part2
 - **topic:** network-vehicle
 - **status:** open
-- **summary:** Section 11 of card IRDU (2026-11-14), moved here verbatim on 2026-11-14 because that file reached the 60 KB bar: the author's question why the receiver phase bias is estimated fresh each epoch although carried, measured on the simulator (A, the carried float at each re-host against truth; B, a bed with no re-seat; C, one injected re-seat; D, the receiver bias's random walk; E not run).
+- **summary:** Section 11 of card IRDU (2026-11-14), moved here verbatim on 2026-11-14 because that file reached the 60 KB bar: the author's question why the receiver phase bias is estimated fresh each epoch although carried, measured on the simulator (A, the carried float at each re-host against truth; B, a bed with no re-seat; C, one injected re-seat; D, the receiver bias's random walk; E not run); then sections 11.3 and 11.4, the wet delay carried as the current reference configuration carries it, and section 11.2's re-seat cost read again against truth.
 - **source:** [IRDU](IRDU_user_integers_on_the_chain_2026-11-14.md) sections 2, 9 and 10 (the instrument, its re-registered bars and the trace this section follows); the header and Outcome of that card summarize this section
 
 Sections 1 to 10 are in [IRDU](IRDU_user_integers_on_the_chain_2026-11-14.md). Results of this section are appended below.
@@ -138,3 +138,81 @@ In both arms the frame was kept: the new edge's rounded target was right on both
 **Expectation (the requesting session's, adopted here).** If the hop reading holds, the narrow lane at depth 3 and 5 on B converges faster with the group: at 105 to 120 min below B's 0.085 and 0.196 cycle. Reading rule (added here): the hop reading holds when the depth-3 and depth-5 D_NL offsets p50 at 105 to 120 min fall below B's by at least 0.02 and 0.04 cycle (about five times the same-build spread of section 11.2's D, 0.001 and 0.008 between B and its q twin) and the receivers' wet-delay error falls with the group. It does not hold when the offsets stay within that margin: the wet delay is then not the hop's term, and the slant-ionosphere level is the next candidate (its ledger row, `network.carry_iono_in_block`, is KEEP_OFF: read before proposing anything there). A mixed outcome (the wet delay improves and the narrow lane does not) is reported as such. At the users, section 11's bars apply on B with the group; r3c is read beside. Prediction of this card: the group lowers the receivers' per-epoch wet-delay steps; whether the narrow lane's offsets at depth follow is the measurement (section 11.2 reads the depth-5 D_NL step p50 at 0.046 NL cycle per epoch at 2 h, about 5 mm, and the receivers' wet-delay formal sigma at 1 to 6 cm at 1 h).
 
 **2026-11-14, addendum to section 11.3, written before it runs (an addition of this session, not of the request).** Section 11.2's D asked what sets the 45 min a re-seat costs; the receiver bias's random walk does not. The wet delay is the other carried candidate: C1 with the group, read against B with the group (`_rap_irdu_zw_c1` against `_rap_irdu_zw_nr3`; the group on both sides, so the event is the one change), with `scripts/irdu_event_diff.py` as in section 11.2. Expectation: if the re-seat's narrow-lane transient is set by the moved receivers' re-converging wet delay, the time until the moved pairs' narrow-lane excess p50 stays below 0.1 cycle falls below C1's 45 to 50 min; if it is set by the released ambiguity carries alone, it stays. Gate: the event run's CHAIN rows are the scripted event's only.
+
+### 11.4 2026-11-14: results of 11.3: the wet delay carried, a re-seat's cost read against truth, and the IRD family
+
+**What ran.** On the build of section 9 with the run settings of the STATUS block, each exiting 0 with 240 of 240 epochs: `_rap_irdu_zw_nr3` (B with the group), `_rap_irdu_zw_r3c` (r3c with the group) and the addendum's `_rap_irdu_zw_c1` (C1 with the group); smokes `_rap_irdu_smk_zw_nr3` and `_rap_irdu_smk_zw_r3c`. Gate G-B0 holds on B with the group (174 births at the first epoch, every later edge row kept, 116 receiver phase-bias births and no other row, no CHAIN row), and the addendum's CHAIN rows are the scripted event's only. The wet delay's own event rows on B with the group: 59 first folds, 3 erases at slip latches (the Melbourne-Wubbena refloats of chords at S43000SIM, S47000SIM and S15000SIM in the first 12 min) and their 3 re-couplings. All 20 user runs exit 0. Grades: `runs_nom/_irdu_grades/s11e_*`; the wet-delay reading is `scripts/irdu_zwd_error.py`.
+
+**ZWD.** Each receiver's wet-delay error against truth, p50 / p95 (mm), and its step between epochs, p50 (mm):
+
+| run | 30 to 45 min | 60 to 75 min | 105 to 120 min |
+| --- | --- | --- | --- |
+| B | 77 / 533; 15.5 | 38 / 214; 9.4 | 14 / 75; 4.6 |
+| B with the group | 28 / 112; 4.0 | 20 / 80; 2.1 | 8 / 39; 1.1 |
+| r3c | 18 / 248; 5.6 | 15 / 83; 3.7 | 20 / 219; 4.7 |
+| r3c with the group | 11 / 40; 1.2 | 11 / 27; 0.8 | 7 / 21; 0.4 |
+
+On B at 105 to 120 min the receivers between satellites read 12.7 against 7.5 mm (depth 2) and 16.5 against 10.0 mm (depth 4). Without the group the wet delay of a station with two satellites takes the hour to converge (S27000SIM: 0.25, 0.22 and 0.15 m at 30, 60 and 110 min against a truth of 0.12 to 0.13 m); with it, it is within 2 cm from 30 min.
+
+**STREAM** (per-pair offset p50 against truth; the step is the p95 over every pair):
+
+| channel, depth class | B, 30 to 45 min | with the group | B, 60 to 75 min | with the group | B, 105 to 120 min | with the group |
+| --- | --- | --- | --- | --- | --- | --- |
+| D_NL, 1 | 0.121 | 0.076 | 0.079 | 0.048 | 0.022 | 0.023 |
+| D_NL, 3 | 0.192 | 0.134 | 0.172 | 0.094 | 0.085 | 0.048 |
+| D_NL, 5 | 0.234 | 0.148 | 0.315 | 0.091 | 0.196 | 0.075 |
+| D_WL, 5 | 0.114 | 0.113 | 0.081 | 0.081 | 0.068 | 0.073 |
+| D_NL step p95 | 0.253 | 0.068 | 0.093 | 0.028 | 0.055 | 0.011 |
+
+On r3c the group moves D_NL at 105 to 120 min from 0.137 to 0.117 (every pair) and from 0.161 to 0.111 (depth 5), and its step p95 from 0.364 to 0.023; D_WL reads 0.086 against 0.100 (every pair) and 0.134 against 0.156 (depth 5).
+
+Card IRD's stream bars at their original values (IRDB section 3.6 froze them at 1.25 times a floor at the null, which a uniform wire would pass), on the pre-hold wire over hour 2 (pair-epochs, 48 720 on B and 55 650 on r3c):
+
+| run | D_WL p50; within 0.20 | D_NL p50; within 0.25 | W-WL (p50 at most 0.08, at least 90 % within 0.20) | W-NL (p50 at most 0.10, at least 85 % within 0.25) |
+| --- | --- | --- | --- | --- |
+| B | 0.064; 96.8 % | 0.155; 67.4 % | pass | FAILED |
+| B with the group | 0.067; 96.2 % | 0.081; 92.9 % | pass | pass |
+| r3c | 0.078; 83.8 % | 0.141; 72.4 % | FAILED | FAILED |
+| r3c with the group | 0.077; 83.3 % | 0.124; 80.5 % | FAILED | FAILED |
+
+USERS:
+
+| stream | FRAC settled WL, N_1 | PAIRS settled | HELD | WRONG, UNRESOLVED (compared) | float 3D h1, h2 (mm) |
+| --- | --- | --- | --- | --- | --- |
+| B | 0.139, 0.255 | 32.1 % of 53 | 39.6 % | 0, 144 (240) | 1 121, 302 |
+| B with the group | 0.141, 0.219 | 18.9 % of 53 | 24.5 % | 0, 106 (106) | 1 052, 127 |
+| r3c, chain | 0.180, 0.245 | 22.4 % of 58 | none | 0, 0 (0) | 392, 164 |
+| r3c with the group | 0.182, 0.259 | 20.3 % of 59 | none | 0, 0 (0) | 375, 144 |
+
+**Verdict by section 11.3's rule: the hop reading HOLDS.** With the group D_NL at 105 to 120 min falls from 0.085 to 0.048 cycle at depth 3 and from 0.196 to 0.075 at depth 5 (margins 0.037 and 0.121, against the required 0.02 and 0.04), and the receivers' wet-delay error falls (14 to 8 mm p50). The pairs on the root and the wide lane do not move, as the hop reading predicts of the ionosphere-free term. At the users B with the group still FAILS section 11's bars (settled N_1 0.219 against 0.131, WL 0.141 against 0.107, PAIRS 18.9 %, HELD 24.5 %, and the two users that hold pairs disagree on all 106 compared pair-epochs), with the float position 2.4 times better in hour 2.
+
+**The addendum (C1 with the group).** The pre-registered measure: the moved pairs' narrow-lane excess over B with the group (p50) stays below 0.1 cycle only from 55 to 60 min after the event, against 45 to 50 min for C1, so by the rule the transient is not shortened. The excess reads 0.04 to 0.09 in the first 30 min (C1: 0.48 to 0.88) and then rises to 0.14 to 0.22 between 30 and 55 min; the next reading shows where the rise comes from.
+
+**2026-11-14, annotation to section 11.2's C: a re-seat's cost read against truth.** The excess compares two runs that are both still converging. Read against truth instead, the moved pairs' |wrap| p50, event run / control:
+
+| case | D_WL at the event epoch | 0.5 to 10 min | 10 to 25 min | 25 to 45 min | 45 to 65 min | D_NL 0.5 to 10 min | 10 to 25 min | 25 to 45 min | 45 to 65 min |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| C1 against B | 0.364 / 0.116 | 0.170 / 0.113 | 0.161 / 0.111 | 0.152 / 0.107 | 0.121 / 0.112 | 0.280 / 0.227 | 0.270 / 0.244 | 0.159 / 0.300 | 0.150 / 0.209 |
+| C2 against B | 0.332 / 0.084 | 0.125 / 0.092 | 0.160 / 0.097 | 0.064 / 0.058 | 0.066 / 0.059 | 0.260 / 0.183 | 0.165 / 0.191 | 0.138 / 0.217 | 0.115 / 0.126 |
+| C1 against B, q 1e-9 | 0.351 / 0.111 | 0.164 / 0.109 | 0.152 / 0.108 | 0.145 / 0.108 | 0.113 / 0.113 | 0.282 / 0.229 | 0.266 / 0.238 | 0.160 / 0.302 | 0.141 / 0.199 |
+| C1 against B, with the group | 0.339 / 0.122 | 0.177 / 0.114 | 0.162 / 0.106 | 0.150 / 0.108 | 0.123 / 0.117 | 0.184 / 0.172 | 0.168 / 0.169 | 0.090 / 0.207 | 0.068 / 0.131 |
+
+The cost against truth is the moved subtree's wide lane: 0.03 to 0.06 cycle above the control for 25 min (C2) to 45 min (C1, and C1 with q 1e-9 or with the group), after a one-epoch spike at the event (0.33 to 0.36 against 0.08 to 0.12). The narrow lane costs 0.01 to 0.08 cycle in the first 10 min and nothing after: from 25 min after the event the moved pairs are closer to truth than the control's (C1: 0.159 against 0.300 at 25 to 45 min; with the group 0.090 against 0.207), because the event re-hosts G24 from S27000SIM, a station with two satellites on B whose wet delay is decimetres off in the first hour without the group, onto S32000SIM. Section 11.2's 45 min of narrow-lane excess is therefore mostly the control's own excursion, not the event's cost. Section 11.2's tables stand as written. Its sentences on the re-seat ("about 45 min to re-converge in the narrow lane", "60 / 45 = 1.3 re-seats per hour") are to be read as follows: a re-seat costs the moved subtree's wide lane about 0.05 cycle for 25 to 45 min, so a stream tolerates about 1.3 to 2.4 re-seats per hour in any subtree that a pair's path crosses, and a stream with a re-seat every 100 s (r3c) still never settles. The wide lane's 25 to 45 min is the time a new tree link's code takes to converge (B's wide lane needs 30 to 45 min from the start), which the hop algebra of section 11 predicts for the geometry-free part.
+
+**The IRD family (the request's item 4).** Card IRD section 11 places these readings at IRD-7 (the W bars on the emitted wire, which with the holds off is the pre-hold wire) and IRD-8 (the consumer proof, K-a to K-e). Neither increment is built, IRD-4 to IRD-6 have not passed, and B is not one of IRD's beds, so every reading here sits beside the bars, not in a gate.
+
+- **K bars at the users.** K-a (0 wrong among at least 1 000 settled determined integers per held-out station): not met on any stream here (the users that hold disagree, 144 and 106 unresolved pair-epochs, and no station holds 1 000). K-b (the wide lane on at least 50 % of settled pairs, at least 70 % of the truth-wire ceiling): HELD 39.6 % and 24.5 % against the truth wire's 86.3 %: not met. K-c and K-e are not read (no 6 h bed, no late start). K-d (0 accepted fixes on the golden and A0 wires with the gate on) belongs to IRD-1's consumer gate: section 2's resolver has none and accepts fixes on the reference configuration's wire (HELD 9.8 % on r3c, section 9), so K-d is not exercised here.
+- **W bars.** The table above: B with the group meets both original bars; B meets W-WL; r3c fails both with and without the group.
+- **A** (the carried float at the re-hosts) repeats IRDC section 6.2 and 6.4 (the covariance is honest where the floats are undamaged: |e|/sigma p50 0.73 and 0.84 at the re-hosts) and IRDG section 7.5 (0 wrong of 3 116 would-be certifications on r3c with the key; the same run here). It extends them: at the re-hosts themselves the certifier determines nothing on r3c, because the new host arc's float carries 10 to 20 times the bar's sigma, so releasing the held branch (IRDC section 7.3) would not act on r3c, as IRDD section 4.2 found ("none on r3c"); rounding instead would step the frame at 28 % of the re-hosts. It contradicts nothing.
+- **B** (no re-seat) repeats IRDD section 4.5's inference that the re-hosts keep the network from converging (B converges and stops moving, r3c stalls), and extends IRDG section 7.7 item 1 (the float's own level): without any event the narrow lane converges more slowly with depth.
+- **C** (one re-seat) traces IRDD section 4.5 item 3 for one release. Its inference that the moved satellites' products lose precision while they re-converge holds for the wide lane (0.05 cycle for 25 to 45 min against truth), not for the narrow lane beyond 10 min; the frame is kept (the rounded targets were right, integer step 0). It extends IRDD section 4.5 item 4 (the certified branch as the remedy): a certified re-host would keep the new link's code history in its carries, but on r3c the branch cannot act (A).
+- **ZWD** (this case) extends IRDE section 9 (its part 2) and IRDF section 4.4: with the floor on, A1's receivers held their wet delay metres off; with the floor off (the D0 ruling) it sits 1 to 8 cm off on B (p50, 30 to 120 min) and is the hop's ionosphere-free term, which carrying it roughly halves. Of IRDG section 7.7 item 1's two ways for the float to settle (the emitted, held wire of IRD-7, or integers fixed in the frame, the re-pinning that is a decision of its own), the wet delay carried is a third, float-side way for the narrow lane, short of re-pinning; it leaves the wide lane at depth (the geometry-free part: the tree links' code and slant-ionosphere levels) and the users.
+- **Route (c) and the elections.** The ledger rows `network.phase_datum_eq34_longevity_election` (KEEP_OFF: falsified as implemented, re-references 2 483 to 2 695 and double-difference steps of 9 to 103 cycles per epoch on its 3 h arm) and `network.phase_datum_eq34_slip_aware_election` (KEEP_OFF: 102 incumbent de-seats, total ionosphere-free spread +15.7 % and clock spread +20 %) are measured harmful, so no election change is named. Route (c) stays the release that keeps the carries where the integer is right (the held certified branch's family, A its bound), the author's decision.
+
+**The answer to the author's question, revised.** Carrying the nearly time-constant parameters between epochs does help, and the one that matters is the wet delay, not the receiver phase bias. The receiver phase bias is already carried and cancels at every link. The wet delay, carried as the current reference configuration carries it (and as the chain's cases did not), roughly halves the hop receivers' wet-delay error and makes the narrow lane converge two to three times faster at depth on a bed without re-seats (depth 5 at 2 h: 0.075 against 0.196 cycle), enough to pass card IRD's own narrow-lane stream bar there. What remains is the wide lane at depth (the tree links' code), the re-seats (each costs the moved branch's wide lane about 0.05 cycle for 25 to 45 min, and r3c has one every 100 s), and users that still hold no correct integers.
+
+**Routes.** (1) The chain's cases without the current reference configuration's wet-delay set read a posture the reference configuration no longer has; whether the arm definitions take the set is the author's decision (measured here as a case only). (2) Route (c) as section 11.2 states it, with the cost now read against truth (the wide lane of the moved subtree). (3) For the wide lane at depth, the remaining term by the hop algebra is the geometry-free one (the tree links' code and slant-ionosphere levels): a shallow tree (route b) shortens the path; carrying the slant ionosphere is the next candidate, and its ledger row `network.carry_iono_in_block` is KEEP_OFF ("mechanism sound, slipped bed fails both gates (consumer +47 %), quiet bed neutral", not graded under the float vehicle), so nothing is proposed there without the author. (4) Route (a) as before. Nothing is armed.
+
+**Not verified.** One bed family, 2 h arms. B carries 61 % fewer arcs than r3c and three satellites without corrections, and the users' failure on B with the group (float 127 mm in hour 2, holding users disagreeing) is not traced. The against-truth reading of C uses windows of 10 to 20 min (20 to 40 epochs) on 55 to 81 pairs. On r3c the group leaves the wide lane slightly worse at depth 5 (0.156 against 0.134), not traced.
+
+**Decisions made on the way, for review.** (1) The four keys are taken as one change, because the ledger arms them only together (`--knob-group zwd_set`; no arm definition changed). (2) The addendum (C1 with the group) is an addition of this session, pre-registered before it ran. (3) Section 11.2's C reading is corrected by a dated annotation against truth; its table and sentences are not rewritten. (4) Card IRD's W bars are read at their original values, because the frozen bars of IRDB section 3.6 sit above the null. (5) IRDG's "re-pinning that is a decision of its own" is read as its section 7.7 item 1's "integers fixed in the frame".
