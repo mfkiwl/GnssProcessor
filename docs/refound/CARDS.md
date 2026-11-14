@@ -111,4 +111,10 @@ and [record/refound/CARDS_part2.md](../record/refound/CARDS_part2.md).
   `network.parallel_carry_harvest`, `parallel_iono_traces` and `parallel_coupling_prepare` (each IDENTICAL to off, off IDENTICAL to main), PASS A rejected on its timing, one OpenMP team size in every region. Loop -28.9 % (field), -25.7 % (sim) against main; all six stages -48.7 % against none at 305 stations over 2 h.
   2026-11-07: a fourth key, `network.sbasis_values_first` (the S-basis completion on eigenvalues first, the rank gate reading
   them), identical; main against all four keys -41.5 % (field), -34.8 % (sim).
+- [IRDU](IRDU_user_integers_on_the_chain_2026-11-14.md): open, 2026-11-14: the user's integers on the chain's stream,
+  measured on the simulator. Pre-registered: five simulated users replay the stream with the fixing control's resolver,
+  graded against truth datum-free (fixed minus truth equal between users and constant in time except at a declared
+  discontinuity). Stage A the controls, stage B the chain on or off by the emission holds on or off on r3c, stage C one
+  event per bed ranked by its cost to the user, stage D the network's certified integers at re-hosts and a default-off
+  research switch that takes them.
 - [DRF](DRF_docs_record_folder_2026-11-09.md): open, 2026-11-09: the docs working set and one record folder: `scripts/docs_record.py` moves closed cards and uncited documents into `docs/record/` (old layout mirrored, links re-pointed, nothing rewritten); 145 of 602 files stay; rehearsed on branch `docs/record-folder`, every docs check passes; landing and the rule text wait for the author.

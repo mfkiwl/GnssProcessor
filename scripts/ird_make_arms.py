@@ -107,11 +107,20 @@ FLOOR_ON = ["network.phase_datum_eq34_rpb_prior_sigma_m=1.0"]
 # on the time link, <arm>_link: the arm as it was defined on 2026-11-09.
 RPB_IN_BLOCK = ["network.phase_datum_eq34_rpb_in_block=true"]
 A1_FAMILY =("A1", "A1k", "A1kr", "A1krh", "A1krhR", "A1krhRs", "A1krhRsm")
+# Card IRDU (the user's integers on the chain's stream): the emission holds off, so the wire is the network's own
+# estimate.  The phase-bias hold, its trip generation (off at the pinned golden's loader default, written out) and
+# the phase-clock hold.  The consumer's side of the holds (closed_loop.pb_hold_presence_flip) is a user-run setting.
+HOLDS_OFF = ["network.emit_pb_hold=false", "network.emit_pb_hold_trip_generation=false",
+             "network.emit_pb_hold_phase_clock=false"]
+# Card IRDU's arms derived from the A1 family (they carry its in-block key): arm -> the A1-family arm it extends.
+IRDU_A1_ARMS = {"A1krhRsmh": "A1krhRsm"}
 
 # name -> (knob list on top of the base, what it is)
 ARMS = {
     "G": ([], "the golden unchanged (the negative control, card IRD section 13)"),
     "R1": (SLIP_SET + SEARCH_LOG + IRD_TRACES, "reference: golden + slip set + search + traces"),
+    "R1h": (SLIP_SET + SEARCH_LOG + IRD_TRACES + HOLDS_OFF,
+            "R1 with the emission holds off (card IRDU: the chain-off wire as the network estimates it)"),
     "A0": (SLIP_SET + SEARCH_LOG + IRD_TRACES + BUNDLE_A0, "R1 + bundle A0"),
     "A0q": (SLIP_SET + SEARCH_LOG + BUNDLE_A0,
             "A0 without the IRD traces (the traces-off twin of IRD-1 gate 2)"),
@@ -193,6 +202,13 @@ ARMS = {
                  + ["network.phase_datum_eq34_family=pair",
                     'network.phase_datum_eq34_event_rows=["kept","returning","rehost","root","slip","merge_split"]'] + FLOOR_OFF + RPB_IN_BLOCK,
                  "A1krhRs + the merge and split row (IRD-4)"),
+    # Card IRDU: the chain as built with the emission holds off, the wire on which the theory predicts integer
+    # between-satellite ambiguities at a user.
+    "A1krhRsmh": (SLIP_SET + SEARCH_LOG + IRD_TRACES + BUNDLE_A0
+                  + ["network.phase_datum_eq34_family=pair",
+                     'network.phase_datum_eq34_event_rows=["kept","returning","rehost","root","slip","merge_split"]']
+                  + FLOOR_OFF + RPB_IN_BLOCK + HOLDS_OFF,
+                  "A1krhRsm with the emission holds off (card IRDU)"),
     "A0fkrhRsm": (SLIP_SET + SEARCH_LOG + IRD_TRACES + BUNDLE_A0
                   + ["network.phase_datum_eq34_rpb_prior_sigma_m=0",
                      'network.phase_datum_eq34_event_rows=["kept","returning","rehost","root","slip","merge_split"]'],
@@ -463,6 +479,10 @@ def make(a):
         # end the blanked station's file after epoch 186 and make the station leave again.  The duration
         # is set directly and the file stays whole.
         sets += duration_sets(base, a.hours)
+    # Run settings (card IRDU): not part of the arm's posture (thread caps and the like), the same on every arm a
+    # card compares, recorded apart from the arm's knob list.
+    run_sets = list(a.run_set or [])
+    sets += run_sets
     missing = unread(sets)
     if missing:
         raise SystemExit("refused: the loader does not read %s (an arm setting them would "
@@ -498,7 +518,7 @@ def make(a):
     prov["ird"] = {"golden_rev": GOLDEN_REV, "golden_path": GOLDEN[which][0],
                    "golden_sha256": GOLDEN[which][1], "bed": a.bed, "fixture": fixture,
                    "arm": a.arm, "knob_under_test": a.knob, "hours": a.hours, "rinex": rinex,
-                   "sets": sets}
+                   "sets": [kv for kv in sets if kv not in run_sets], "run_sets": run_sets}
     with open(rj, "w") as fh:
         json.dump(prov, fh, indent=2)
     return 0
@@ -569,9 +589,13 @@ def selftest():
         and sorted(n for n in ARMS if n.endswith("_floor")) == sorted(n + "_floor" for n in A1_FAMILY),
         "each A1-family arm has a floor-on variant that differs from its time-link variant in the floor's value alone, "
         "and no other arm has one")
-    chk(not any(kv.startswith("network.phase_datum_eq34_rpb_in_block") for n in ARMS if n not in A1_FAMILY
-                for kv in compose(n, "r3c")),
+    chk(not any(kv.startswith("network.phase_datum_eq34_rpb_in_block") for n in ARMS
+                if n not in A1_FAMILY + tuple(IRDU_A1_ARMS) for kv in compose(n, "r3c")),
         "no arm outside the A1 family sets the in-block key (the A0 family and the variants keep the time link)")
+    chk(all(set(compose(n, "r3c")) - set(compose(IRDU_A1_ARMS[n], "r3c")) == set(HOLDS_OFF) for n in IRDU_A1_ARMS)
+        and set(compose("R1h", "r3c")) - set(compose("R1", "r3c")) == set(HOLDS_OFF)
+        and len(compose("R1h", "r3c")) == len(compose("R1", "r3c")) + len(HOLDS_OFF),
+        "card IRDU's holds-off arms are their parent arm plus the three hold keys and nothing else")
     chk(set(compose("A1_floor", "r3c")) - set(compose("A0", "r3c"))
         == {"network.phase_datum_eq34_family=pair"} | set(FLOOR_ON),
         "A1_floor is A0 plus the pair family knob, the floor written out at its default (A1 before the rulings)")
@@ -785,6 +809,8 @@ def main():
     m.add_argument("--hours", type=float, default=2.0)
     m.add_argument("--knob", default=None, help="the one knob under test, key=value")
     m.add_argument("--drop-station", action="append")
+    m.add_argument("--run-set", action="append",
+                   help="a run setting outside the arm's posture (a thread cap), key=value, repeatable")
     m.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     if a.selftest:
