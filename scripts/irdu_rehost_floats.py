@@ -14,7 +14,10 @@ arc and epoch, with both bands:
     e_1 = float_1 - N~_1, e_2 = float_2 - N~_2, e_WL = e_1 - e_2        (cycles, unwrapped)
 
 Rounding the carried float keeps the frame on a band when |e| < 0.5 (the wide lane: |e_WL| < 0.5; the joint
-reading: both bands).  The same is read on every chord row of the table (the base rate), by the chord's age in
+reading: both bands).  The card's N_1 (section 2: the N_1 of the ionosphere-free row with the wide lane rounded) is
+read beside the per-band e_1: n = (f1 n1 - f2 n2 - f2 round(n1 - n2)) / (f1 - f2), its error e_NL = n - N~_1, which
+is right when the wide lane rounds right and |e_NL| < 0.5 (an ionosphere-like error of the two floats cancels in it);
+its formal sigma is that of (f1 n1 - f2 n2) / (f1 - f2).  The same is read on every chord row of the table (the base rate), by the chord's age in
 the table (time since the start of its unbroken run of rows), so that the re-hosts can be read against chords of
 the same age.  The formal sigma of each float (sqrt q, the producer's unscaled covariance) and the certifier's
 reading (kChainCertSigmaScale 3, determined at a conditional sigma of 0.05 cycle) are printed beside it.
@@ -39,6 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ird_frame_census as IFC  # noqa: E402  (the chain traces and the frame algebra)
 
 AGE_BINS_MIN = ((0, 5), (5, 15), (15, 30), (30, 60), (60, 1e9))
+F1, F2 = 1575.42e6, 1227.60e6   # GPS L1, L2 (the r3c family is GPS L1C + L2W)
 CERT_SCALE = 3.0           # include/network/solve/ChainFrame.hpp, kChainCertSigmaScale
 CERT_DET_SIGMA = 0.05      # kChainCertDeterminedSigmaCyc
 
@@ -98,12 +102,18 @@ def summarize(rows):
     s1 = np.array([r["s1"] for r in rows])
     sw = np.array([r["sw"] for r in rows])
     both = np.array([abs(r["e1"]) < 0.5 and abs(r["e1"] - r["e2"]) < 0.5 for r in rows])
+    enl = np.array([abs(r["enl"]) for r in rows])
+    snl = np.array([r["snl"] for r in rows])
+    card = np.array([r["wl_ok"] and abs(r["enl"]) < 0.5 for r in rows])
     return {"n": len(rows),
             "wl_p50": float(np.percentile(ew, 50)), "wl_p90": float(np.percentile(ew, 90)),
             "wl_round_ok": float(np.mean(ew < 0.5)), "wl_within_025": float(np.mean(ew < 0.25)),
             "n1_p50": float(np.percentile(e1, 50)), "n1_p90": float(np.percentile(e1, 90)),
             "n1_round_ok": float(np.mean(e1 < 0.5)), "n1_within_025": float(np.mean(e1 < 0.25)),
             "both_round_ok": float(np.mean(both)),
+            "nl_p50": float(np.percentile(enl, 50)), "nl_p90": float(np.percentile(enl, 90)),
+            "card_round_ok": float(np.mean(card)), "sigmanl_p50": float(np.percentile(snl, 50)),
+            "znl_p50": float(np.percentile(enl / np.maximum(snl, 1e-9), 50)),
             "sigma1_p50": float(np.percentile(s1, 50)), "sigmawl_p50": float(np.percentile(sw, 50)),
             "z1_p50": float(np.percentile(e1 / np.maximum(s1, 1e-9), 50)),
             "zwl_p50": float(np.percentile(ew / np.maximum(sw, 1e-9), 50))}
@@ -112,18 +122,28 @@ def summarize(rows):
 def fmt(s):
     if not s.get("n"):
         return "n 0"
-    return ("n %4d | WL |e| p50 %.3f p90 %.3f, round right %5.1f %%, within 0.25 %5.1f %% | N1 |e| p50 %.3f p90 %.3f, "
-            "round right %5.1f %% | both %5.1f %% | formal sigma N1 %.3f WL %.3f | |e|/sigma p50 N1 %.2f WL %.2f"
-            % (s["n"], s["wl_p50"], s["wl_p90"], 100 * s["wl_round_ok"], 100 * s["wl_within_025"], s["n1_p50"],
-               s["n1_p90"], 100 * s["n1_round_ok"], 100 * s["both_round_ok"], s["sigma1_p50"], s["sigmawl_p50"],
-               s["z1_p50"], s["zwl_p50"]))
+    return ("n %4d | WL |e| p50 %.3f p90 %.3f, right %5.1f %% | N1 (IF row, WL rounded) |e| p50 %.3f p90 %.3f, WL and "
+            "N1 right %5.1f %% | band 1 alone |e| p50 %.3f, both bands right %5.1f %% | formal sigma WL %.3f N1(IF) %.3f "
+            "band1 %.3f | |e|/sigma p50 WL %.2f N1(IF) %.2f"
+            % (s["n"], s["wl_p50"], s["wl_p90"], 100 * s["wl_round_ok"], s["nl_p50"], s["nl_p90"],
+               100 * s["card_round_ok"], s["n1_p50"], 100 * s["both_round_ok"], s["sigmawl_p50"], s["sigmanl_p50"],
+               s["sigma1_p50"], s["zwl_p50"], s["znl_p50"]))
+
+
+def card_n1(f1c, f2c):
+    """The card's N_1 float (section 2): the ionosphere-free row with the wide lane rounded."""
+    return (F1 * f1c - F2 * f2c - F2 * round(f1c - f2c)) / (F1 - F2)
 
 
 def row_of(c, e1, e2, age_min):
     s1 = math.sqrt(max(c.q11, 0.0))
     sw = math.sqrt(max(c.q11 + c.q22 - 2.0 * c.q12, 0.0))
+    snl = math.sqrt(max(F1 * F1 * c.q11 - 2.0 * F1 * F2 * c.q12 + F2 * F2 * c.q22, 0.0)) / (F1 - F2)
+    z1, z2 = c.f1 - e1, c.f2 - e2          # the frame truth of the two bands (integers)
+    wl_ok = round(c.f1 - c.f2) == round(z1 - z2)
     return {"tow": c.tow, "sta": c.sta, "sat": c.sat, "f1": c.f1, "f2": c.f2, "e1": e1, "e2": e2,
-            "s1": s1, "sw": sw, "age_min": age_min, "cert_sigma1": CERT_SCALE * s1}
+            "s1": s1, "sw": sw, "snl": snl, "wl_ok": wl_ok, "enl": card_n1(c.f1, c.f2) - z1,
+            "age_min": age_min, "cert_sigma1": CERT_SCALE * s1}
 
 
 def analyse(run, fixture, systems=("G",), list_n=12):
@@ -218,9 +238,9 @@ def analyse(run, fixture, systems=("G",), list_n=12):
           % (cert_ok, len(out_rows), float(np.percentile([r["cert_sigma1"] for r in out_rows], 50)) if out_rows else float("nan")))
     print("first %d re-host arcs:" % list_n)
     for r in out_rows[:list_n]:
-        print("  tow %.0f %s %s age %.1f min: e1 %+.3f e2 %+.3f eWL %+.3f (sigma N1 %.3f, WL %.3f), pin steps %s"
-              % (r["rehost_tow"], r["sta"], r["sat"], r["age_min"], r["e1"], r["e2"], r["e1"] - r["e2"], r["s1"],
-                 r["sw"], r["pin_steps"]))
+        print("  tow %.0f %s %s age %.1f min: e1 %+.3f e2 %+.3f eWL %+.3f eN1(IF) %+.3f (sigma WL %.3f, N1(IF) %.3f), "
+              "pin steps %s" % (r["rehost_tow"], r["sta"], r["sat"], r["age_min"], r["e1"], r["e2"], r["e1"] - r["e2"],
+                                r["enl"], r["sw"], r["snl"], r["pin_steps"]))
     res["rows"] = out_rows
     return res
 
@@ -233,12 +253,19 @@ def selftest():
         print(("PASS " if c else "FAIL ") + msg)
         ok &= bool(c)
 
-    rows = [{"e1": 0.1, "e2": 0.0, "s1": 0.1, "sw": 0.1}, {"e1": 0.6, "e2": 0.0, "s1": 0.1, "sw": 0.1},
-            {"e1": 0.2, "e2": -0.4, "s1": 0.1, "sw": 0.1}]
+    base = {"s1": 0.1, "sw": 0.1, "snl": 0.1, "enl": 0.0, "wl_ok": True}
+    rows = [dict(base, e1=0.1, e2=0.0), dict(base, e1=0.6, e2=0.0, wl_ok=False), dict(base, e1=0.2, e2=-0.4, wl_ok=False)]
     s = summarize(rows)
     chk(abs(s["n1_round_ok"] - 2 / 3) < 1e-12, "N1 rounding right on 2 of 3 rows")
     chk(abs(s["wl_round_ok"] - 1 / 3) < 1e-12, "WL rounding right on 1 of 3 rows (0.1, 0.6, 0.6)")
     chk(abs(s["both_round_ok"] - 1 / 3) < 1e-12, "both bands right on 1 of 3 rows")
+    chk(abs(s["card_round_ok"] - 1 / 3) < 1e-12, "the card's N_1 right only where the wide lane is right")
+    # an ionosphere-like error (e2 = (f1/f2) e1, the dispersive ratio of a phase advance in cycles) cancels in the
+    # ionosphere-free row: floats N + e with N1 = 10, N2 = 7
+    e1 = 0.4
+    e2 = e1 * F1 / F2
+    chk(abs(card_n1(10 + e1, 7 + e2) - 10) < 1e-9 and round((10 + e1) - (7 + e2)) == 3,
+        "an ionosphere-like error of the two floats cancels in the card's N_1")
     chk(age_bin(4.9) == (0, 5) and age_bin(5.0) == (5, 15) and age_bin(500) == (60, 1e9), "age bins")
     return ok
 

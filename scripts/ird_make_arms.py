@@ -394,6 +394,15 @@ if os.path.isfile(IRDU_NR_ARCS):
     BEDS["irdu_nr"] = ("sim", "runs/simarl_r3c", ARL_GPS_ONLY,
                        "IRDU no re-seat: r3c with only the arcs tracked through the whole 2 h (no rise, set, return "
                        "or slip)", irdu_nr_ops())
+    # section 11 C: one injected re-seat on the no-re-seat bed at 35 min (epoch 71, TOW 263130, the event rule of
+    # section 11), the arc blanked to the run end; targets from the bed's tree (root S30000SIM, unchanged over the run)
+    IRDU_C_TOW = 263130
+    BEDS["irdu_nr_c1"] = ("sim", "runs/simarl_r3c", ARL_GPS_ONLY,
+                          "IRDU C1: irdu_nr, G24 (7 vertices below it) loses its host S27000SIM at epoch 71",
+                          irdu_nr_ops(["strip;types=???;stations=S27000SIM;sats=G24;tow_from=%d" % IRDU_C_TOW]))
+    BEDS["irdu_nr_c2"] = ("sim", "runs/simarl_r3c", ARL_GPS_ONLY,
+                          "IRDU C2: irdu_nr, S02000SIM (two child satellites) loses its parent G06 at epoch 71",
+                          irdu_nr_ops(["strip;types=???;stations=S02000SIM;sats=G06;tow_from=%d" % IRDU_C_TOW]))
 
 
 def sha256_bytes(b):
