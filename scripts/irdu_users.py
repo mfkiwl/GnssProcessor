@@ -8,7 +8,7 @@ several stations of the bed.
 
 <net tag> is the network run's tag (folder _rap_<net tag> under RAPID_RUNS_ROOT, default
 D:/GnssProcessorSupport/runs_nom).  One user run per user and variant, folder
-_rap_irdu_u_<net tag less its irdu_ prefix>_<variant>_<user, lower case, first four characters>.
+_rap_irdu_u_<net tag less its irdu_ prefix>_<variant>_<user, lower case, first three characters>.
 
 Each user run is a consumer replay (network.closed_loop.replay_products_path = the network run's products.txt) of
 the network run's own arm.json with the recipe of the fixing control (card ARN; the field tool nw_arms.py):
@@ -52,7 +52,7 @@ def net_dir(tag):
 
 def user_dir(tag, variant, user):
     short = tag[5:] if tag.startswith("irdu_") else tag
-    return RUNS / ("_rap_irdu_u_%s_%s_%s" % (short, variant, user[:4].lower()))
+    return RUNS / ("_rap_irdu_u_%s_%s_%s" % (short, variant, user[:3].lower()))
 
 
 def fixture_of(net):

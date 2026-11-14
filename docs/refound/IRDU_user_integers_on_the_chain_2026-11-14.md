@@ -93,3 +93,26 @@ A default-off key on this branch: a re-host whose new edge the previous chord ta
 (1) Double differences do not depend on the reference: how many of the integers the events of stage C need were determined and right in the quiet stretches before them. (2) A truthful per-key integer declaration read from the chain: how many of stage C's wrong user fixes it would have prevented (measure only).
 
 <!-- Results are appended below this line under dated headings. -->
+
+## 9. 2026-11-14: stage A, the controls
+
+**What ran.** The network runs use this branch's Release build at `f49f2b1` (main `43ec792` plus the scripts of the pre-registration), copied as `build/x64-Release/gnss_processor_irdu_net0.exe` (sha256[:16] `399f1467d34fb82d`), with the run settings of the STATUS block. Smoke first: arms G and A1krhRsmh on r3c for 0.1 h (exit 0, 13 of 13 epochs emitted each), and two users on the second (exit 0, the resolver log writes CLFRAC). Arm G on r3c for 2 h: exit 0, 240 of 240 epochs. The truth wires are `_rap_irdu_tw_r3c` and `_rap_irdu_twg_r3c` (`scripts/simnet_truth_wire.py`, template G's `products.txt`; the second with `--integer-gauge 7`). Every one of the 30 user runs exits 0. Grades: `runs_nom/_irdu_grades/a_*.json`.
+
+| control | FRAC 30 to 120 min: WL, N_1 | FRAC settled (90 to 120 min): WL, N_1 | PAIRS within 0.10: 30 min, settled | HELD pooled (per user) | WRONG, UNRESOLVED (compared pair-epochs) | steps | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A-1 truth wire | 0.060, **0.160** | 0.057, 0.081 | 32.8 % of 122, 73.6 % of 53 | 86.3 % (72.6 to 97.5) | 0, 0 (3 440) | 0 | **FAILED as written** (the N_1 clause, 0.160 against 0.08); the other clauses pass |
+| A-2 truth wire, integer gauge | as A-1 | as A-1 | as A-1 | as A-1 | 0, 0 (3 440) | 0 | as A-1 |
+| A-3 golden posture (arm G) | 0.248, 0.249 | 0.304, 0.243 | 18.9 %, 13.2 % | 9.8 % (0.0 to 40.4) | 0, 0 (58) | 0 | PASS |
+
+**Readings.**
+
+1. **The integer readings are exact on an integer stream.** Every held integer at every user minus the truth is the stream's own offset: (0, 0) on all 754 held satellite-epochs of SZZ000SIM on A-1, and on A-2 the gauge differences (for instance (22, 61) and (-31, 63)) with no disagreement between users. A-2 reproduces A-1 in every fraction and held share, as integer offsets must. The truth convention (slip-accumulated integer plus the wind-up branch of the user's arc) needs no correction.
+2. **The users' float narrow lane converges slowly on r3c.** On the truth wire the held-out user's N_1 fraction by 15 min bins from its first epoch reads 0.30, 0.20, 0.29, 0.17, 0.12, 0.16, 0.05 and 0.05 (the wide lane 0.09 to 0.02); the settled N_1 per user is 0.051 (SZZ000SIM), 0.056, 0.063, 0.102 and 0.133. No stream can meet a fraction bar of 0.08 over 30 to 120 min on this bed, nor the 90 % PAIRS clause of section 4 (33 % on the truth wire in that window, 74 % settled). The fixing user nonetheless holds 86 % of the wide-lane pair-epochs from minute 42 to 57, all correct: the resolver's wide lane and ionosphere-free row decide sooner than the per-pair float fraction settles.
+3. **The golden stream reads at the null and still gets fixes.** Two users hold integers on it (S32000SIM 40.4 %, S27000SIM 6.4 %): the ratio test accepted near-integer floats of a non-integer stream. The fixed position is worse than the float where it held (hour 2: S48000SIM 86 against 18 mm, S32000SIM 81 against 28 mm). WRONG (a) sees nothing there because those pairs are rarely held by two users at once (58 compared pair-epochs): on a non-integer stream the readings that speak are FRAC and the position, as section 2 says.
+
+**Re-registration (2026-11-14, a decision of this session, flagged for the author's review).** By section 3's rule the instrument is void for fraction bars over 30 to 120 min on r3c, and the card stops until it is repaired. The repair re-registers the window and the bars of section 4 against the truth wire on the same bed and window. It is written before any stage-B cell is graded at the user (the stage-B network runs had finished and their user replays were running; nothing of them had been read):
+
+1. FRAC and PAIRS bars are read in the settled window, 90 to 120 min after each user's first epoch; the 30 to 120 min window is reported beside it.
+2. The theory's cell passes when its settled pooled WL and N_1 means are at most the truth wire's settled means plus 0.05 cycle (r3c: 0.107 and 0.131), its settled PAIRS share within 0.10 is at least the truth wire's less 15 points (r3c: 58.6 %), its pooled HELD is at least half the truth wire's (r3c: 43.2 %), and WRONG and UNRESOLVED are 0. A null cell reads a settled pooled N_1 mean of at least 0.20.
+3. The microscope column is read against its own truth wire (`_rap_irdu_tw_mic`, template the products of `_rap_irdu_ch_mic`, fixture r1c), with bars of the same form.
+4. The record keeps A-1's and A-2's fraction clause FAILED as written; their integer clauses PASS, and A-3 PASSES.

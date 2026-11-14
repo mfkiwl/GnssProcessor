@@ -374,14 +374,14 @@ def user_runs(tag, users):
     return {u: {v: IU.user_dir(tag, v, u) for v in ("obs", "fix")} for u in users}
 
 
-def grade_cell(tag, users, from_min=30.0):
+def grade_cell(tag, users, from_min=30.0, settled_min=90.0):
     net = RUNS / ("_rap_" + tag)
     runs = user_runs(tag, users)
     meta = json.load(open(next(iter(runs.values()))["obs"] / "irdu_user.json"))
     fixture = Path(meta["fixture"])
     decl, datum = stream_declarations(net / "products.txt")
     res = {"tag": tag, "fixture": fixture.as_posix(), "users": {}, "pooled": {}}
-    pooled_w, pooled_n = [], []
+    pooled_w, pooled_n, pooled_ws, pooled_ns = [], [], [], []
     e_by_user = {}
     for u in users:
         r_obs, r_fix = runs[u]["obs"], runs[u]["fix"]
@@ -395,6 +395,13 @@ def grade_cell(tag, users, from_min=30.0):
             row["pairs"] = pair_stats(pair_fractions(cl, (t_first or 0) + 60.0 * from_min))
             pooled_w += [x[2] for x in ff]
             pooled_n += [x[3] for x in ff]
+            # The settled window (from settled_min minutes after the user's first epoch).
+            fs = float_fractions(cl, (t_first or 0) + 60.0 * settled_min)
+            row["frac_wl_s"] = frac_stats([x[2] for x in fs])
+            row["frac_n1_s"] = frac_stats([x[3] for x in fs])
+            row["pairs_s"] = pair_stats(pair_fractions(cl, (t_first or 0) + 60.0 * settled_min))
+            pooled_ws += [x[2] for x in fs]
+            pooled_ns += [x[3] for x in fs]
             row["pos_obs"] = hourly(r_obs)
         if (r_fix / "logs").exists():
             cl, wl = parse_resolver(r_fix)
@@ -410,6 +417,17 @@ def grade_cell(tag, users, from_min=30.0):
     nwithin = sum(r.get("pairs", {}).get("pairs", 0) * r.get("pairs", {}).get("w010", 0.0)
                   for r in res["users"].values())
     res["pooled"]["pairs"] = {"pairs": npairs, "w010": nwithin / npairs if npairs else None}
+    res["pooled"]["frac_wl_s"] = frac_stats(pooled_ws)
+    res["pooled"]["frac_n1_s"] = frac_stats(pooled_ns)
+    npairs = sum(r.get("pairs_s", {}).get("pairs", 0) for r in res["users"].values())
+    nwithin = sum(r.get("pairs_s", {}).get("pairs", 0) * r.get("pairs_s", {}).get("w010", 0.0)
+                  for r in res["users"].values())
+    res["pooled"]["pairs_s"] = {"pairs": npairs, "w010": nwithin / npairs if npairs else None}
+    res["settled_min"] = settled_min
+    pe = sum(r.get("held", {}).get("pair_epochs", 0) for r in res["users"].values())
+    ph = sum((r.get("held", {}).get("held") or 0.0) * r.get("held", {}).get("pair_epochs", 0)
+             for r in res["users"].values())
+    res["pooled"]["held"] = {"pair_epochs": pe, "held": ph / pe if pe else None}
     if e_by_user:
         per_user, wrong_list, steps, cons_steps, consensus = grade_wrong(e_by_user, decl, datum)
         for u in per_user:
@@ -461,6 +479,16 @@ def print_cell(res):
               pct(p.get("pairs", {}).get("w010")), p.get("pairs", {}).get("pairs", 0),
               w.get("held_pair_epochs", 0), w.get("compared", 0), w.get("wrong", 0), w.get("unresolved", 0),
               w.get("steps_declared", 0), w.get("steps_undeclared", 0)))
+    print("    pooled HELD %s %% of %d wide-lane pair-epochs" % (pct(p.get("held", {}).get("held")),
+                                                            p.get("held", {}).get("pair_epochs", 0)))
+    fws, fns = p.get("frac_wl_s", {}), p.get("frac_n1_s", {})
+    print("    settled (from %.0f min) | WL %s (%s %% <.10) | N1 %s (%s %% <.10, %s %% <.15) | n %d | pairs within 0.10 "
+          "%s %% of %d | per user N1: %s" % (
+              res.get("settled_min", 0), "%.3f" % fws["mean"] if fws.get("n") else "-", pct(fws.get("w010")),
+              "%.3f" % fns["mean"] if fns.get("n") else "-", pct(fns.get("w010")), pct(fns.get("w015")),
+              fws.get("n", 0), pct(p.get("pairs_s", {}).get("w010")), p.get("pairs_s", {}).get("pairs", 0),
+              " ".join("%s %s" % (u[:3], "%.3f" % r["frac_n1_s"]["mean"] if r.get("frac_n1_s", {}).get("n") else "-")
+                       for u, r in res["users"].items())))
     if res.get("consensus_steps") is not None:
         cs = res["consensus_steps"]
         print("    consensus offsets: %d satellite pairs; %d changes in time (%d declared)"
@@ -523,6 +551,7 @@ def main():
     ap.add_argument("tag", nargs="?")
     ap.add_argument("--users", default=None)
     ap.add_argument("--from-min", type=float, default=30.0)
+    ap.add_argument("--settled-min", type=float, default=90.0)
     ap.add_argument("--json", default=None)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -530,7 +559,7 @@ def main():
         return selftest()
     import irdu_users as IU
     users = a.users.split(",") if a.users else IU.USERS
-    res = grade_cell(a.tag, users, a.from_min)
+    res = grade_cell(a.tag, users, a.from_min, a.settled_min)
     print_cell(res)
     if a.json:
         json.dump(res, open(a.json, "w"), indent=1, default=str)
