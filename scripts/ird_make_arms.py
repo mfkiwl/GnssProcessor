@@ -374,6 +374,27 @@ BEDS = {
                         "IRD msr's control on the microscope", pure_cut_ops(CUT_ROOT, CUT_ROOT_BRIDGE, split=False)),
 }
 
+# Card IRDU section 11 B: the no-re-seat bed, rung 3c with only the arcs the network tracked through the whole 2 h
+# (scripts/irdu_static_bed.py writes the arcs file from the post-fit rows of arm R1 on r3c; the arc of the scripted
+# slip, S43000SIM G22, is dropped as well).  One whole-run strip op per station.
+IRDU_NR_ARCS = ROOT + "/config/sim/irdu/irdu_nr_arcs.json"
+
+
+def irdu_nr_ops(extra=()):
+    """The strip ops of the no-re-seat bed (one per station), then `extra` (an injected event); [] without the file."""
+    if not os.path.isfile(IRDU_NR_ARCS):
+        return []
+    with open(IRDU_NR_ARCS) as fh:
+        arcs = json.load(fh)
+    return ["strip;types=???;stations=%s;sats=%s" % (st, ",".join(sats))
+            for st, sats in sorted(arcs["strip"].items()) if sats] + list(extra)
+
+
+if os.path.isfile(IRDU_NR_ARCS):
+    BEDS["irdu_nr"] = ("sim", "runs/simarl_r3c", ARL_GPS_ONLY,
+                       "IRDU no re-seat: r3c with only the arcs tracked through the whole 2 h (no rise, set, return "
+                       "or slip)", irdu_nr_ops())
+
 
 def sha256_bytes(b):
     return hashlib.sha256(b).hexdigest()
