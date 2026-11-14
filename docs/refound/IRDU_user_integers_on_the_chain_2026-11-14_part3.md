@@ -33,3 +33,39 @@ Sections 1 to 10 are in [IRDU](IRDU_user_integers_on_the_chain_2026-11-14.md), s
 **Decisions made in the author's absence, for review.** (1) The instrument extends the existing simulation-only oracle pin instead of adding a second truth-fed mechanism. (2) A link's ring is the larger depth of its two vertices. (3) Q1 runs before the rings, in the order the requesting session set. (4) At the users the thin bed is read against a truth wire on the bed's own satellites. (5) The frame file's integers stay valid while every chain pin on a listed link sits at its integer; a re-host onto a link at its integer keeps them. (6) Q4 on r3c is not built.
 
 **Limits.** No integer search; nothing armed; no reference configuration or ledger verdict changed; the hold of 2026-11-02 on the certified re-host branch stands; the do-not-build on integer resolution in the network stands beyond this measurement.
+
+### 12.1 2026-11-14: Q1, every link at its true integer: PASS on the stream at every depth and at the users against the bed's truth wire
+
+**What ran.** `_rap_irdu_q1_nr3`: A1krhRsmh with `fpin_nr3_all` on `irdu_nr`, 2 h, on `gnss_processor_irdu_fp2.exe` with the run settings of the STATUS block; exit 0, 240 of 240 epochs. The bed's truth wire `_rap_irdu_tw_nr3` (`scripts/simnet_truth_wire.py`, template the products of `_rap_irdu_zw_nr3`; 29 corrected satellites, none dropped). All 20 user runs exit 0. Grades: `runs_nom/_irdu_grades/s12q1_*`.
+
+**Gate Q1-G0: passes.** The pin's run end: 240 active epochs, 87 048 prior rows injected (372 chord rows on 234 epochs, after the leveling warm-up), 372 links first pinned and none released; 41 760 checks found every tree link at its integer (174 rows, every epoch); no tree link of the file left the chain's pins; no link was released at a true slip; the frame stayed the file's for the whole run. Gate G-B0 holds: 174 births at the first epoch, every later edge row kept, no CHAIN row. The 2 604 arc-epochs "pinned without a carried ambiguity" are the first seven epochs, before the leveling carry exists.
+
+**STREAM** (per-pair offset p50 against truth by depth class; Q1 against the adopted arm's reference row `_rap_irdu_zw_nr3`):
+
+| channel, depth class | 15 to 30 min: Q1 / reference | 60 to 75 min | 105 to 120 min |
+| --- | --- | --- | --- |
+| D_NL, 1 | 0.021 / 0.080 | 0.020 / 0.048 | 0.025 / 0.023 |
+| D_NL, 3 | 0.016 / 0.155 | 0.015 / 0.094 | 0.013 / 0.048 |
+| D_NL, 5 | 0.030 / 0.184 | 0.015 / 0.091 | 0.015 / 0.075 |
+| D_WL, 1 | 0.079 / 0.131 | 0.031 / 0.035 | 0.028 / 0.037 |
+| D_WL, 3 | 0.085 / 0.131 | 0.051 / 0.064 | 0.049 / 0.052 |
+| D_WL, 5 | 0.069 / 0.123 | 0.051 / 0.081 | 0.048 / 0.073 |
+| step p95, every pair, D_WL; D_NL | 0.019 / 0.030; 0.005 / 0.110 | 0.006 / 0.009; 0.005 / 0.028 | 0.003 / 0.005; 0.005 / 0.011 |
+
+Card IRD's stream bars at their original values over hour 2 (pre-hold, 48 720 pair-epochs): D_WL p50 0.051 (depth 1: 0.033, 3: 0.052, 5: 0.052) with 100 % of pair-epochs within 0.20; D_NL p50 0.020 in every depth class with 100 % within 0.25 (p99 0.09); the Melbourne-Wubbena channel p50 0.012. W-WL and W-NL pass in every depth class (the reference row: D_WL 0.067, 96.2 %; D_NL 0.081, 92.9 %). The phase-only wide lane still reads the null at every depth (0.18 to 0.27), as in section 11.2: the per-satellite shift of the code datum goes into a user's ionosphere, so the reading through the code biases is the one a user sees.
+
+**USERS** (section 9's readings; the bed's truth wire is the control):
+
+| stream | FRAC settled WL, N_1 (per user N_1) | PAIRS settled | HELD (per user) | WRONG, UNRESOLVED (compared) | float 3D h1, h2 (mm) |
+| --- | --- | --- | --- | --- | --- |
+| the bed's truth wire | 0.156, 0.186 (0.065, 0.065, 0.162, 0.322, 0.327) | 52.8 % of 53 | 67.5 % (95.1, 96.2, 58.5, 0.0, 61.7) | 0, 0 (2 747) | 166, 26 |
+| Q1, every link at its integer | 0.140, 0.193 (0.113, 0.190, 0.260, 0.174, 0.230) | 24.5 % of 53 | 50.2 % (92.1, 92.7, 39.8, 4.9, 5.6) | 0, 0 (1 357) | 802, 129 |
+| the reference row | 0.141, 0.219 | 18.9 % of 53 | 24.5 % | 0, 106 (106) | 1 052, 127 |
+
+(users in the order SZZ000SIM, S48000SIM, S40000SIM, S27000SIM, S32000SIM)
+
+**Verdict.** On the stream Q1 PASSES its rule: W-WL and W-NL pass in every depth class over hour 2, and D_NL p50 is at most 0.025 cycle at every depth at 105 to 120 min. The bed's truth wire itself fails section 9's absolute bars (settled WL 0.156, N_1 0.186: two of the five users, S27000SIM and S32000SIM, read about 0.32 on N_1 even on truth), so by section 12's rule the user verdict is read against that truth wire only. At the users Q1 PASSES that rule: settled WL 0.140 and N_1 0.193 within the truth wire's 0.156 and 0.186 plus 0.05, HELD 50.2 % against half the truth wire's 67.5 %, and no wrong or unresolved integer in 1 357 compared pair-epochs (where the reference row had 106 unresolved of 106).
+
+**What Q1 shows.** With every link at its integer, the stream's narrow lane is at the truth level at every depth within the first 15 to 30 min (0.02 to 0.03 cycle), and depth stops mattering: the wet delay and the tree's code no longer set the realization once each satellite's and receiver's biases rest on all of their links. The wide lane improves too (depth 5: 0.048 against 0.073 at 2 h) but stays near 0.05 cycle at depths 3 and 5, while the Melbourne-Wubbena channel reads 0.012: what is left on the wide lane through the code is the stream's code biases (a 3 cm geometry-free inconsistency between code and phase moves it by 0.05 cycle), not its integers. At the users the integers are right and held at the two well-placed users (SZZ000SIM and S48000SIM, 92 % held), as on truth. The float position is the gap: 129 mm in hour 2 against 26 mm on the truth wire with the same satellites (802 against 166 mm in hour 1), so something other than the phase's integers, most likely the stream's code clocks or code biases, still limits a float user here; not traced.
+
+**Not verified.** One bed, thin (61 % of r3c's arcs removed, three satellites without corrections), 2 h; four of the five users are network stations; the float position's gap to the truth wire is not traced; card IRD's K-a needs at least 1 000 settled determined integers per held-out station (here 670 and 658 compared pair-epochs at the two holding users, 0 wrong); the per-depth shares of the W bars are read from the pooled shares (100 %), the split printing p50 only.
