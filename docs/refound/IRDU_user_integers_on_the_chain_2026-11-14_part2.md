@@ -5,7 +5,7 @@
 - **id:** IRDU-part2
 - **topic:** network-vehicle
 - **status:** open
-- **summary:** Section 11 of card IRDU (2026-11-14), moved here verbatim on 2026-11-14 because that file reached the 60 KB bar: the author's question why the receiver phase bias is estimated fresh each epoch although carried, measured on the simulator (A, the carried float at each re-host against truth; B, a bed with no re-seat; C, one injected re-seat; D, the receiver bias's random walk; E not run); then sections 11.3 and 11.4, the wet delay carried as the current reference configuration carries it, and section 11.2's re-seat cost read again against truth.
+- **summary:** Section 11 of card IRDU (2026-11-14), moved here verbatim on 2026-11-14 because that file reached the 60 KB bar: the author's question why the receiver phase bias is estimated fresh each epoch although carried, measured on the simulator (A, the carried float at each re-host against truth; B, a bed with no re-seat; C, one injected re-seat; D, the receiver bias's random walk; E not run); then sections 11.3 and 11.4, the wet delay carried as the current reference configuration carries it, and section 11.2's re-seat cost read again against truth; section 11.5, the author's ruling of 2026-11-14 that the chain's simulator arms carry the wet delay ("Yes, adopt it"), the adopted arms with their `_nozwd` variants, the gate (four reproductions IDENTICAL) and the adopted arm's reference rows.
 - **source:** [IRDU](IRDU_user_integers_on_the_chain_2026-11-14.md) sections 2, 9 and 10 (the instrument, its re-registered bars and the trace this section follows); the header and Outcome of that card summarize this section
 
 Sections 1 to 10 are in [IRDU](IRDU_user_integers_on_the_chain_2026-11-14.md). Results of this section are appended below.
@@ -216,3 +216,40 @@ The cost against truth is the moved subtree's wide lane: 0.03 to 0.06 cycle abov
 **Not verified.** One bed family, 2 h arms. B carries 61 % fewer arcs than r3c and three satellites without corrections, and the users' failure on B with the group (float 127 mm in hour 2, holding users disagreeing) is not traced. The against-truth reading of C uses windows of 10 to 20 min (20 to 40 epochs) on 55 to 81 pairs. On r3c the group leaves the wide lane slightly worse at depth 5 (0.156 against 0.134), not traced.
 
 **Decisions made on the way, for review.** (1) The four keys are taken as one change, because the ledger arms them only together (`--knob-group zwd_set`; no arm definition changed). (2) The addendum (C1 with the group) is an addition of this session, pre-registered before it ran. (3) Section 11.2's C reading is corrected by a dated annotation against truth; its table and sentences are not rewritten. (4) Card IRD's W bars are read at their original values, because the frozen bars of IRDB section 3.6 sit above the null. (5) IRDG's "re-pinning that is a decision of its own" is read as its section 7.7 item 1's "integers fixed in the frame".
+
+### 11.5 2026-11-14: the author's ruling: the chain's simulator arms carry the wet delay
+
+**The ruling.** The question as put to the author by the requesting session, after section 11.4 was re-graded there and relayed: "Should the chain's simulator tests carry the wet delay from now on?" The author's answer, verbatim: "Yes, adopt it".
+
+**The scope, as the requesting session reads it (a reading, not the author's words).** The research arms of the chain on the simulator: arm A1 and its descendants in `scripts/ird_make_arms.py`, as with the adoption of `network.phase_datum_eq34_rpb_in_block` on 2026-11-10 (card IRDG section 8). It is not a change of any reference configuration (they already arm the set), not a ledger verdict, and not an observed-data arm (card IRD holds those until IRD-6). This card reads card IRDU's holds-off arm A1krhRsmh as a descendant (it is A1krhRsm with the emission holds off), so it takes the set too.
+
+**What changes.**
+
+- `scripts/ird_make_arms.py`: arms A1, A1k, A1kr, A1krh, A1krhR, A1krhRs, A1krhRsm and A1krhRsmh append `ZWD_SET`, the four keys of section 11.3 exactly as the current reference configuration arms them (`network.carry_zwd` true, `network.carry_zwd_in_block` true, `network.zwd_carry_q` 5e-08, `network.phase_colour_state` true), after their own keys. Each keeps a variant without the set, **`<arm>_nozwd`**: the arm as defined from 2026-11-10 to 2026-11-14, which reproduces every reading made on those arms until this ruling. The variants `<arm>_link` and `<arm>_floor` keep their dates' definitions, without the set. The setting group `zwd_set` of section 11.3 is now `ZWD_SET` itself, so the cases `_rap_irdu_zw_*` are the adopted arm; the script refuses the group on an arm that already carries it (a case that would change nothing) and takes it on the `_nozwd` variants. The selftest checks that each adopted arm is its `_nozwd` variant followed by the four keys in order, that no other arm carries a key of the set, that the `_link` variants are the `_nozwd` arms less the in-block key alone, and that the four values equal the current reference configuration's.
+- `scripts/irdg_run.py` (card IRDG's arms): its group `adopted` makes `<arm>_nozwd`, the arms card IRDG section 8 checked, under the same run tags; its selftest compares the key arm with `A1krhRsm_nozwd`.
+- Unchanged: the loader defaults, every reference configuration (`make_golden_config.py --verify` passes), the ledger, the A0 family and the beds.
+
+**The gate (before the commit).** On the build of section 9 with the run settings of the STATUS block, each run 2 h, exit 0, 240 of 240 epochs, compared with `scripts/nom_td_gate.py --whole --mask-time` (the configurations with the run directory masked, `products.txt` and every trace CSV in row order, the run manifest, the whole logs and the exit code); smokes of 0.1 h first (`_rap_irdu_smk_gate_zw_nr3`, `_rap_irdu_smk_gate_nozwd_nr3`, exit 0):
+
+| run made from the new definitions | reproduces | result |
+| --- | --- | --- |
+| `_rap_irdu_gate_nozwd_nr3`: A1krhRsmh_nozwd on the bed without re-seats | `_rap_irdu_ch_nr3` | IDENTICAL |
+| `_rap_irdu_gate_nozwd_r3c`: A1krhRsmh_nozwd on r3c | `_rap_irdu_ch_r3c` | IDENTICAL |
+| `_rap_irdu_gate_zw_nr3`: A1krhRsmh (adopted) on the bed without re-seats | `_rap_irdu_zw_nr3` | IDENTICAL |
+| `_rap_irdu_gate_zw_r3c`: A1krhRsmh (adopted) on r3c | `_rap_irdu_zw_r3c` | IDENTICAL |
+
+The script still refuses a key the loader does not read (`--knob network.not_a_key_irdu=1`: exit 1, no run directory made); `scripts/ird_make_arms.py --selftest` and `scripts/irdg_run.py --selftest` pass; `python scripts/docs_record.py verify` passes.
+
+**The adopted arm's reference rows** (section 11.4's columns with the set; a later increment is read against these, A1krhRsmh on the same build and run settings):
+
+| reading | bed without re-seats (`_rap_irdu_zw_nr3`) | r3c (`_rap_irdu_zw_r3c`) |
+| --- | --- | --- |
+| receivers' wet-delay error p50 / p95 and step p50 (mm), 30 to 45, 60 to 75, 105 to 120 min | 28 / 112, 4.0; 20 / 80, 2.1; 8 / 39, 1.1 | 11 / 40, 1.2; 11 / 27, 0.8; 7 / 21, 0.4 |
+| D_WL per-pair offset p50, depth 1, 3, 5, every pair, 105 to 120 min | 0.037, 0.052, 0.073; 0.059 | 0.052, 0.070, 0.156; 0.100 |
+| D_NL per-pair offset p50, depth 1, 3, 5, every pair, 105 to 120 min | 0.023, 0.048, 0.075; 0.052 | 0.046, 0.123, 0.111; 0.117 |
+| step p95, D_WL and D_NL, 105 to 120 min | 0.005, 0.011 | 0.071, 0.023 |
+| card IRD's stream bars at their original values, hour 2: D_WL p50 and share within 0.20; D_NL p50 and share within 0.25 | 0.067, 96.2 %; 0.081, 92.9 % (W-WL and W-NL pass) | 0.077, 83.3 %; 0.124, 80.5 % (both FAILED) |
+| users: FRAC settled WL, N_1; PAIRS settled; HELD; WRONG, UNRESOLVED (compared); float 3D h1, h2 | 0.141, 0.219; 18.9 % of 53; 24.5 %; 0, 106 (106); 1 052, 127 mm | 0.182, 0.259; 20.3 % of 59; none; 0, 0 (0); 375, 144 mm |
+| one re-seat (C1 at 35 min, `_rap_irdu_zw_c1` against `_rap_irdu_zw_nr3`): moved pairs' D_WL against truth, event / control, at 0.5 to 10, 10 to 25, 25 to 45, 45 to 65 min | 0.177 / 0.114, 0.162 / 0.106, 0.150 / 0.108, 0.123 / 0.117 | |
+
+**Not covered with the set.** The microscope; IRD-4's event fixtures (`ird_t1`, `ird_tr`, `ird_rg`, `ird_rv6`, `ird_rv16`, `ird_l2v16`, the merge and split beds and their controls); r2; the golden sim bed; 6 h runs; the `_link` and `_floor` variants (they keep their dates' definitions); any observed-data arm; a warm resume (the set's in-block key and its rate are fingerprinted, so an arm with the set never resumes from a snapshot written without it).

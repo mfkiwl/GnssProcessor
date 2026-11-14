@@ -32,6 +32,13 @@ without the key (the diagonal time link, the arm as defined on 2026-11-09), and 
 defined before 2026-11-09 (the floor at 1 m, the time link).  The loader refuses the key with a zero
 network.phase_datum_eq34_rpb_q_m2s, so a no-link reading (q 0) is made on <arm>_link.
 
+The wet delay carried in the station block with its pair, the phase colour state, was adopted on the chain's
+simulator arms by the author on 2026-11-14 (card IRDU section 11.5): A1, every arm derived from it and card IRDU's
+holds-off arm add ZWD_SET, the four keys exactly as the current reference configuration arms them
+(network.carry_zwd, network.carry_zwd_in_block, network.zwd_carry_q 5e-08, network.phase_colour_state; the
+reference configuration pinned at GOLDEN_REV predates them).  <arm>_nozwd is the arm without the set, as defined
+from 2026-11-10 to 2026-11-14; <arm>_link and <arm>_floor keep their dates' definitions, without the set.
+
 An arm is refused when it sets a key the config loader does not read (a quoted literal in
 src/core/config/*.cpp): the loader ignores an unknown key without a word, so such an arm would
 silently be its base.
@@ -106,6 +113,12 @@ FLOOR_ON = ["network.phase_datum_eq34_rpb_prior_sigma_m=1.0"]
 # of 2026-11-10 (card IRDG section 8), A1 and every arm derived from it.  Each of those arms keeps a variant
 # on the time link, <arm>_link: the arm as it was defined on 2026-11-09.
 RPB_IN_BLOCK = ["network.phase_datum_eq34_rpb_in_block=true"]
+# The wet delay carried in the station block with its pair, the phase colour state: the four keys exactly as the
+# current reference configuration arms them (main, config/golden/golden_sim_refound.json; the ledger arms them only
+# together), absent from the golden pinned at GOLDEN_REV.  Adopted on A1, its descendants and card IRDU's holds-off
+# arm by the author's ruling of 2026-11-14 (card IRDU section 11.5); <arm>_nozwd is each arm without it.
+ZWD_SET = ["network.carry_zwd=true", "network.carry_zwd_in_block=true", "network.zwd_carry_q=5e-08",
+           "network.phase_colour_state=true"]
 A1_FAMILY =("A1", "A1k", "A1kr", "A1krh", "A1krhR", "A1krhRs", "A1krhRsm")
 # Card IRDU (the user's integers on the chain's stream): the emission holds off, so the wire is the network's own
 # estimate.  The phase-bias hold, its trip generation (off at the pinned golden's loader default, written out) and
@@ -237,6 +250,12 @@ for _name in A1_FAMILY:
                              % _name)
     ARMS[_name + "_floor"] = ([kv for kv in _link if kv not in FLOOR_OFF] + FLOOR_ON,
                               "%s as defined before 2026-11-09: the RPB floor on at 1 m, the time link" % _name)
+# The wet-delay set adopted on 2026-11-14 (card IRDU section 11.5), after the variants above so that they keep their
+# dates' definitions.  <arm>_nozwd: the arm as defined from 2026-11-10 to 2026-11-14, without the set.
+for _name in A1_FAMILY + tuple(IRDU_A1_ARMS):
+    _sets, _what = ARMS[_name]
+    ARMS[_name + "_nozwd"] = (list(_sets), "%s as defined from 2026-11-10 to 2026-11-14: no wet-delay set" % _name)
+    ARMS[_name] = (list(_sets) + ZWD_SET, _what + " + the wet-delay set (adopted 2026-11-14, card IRDU section 11.5)")
 # Card IRD section 6 fixtures.  The slip fixtures are generated under FIXTURES_ROOT; the gap fixtures
 # are rung 3b with one station blanked; the one-band fixture of IRD-3 (card IRDC section 5) is rung 3b
 # with one station's L2 blanked.  TOW = 261030 + 30 (epoch - 1).
@@ -412,8 +431,7 @@ KNOB_GROUPS = {
     # the wet delay carried in the station block with its pair, the phase colour state (ledger rows network.carry_zwd,
     # network.carry_zwd_in_block, network.zwd_carry_q and network.phase_colour_state: armed together on 2026-11-09,
     # "arm the three keys together, never this link alone")
-    "zwd_set": ["network.carry_zwd=true", "network.carry_zwd_in_block=true", "network.zwd_carry_q=5e-08",
-                "network.phase_colour_state=true"],
+    "zwd_set": list(ZWD_SET),
 }
 
 
@@ -516,6 +534,9 @@ def make(a):
         if a.knob:
             raise SystemExit("refused: --knob and --knob-group together would be two changes")
         a.knob = list(KNOB_GROUPS[a.knob_group])
+        if compose(a.arm, a.bed, a.knob) == compose(a.arm, a.bed):
+            raise SystemExit("refused: arm %s already carries the group %s, so the case would change nothing"
+                             % (a.arm, a.knob_group))
     if no_link_refused(a.arm, a.knob):
         raise SystemExit("refused: the loader does not take network.phase_datum_eq34_rpb_in_block with a zero "
                          "network.phase_datum_eq34_rpb_q_m2s; the no-link reading is made on arm %s_link" % a.arm)
@@ -621,26 +642,35 @@ def selftest():
         == set(CHAIN_ON + FLOAT_REPIN_OFF), "R1C is R1 + the chain, A0 less every held knob")
     a1 = compose("A1", "r3c")
     chk(set(a1) - set(compose("A0", "r3c")) == {"network.phase_datum_eq34_family=pair"} | set(FLOOR_OFF + RPB_IN_BLOCK)
-        and set(compose("A0", "r3c")) <= set(a1) and len(a1) == len(compose("A0", "r3c")) + 3,
-        "A1 is A0 plus the pair family knob, the RPB floor off (D0 as ruled 2026-11-09) and the in-block key "
-        "(adopted 2026-11-10)")
+        | set(ZWD_SET) and set(compose("A0", "r3c")) <= set(a1) and len(a1) == len(compose("A0", "r3c")) + 3 + len(ZWD_SET),
+        "A1 is A0 plus the pair family knob, the RPB floor off (D0 as ruled 2026-11-09), the in-block key "
+        "(adopted 2026-11-10) and the wet-delay set (adopted 2026-11-14)")
     chk(all(FLOOR_OFF[0] in compose(n, "r3c") and FLOOR_ON[0] not in compose(n, "r3c")
-            and RPB_IN_BLOCK[0] in compose(n, "r3c") for n in A1_FAMILY),
-        "every arm of the A1 family has the RPB floor off and the RPB in the station block")
-    chk(all(set(compose(n, "r3c")) - set(compose(n + "_link", "r3c")) == set(RPB_IN_BLOCK)
-            and set(compose(n + "_link", "r3c")) <= set(compose(n, "r3c"))
-            and len(compose(n + "_link", "r3c")) == len(compose(n, "r3c")) - 1 for n in A1_FAMILY)
+            and RPB_IN_BLOCK[0] in compose(n, "r3c") and set(ZWD_SET) <= set(compose(n, "r3c")) for n in A1_FAMILY),
+        "every arm of the A1 family has the RPB floor off, the RPB in the station block and the wet-delay set")
+    adopted = A1_FAMILY + tuple(IRDU_A1_ARMS)
+    chk(all(compose(n + "_nozwd", "r3c") + ZWD_SET == compose(n, "r3c") for n in adopted)
+        and sorted(n for n in ARMS if n.endswith("_nozwd")) == sorted(n + "_nozwd" for n in adopted),
+        "each adopted arm is its variant without the set followed by the four keys in order, and no other arm has one")
+    chk(not any(kv in ZWD_SET for n in ARMS if n not in adopted for kv in compose(n, "r3c")),
+        "no arm outside the adopted ones carries a key of the wet-delay set (the A0 family and every variant)")
+    chk(all(set(compose(n + "_nozwd", "r3c")) - set(compose(n + "_link", "r3c")) == set(RPB_IN_BLOCK)
+            and set(compose(n + "_link", "r3c")) <= set(compose(n + "_nozwd", "r3c"))
+            and len(compose(n + "_link", "r3c")) == len(compose(n + "_nozwd", "r3c")) - 1 for n in A1_FAMILY)
         and sorted(n for n in ARMS if n.endswith("_link")) == sorted(n + "_link" for n in A1_FAMILY),
-        "each A1-family arm has a time-link variant that is the arm less the in-block key alone, and no other arm has one")
+        "each A1-family arm has a time-link variant that is the arm as defined until 2026-11-14 less the in-block key "
+        "alone, and no other arm has one")
     chk(all(set(compose(n + "_floor", "r3c")) - set(compose(n + "_link", "r3c")) == set(FLOOR_ON)
             and set(compose(n + "_link", "r3c")) - set(compose(n + "_floor", "r3c")) == set(FLOOR_OFF)
             and len(compose(n + "_floor", "r3c")) == len(compose(n + "_link", "r3c")) for n in A1_FAMILY)
         and sorted(n for n in ARMS if n.endswith("_floor")) == sorted(n + "_floor" for n in A1_FAMILY),
         "each A1-family arm has a floor-on variant that differs from its time-link variant in the floor's value alone, "
         "and no other arm has one")
+    with_key = A1_FAMILY + tuple(IRDU_A1_ARMS) + tuple(n + "_nozwd" for n in A1_FAMILY + tuple(IRDU_A1_ARMS))
     chk(not any(kv.startswith("network.phase_datum_eq34_rpb_in_block") for n in ARMS
-                if n not in A1_FAMILY + tuple(IRDU_A1_ARMS) for kv in compose(n, "r3c")),
-        "no arm outside the A1 family sets the in-block key (the A0 family and the variants keep the time link)")
+                if n not in with_key for kv in compose(n, "r3c")),
+        "no arm outside the A1 family and its _nozwd variants sets the in-block key (the A0 family and the _link and "
+        "_floor variants keep the time link)")
     chk(all(set(compose(n, "r3c")) - set(compose(IRDU_A1_ARMS[n], "r3c")) == set(HOLDS_OFF) for n in IRDU_A1_ARMS)
         and set(compose("R1h", "r3c")) - set(compose("R1", "r3c")) == set(HOLDS_OFF)
         and len(compose("R1h", "r3c")) == len(compose("R1", "r3c")) + len(HOLDS_OFF),
@@ -651,8 +681,8 @@ def selftest():
     chk(set(compose("A1krhRsm_link", "r3c")) - set(compose("A0fkrhRsm", "r3c")) == {"network.phase_datum_eq34_family=pair"}
         and set(compose("A0fkrhRsm", "r3c")) <= set(compose("A1krhRsm_link", "r3c")),
         "A1krhRsm_link is A0fkrhRsm plus exactly the pair family knob")
-    chk(compose("A1krhRsm_link", "r3c", knob=RPB_IN_BLOCK[0]) == compose("A1krhRsm", "r3c"),
-        "A1krhRsm is its time-link variant with the in-block key as the one knob (the key arm card IRDG graded)")
+    chk(compose("A1krhRsm_link", "r3c", knob=RPB_IN_BLOCK[0]) == compose("A1krhRsm_nozwd", "r3c"),
+        "A1krhRsm_nozwd is its time-link variant with the in-block key as the one knob (the key arm card IRDG graded)")
     chk(not no_link_refused("A1krhRsm_link", "network.phase_datum_eq34_rpb_q_m2s=0")
         and not no_link_refused("A1krhRsm", None)
         and no_link_refused("A1krhRsm", "network.phase_datum_eq34_rpb_q_m2s=0")
@@ -730,10 +760,19 @@ def selftest():
         and "network.phase_datum_min_stations=1" not in o, "the knob under test overrides the arm")
     # card IRDU section 11.3: a setting group is the one change, each key once, and it is the current reference
     # configuration's own values (config/golden/golden_sim_refound.json at HEAD)
-    g = compose("A1krhRsmh", "r3c", knob=KNOB_GROUPS["zwd_set"])
+    g = compose("A1krhRsmh_nozwd", "r3c", knob=KNOB_GROUPS["zwd_set"])
     gk = [kv.split("=", 1)[0] for kv in g]
     chk(len(gk) == len(set(gk)) and g[-4:] == KNOB_GROUPS["zwd_set"]
-        and g[:-4] == compose("A1krhRsmh", "r3c"), "a setting group is appended once to the unchanged arm")
+        and g[:-4] == compose("A1krhRsmh_nozwd", "r3c") and g == compose("A1krhRsmh", "r3c"),
+        "a setting group is appended once to the unchanged arm, and the wet-delay group on A1krhRsmh_nozwd is the "
+        "adopted A1krhRsmh key for key (the cases of card IRDU section 11.3 are the adopted arm)")
+    try:
+        make(argparse.Namespace(bed="r3c", arm="A1krhRsmh", knob=None, knob_group="zwd_set", tag="_selftest_noop",
+                                hours=0.1, run_set=[], drop_station=[], dry_run=True))
+        chk(False, "a setting group the arm already carries is refused (a case that changes nothing)")
+    except SystemExit as e:
+        chk("already carries" in str(e), "a setting group the arm already carries is refused (a case that changes "
+            "nothing)")
     with open(ROOT + "/config/golden/golden_sim_refound.json", encoding="utf-8") as fh:
         cur = json.load(fh)
     same = True
