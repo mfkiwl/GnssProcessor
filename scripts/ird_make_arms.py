@@ -405,6 +405,18 @@ if os.path.isfile(IRDU_NR_ARCS):
                           irdu_nr_ops(["strip;types=???;stations=S02000SIM;sats=G06;tow_from=%d" % IRDU_C_TOW]))
 
 
+# A setting group taken as the one change of a case (card IRDU section 11.3): keys that the ledger arms only together,
+# written exactly as the current reference configuration arms them (the selftest compares them with
+# config/golden/golden_sim_refound.json at HEAD).  A group never changes an arm's definition.
+KNOB_GROUPS = {
+    # the wet delay carried in the station block with its pair, the phase colour state (ledger rows network.carry_zwd,
+    # network.carry_zwd_in_block, network.zwd_carry_q and network.phase_colour_state: armed together on 2026-11-09,
+    # "arm the three keys together, never this link alone")
+    "zwd_set": ["network.carry_zwd=true", "network.carry_zwd_in_block=true", "network.zwd_carry_q=5e-08",
+                "network.phase_colour_state=true"],
+}
+
+
 def sha256_bytes(b):
     return hashlib.sha256(b).hexdigest()
 
@@ -465,9 +477,9 @@ def compose(arm, bed, knob=None):
                 raise SystemExit("arm %s on bed %s sets %s twice with different values" % (arm, bed, k))
             vals[k] = v
         sets = ["%s=%s" % kv for kv in vals.items()]
-    if knob:
-        k = knob.split("=", 1)[0]
-        sets = [kv for kv in sets if kv.split("=", 1)[0] != k] + [knob]
+    for kn in ([knob] if isinstance(knob, str) else list(knob or [])):
+        k = kn.split("=", 1)[0]
+        sets = [kv for kv in sets if kv.split("=", 1)[0] != k] + [kn]
     return sets
 
 
@@ -477,6 +489,8 @@ def no_link_refused(arm, knob):
     column's own process noise), so the no-link reading is made on the arm's time-link variant."""
     if not knob or RPB_IN_BLOCK[0] not in ARMS[arm][0]:
         return False
+    if not isinstance(knob, str):
+        return any(no_link_refused(arm, kn) for kn in knob)
     key, value = knob.split("=", 1)
     try:
         return key == "network.phase_datum_eq34_rpb_q_m2s" and float(value) == 0.0
@@ -498,6 +512,10 @@ def duration_sets(base, hours):
 
 def make(a):
     which, fixture, _, _, rinex = BEDS[a.bed]
+    if getattr(a, "knob_group", None):
+        if a.knob:
+            raise SystemExit("refused: --knob and --knob-group together would be two changes")
+        a.knob = list(KNOB_GROUPS[a.knob_group])
     if no_link_refused(a.arm, a.knob):
         raise SystemExit("refused: the loader does not take network.phase_datum_eq34_rpb_in_block with a zero "
                          "network.phase_datum_eq34_rpb_q_m2s; the no-link reading is made on arm %s_link" % a.arm)
@@ -547,7 +565,8 @@ def make(a):
     prov = json.load(open(rj))
     prov["ird"] = {"golden_rev": GOLDEN_REV, "golden_path": GOLDEN[which][0],
                    "golden_sha256": GOLDEN[which][1], "bed": a.bed, "fixture": fixture,
-                   "arm": a.arm, "knob_under_test": a.knob, "hours": a.hours, "rinex": rinex,
+                   "arm": a.arm, "knob_under_test": a.knob, "knob_group": getattr(a, "knob_group", None),
+                   "hours": a.hours, "rinex": rinex,
                    "sets": [kv for kv in sets if kv not in run_sets], "run_sets": run_sets}
     with open(rj, "w") as fh:
         json.dump(prov, fh, indent=2)
@@ -709,6 +728,22 @@ def selftest():
     o = compose("A0", "r2", knob="network.phase_datum_min_stations=2")
     chk(o.count("network.phase_datum_min_stations=2") == 1
         and "network.phase_datum_min_stations=1" not in o, "the knob under test overrides the arm")
+    # card IRDU section 11.3: a setting group is the one change, each key once, and it is the current reference
+    # configuration's own values (config/golden/golden_sim_refound.json at HEAD)
+    g = compose("A1krhRsmh", "r3c", knob=KNOB_GROUPS["zwd_set"])
+    gk = [kv.split("=", 1)[0] for kv in g]
+    chk(len(gk) == len(set(gk)) and g[-4:] == KNOB_GROUPS["zwd_set"]
+        and g[:-4] == compose("A1krhRsmh", "r3c"), "a setting group is appended once to the unchanged arm")
+    with open(ROOT + "/config/golden/golden_sim_refound.json", encoding="utf-8") as fh:
+        cur = json.load(fh)
+    same = True
+    for kv in KNOB_GROUPS["zwd_set"]:
+        k, v = kv.split("=", 1)
+        node = cur
+        for part in k.split("."):
+            node = node.get(part) if isinstance(node, dict) else None
+        same &= node is not None and json.loads(v) == node
+    chk(same, "the wet-delay group is the current reference configuration's own four values")
     loader = loader_keys.LoaderKeys({"GnssConfigLoadNetwork.cpp":
                                      'a = "network.phase_datum_eq34"; b = "network.cycle_slip.gf_arc_jump";'})
     chk(unread(["network.phase_datum_eq34=true", "network.trace_chain_datum=true"], loader)
@@ -838,6 +873,8 @@ def main():
     m.add_argument("--tag", required=True)
     m.add_argument("--hours", type=float, default=2.0)
     m.add_argument("--knob", default=None, help="the one knob under test, key=value")
+    m.add_argument("--knob-group", default=None, choices=sorted(KNOB_GROUPS),
+                   help="a setting group of KNOB_GROUPS taken as the one change (keys the ledger arms only together)")
     m.add_argument("--drop-station", action="append")
     m.add_argument("--run-set", action="append",
                    help="a run setting outside the arm's posture (a thread cap), key=value, repeatable")
