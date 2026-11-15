@@ -465,6 +465,27 @@ KNOB_GROUPS["nrf_p"] = KNOB_GROUPS["nrf_g"] + ["network.ring_fix.rule=plain"]
 # at most 3 per epoch) with the frozen gate, and changes O and L (the odds gate).
 KNOB_GROUPS["nrf_o"] = KNOB_GROUPS["nrf_g"] + ["network.ring_fix.order=certain"]
 KNOB_GROUPS["nrf_ol"] = KNOB_GROUPS["nrf_o"] + ["network.ring_fix.gate=odds"]
+# Card NRF section 12 (stage N2): N1b-OL with the truth of the bed's own fixture (the audit in every epoch's frame; no
+# frame file, which holds only for the bed without re-seats), and with the oracle phase for the whole run (the ceiling,
+# _c) or for the first 30 min (the steady-state harness, _s).  On irdu_nr the frame file is kept beside the truth: the
+# truth model is checked against it.
+NRF_N2_BEDS = ("irdu_nr", "r3c", "ird_t2", "ird_tr", "ird_t3", "ird_rv16", "ird_rg", "ird_ms", "ird_msx")
+
+
+def _nrf_fixture(bed):
+    fx = BEDS[bed][1]
+    return (fx if os.path.isabs(fx) else os.path.realpath(ROOT + "/" + fx)).replace(os.sep, "/")
+
+
+for _bed in NRF_N2_BEDS:
+    if _bed not in BEDS or BEDS[_bed][1] is None:
+        continue
+    _base = ["network.ring_fix.enable=true", "network.ring_fix.order=certain", "network.ring_fix.gate=odds"]
+    if _bed == "irdu_nr":
+        _base = KNOB_GROUPS["nrf_ol"][:]
+    KNOB_GROUPS["nrf_olt_" + _bed] = _base + ["network.ring_fix.truth_root=" + _nrf_fixture(_bed)]
+    KNOB_GROUPS["nrf_olc_" + _bed] = KNOB_GROUPS["nrf_olt_" + _bed] + ["network.ring_fix.oracle_until_s=1000000"]
+    KNOB_GROUPS["nrf_ols_" + _bed] = KNOB_GROUPS["nrf_olt_" + _bed] + ["network.ring_fix.oracle_until_s=1800"]
 
 
 def sha256_bytes(b):

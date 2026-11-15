@@ -514,3 +514,154 @@ TEST(RingFixDecideOrder, TheCapDecidesTheMostCertainFirstAndKeepsTheOthersCount)
     EXPECT_TRUE(rf.links.at(ids[4]).held);
     EXPECT_EQ(rf.counters.decided, 5);
 }
+
+// ---- Stage N2: held integers through the chain's events ----
+
+TEST(RingFixCuts, TheStepOfAMovedSideComesFromItsHeldReleasedEdge) {
+    long long d = 0;
+    EXPECT_TRUE(ringFixCutStep(true, 12, 12.0, true, d));
+    EXPECT_EQ(d, 0);                                   // re-host onto a link at its integer: the frame is kept
+    EXPECT_TRUE(ringFixCutStep(true, 12, 10.0, true, d));
+    EXPECT_EQ(d, 2);                                   // satellite moved: N_h - k'
+    EXPECT_TRUE(ringFixCutStep(true, 12, 10.0, false, d));
+    EXPECT_EQ(d, -2);                                  // receiver moved: k' - N_h
+    EXPECT_FALSE(ringFixCutStep(false, 12, 10.0, true, d));   // not held: unknown
+    EXPECT_FALSE(ringFixCutStep(true, 12, 10.4, true, d));    // a target off the integers: unknown
+}
+
+TEST(RingFixCuts, CrossingLinksAreReexpressedInsideLinksKeptUnknownStepsRelease) {
+    NetworkRingFix rf = heldState(5000.0);             // kId: station 3, G05, held (10, 7)
+    const RingFixLinkId inside{4, "G06", "L1C", "L2W"}, crossing_r{5, "G05", "L1C", "L2W"};
+    for (const RingFixLinkId& id : {inside, crossing_r}) {
+        RingFixLink& L = rf.links[id];
+        L.held = true; L.n1 = 20; L.n2 = 15; L.lambda1 = kL1; L.lambda2 = kL2;
+    }
+    // M: receivers {3, 4}, satellites {G06} on L1C with a known step 2; band 2 kept (0).
+    RingFixCut c1;
+    c1.signal = "L1C"; c1.stations = {3, 4}; c1.sats = {"G06"}; c1.known = true; c1.delta = 2; c1.row = "rehost";
+    RingFixCut c2 = c1;
+    c2.signal = "L2W"; c2.delta = 0;
+    const RingFixCutOutcome out = ringFixApplyCuts(rf, {c1, c2}, 5000.0);
+    // kId: receiver 3 in M, G05 outside: crossing, +2 on band 1.
+    EXPECT_EQ(rf.links.at(kId).n1, 12);
+    EXPECT_EQ(rf.links.at(kId).n2, 7);
+    // inside: receiver 4 and G06 both in M: kept.
+    EXPECT_EQ(rf.links.at(inside).n1, 20);
+    // crossing_r: receiver 5 outside, G05 outside: untouched.
+    EXPECT_EQ(rf.links.at(crossing_r).n1, 20);
+    EXPECT_FALSE(rf.links.at(crossing_r).rebase_stamps);
+    EXPECT_TRUE(rf.links.at(kId).rebase_stamps);
+    EXPECT_TRUE(rf.links.at(inside).rebase_stamps);
+    EXPECT_EQ(out.reexpressed.size(), 1u);
+    EXPECT_EQ(rf.counters.cuts_known_zero, 1);
+    // A satellite in M, its receiver outside: minus the step.
+    NetworkRingFix rs = heldState(5000.0);
+    RingFixCut c3;
+    c3.signal = "L2W"; c3.sats = {"G05"}; c3.known = true; c3.delta = 3; c3.row = "returning";
+    ringFixApplyCuts(rs, {c3}, 5000.0);
+    EXPECT_EQ(rs.links.at(kId).n2, 4);
+    // An unknown step across the link releases it.
+    NetworkRingFix ru = heldState(5000.0);
+    RingFixCut c4;
+    c4.signal = "L1C"; c4.stations = {3}; c4.known = false; c4.row = "rehost";
+    const RingFixCutOutcome o4 = ringFixApplyCuts(ru, {c4}, 5000.0);
+    EXPECT_FALSE(ru.links.at(kId).held);
+    ASSERT_EQ(o4.released.size(), 1u);
+    EXPECT_EQ(ru.counters.released[static_cast<std::size_t>(RingFixRelease::Chain)], 1);
+    EXPECT_EQ(ru.counters.cut_released, 1);
+}
+
+TEST(RingFixCuts, AStampRebaseAfterACutIsNoRefloat) {
+    NetworkRingFix rf = heldState(5000.0);
+    rf.links.at(kId).rebase_stamps = true;
+    RingFixHoldObs o = presentObs();
+    o.stamp1 = 5001.0;   // the harvest re-created the entries the cut erased
+    o.stamp2 = 5001.0;
+    EXPECT_TRUE(ringFixReleaseStep(rf, {{kId, o}}, 5030.0).empty());
+    EXPECT_TRUE(rf.links.at(kId).held);
+    EXPECT_FALSE(rf.links.at(kId).rebase_stamps);
+    EXPECT_EQ(rf.links.at(kId).stamp1, 5001.0);
+    EXPECT_EQ(rf.counters.stamps_rebased, 1);
+    // A later re-level is a refloat again.
+    o.stamp2 = 5100.0;
+    const auto ev = ringFixReleaseStep(rf, {{kId, o}}, 5120.0);
+    ASSERT_EQ(ev.size(), 1u);
+    EXPECT_EQ(ev[0].release, RingFixRelease::Refloat);
+}
+
+TEST(RingFixCuts, TheOldHostIsInheritedAtItsMovedTargetWhenEveryStepIsKnown) {
+    NetworkRingFix rf;
+    RingFixInheritCand c;
+    c.id = {7, "G09", "L1C", "L2W"};
+    c.k1 = 5; c.k2 = 4; c.lambda1 = kL1; c.lambda2 = kL2; c.ring = 3; c.root = "S30000SIM";
+    RingFixCut cut;
+    cut.signal = "L1C"; cut.sats = {"G09"}; cut.known = true; cut.delta = 1; cut.row = "rehost";
+    const auto ev = ringFixInherit(rf, {c}, {cut}, 6000.0);
+    ASSERT_EQ(ev.size(), 1u);
+    EXPECT_TRUE(ev[0].inherited);
+    const RingFixLink& L = rf.links.at(c.id);
+    EXPECT_TRUE(L.held);
+    EXPECT_EQ(L.n1, 4);    // satellite in M: minus the step
+    EXPECT_EQ(L.n2, 4);
+    EXPECT_TRUE(L.rebase_stamps);
+    EXPECT_EQ(rf.counters.inherited, 1);
+    // Unknown step or a latch: not inherited.
+    NetworkRingFix r2;
+    cut.known = false;
+    EXPECT_TRUE(ringFixInherit(r2, {c}, {cut}, 6000.0).empty());
+    NetworkRingFix r3;
+    c.latched = true;
+    cut.known = true;
+    EXPECT_TRUE(ringFixInherit(r3, {c}, {cut}, 6000.0).empty());
+}
+
+TEST(RingFixOracle, TheOraclePhaseHoldsEveryLinkAtTruthThenTheRuleDecides) {
+    NetworkRingFix rf;
+    rf.oracle_until_s = 600.0;
+    RingFixDecideObs o = obsNear(kId, 10, 7, 0.4, 1.0);   // a float far from anything the gate would take
+    o.have_truth = true;
+    o.truth1 = 11;
+    o.truth2 = 8;
+    const auto ev = ringFixDecideStep(rf, {o}, 1000.0);   // t0 = 1000
+    ASSERT_EQ(ev.size(), 1u);
+    EXPECT_TRUE(ev[0].oracle);
+    EXPECT_EQ(rf.links.at(kId).n1, 11);
+    // Inside the phase a held integer that differs is set again.
+    rf.links.at(kId).n1 = 13;
+    ringFixDecideStep(rf, {o}, 1300.0);
+    EXPECT_EQ(rf.links.at(kId).n1, 11);
+    EXPECT_EQ(rf.counters.oracle_corrected, 1);
+    // After the phase the rule runs: a released link with this float is not decided again.
+    rf.links.at(kId).held = false;
+    const auto ev2 = ringFixDecideStep(rf, {o}, 1700.0);
+    ASSERT_EQ(ev2.size(), 1u);
+    EXPECT_EQ(ev2[0].kind, RingFixEvent::Kind::Refuse);
+}
+
+TEST(RingFixTruthModel, TheBranchTheSlipsAndTheCycle) {
+    RingFixTruth T;
+    T.arcs[{0, "G01", "L1C"}] = {100, {{1000.0, 2}}};
+    T.arcs[{1, "G01", "L1C"}] = {50, {}};
+    T.arcs[{1, "G02", "L1C"}] = {70, {}};
+    T.arcs[{0, "G02", "L1C"}] = {30, {}};
+    T.windup[{0, "G01"}] = {{200.0, 0.6}, {800.0, -1.4}};
+    EXPECT_EQ(ringFixWindupBranch(0.5), 1);
+    EXPECT_EQ(ringFixWindupBranch(-0.5), 0);
+    EXPECT_EQ(ringFixWindupBranch(-1.4), -1);
+    ringFixTruthObserve(T, 0, "G01", 200.0);   // first arc: branch round(0.6) = 1
+    ringFixTruthObserve(T, 0, "G01", 230.0);
+    long long n = 0;
+    ASSERT_TRUE(ringFixTruthN(T, 0, "G01", "L1C", 500.0, 230.0, n));
+    EXPECT_EQ(n, 101);
+    ringFixTruthObserve(T, 0, "G01", 800.0);   // a gap above 300 s: a new arc, branch round(-1.4) = -1
+    ASSERT_TRUE(ringFixTruthN(T, 0, "G01", "L1C", 1000.0, 800.0, n));
+    EXPECT_EQ(n, 100 + 2 - 1);                 // the slip at 1000 counts at 1000
+    EXPECT_FALSE(ringFixTruthN(T, 9, "G01", "L1C", 0.0, 0.0, n));
+    // A 4-cycle: chord (1, G01) +1, path (1, G02) -1, (0, G02) +1, (0, G01) -1 with targets 3 and 4 on the path.
+    const std::vector<std::tuple<int, std::string, std::string, int>> terms = {
+        {1, "G01", "L1C", 1}, {1, "G02", "L1C", -1}, {0, "G02", "L1C", 1}, {0, "G01", "L1C", -1}};
+    // pin_sum = (-1)(3) + (+1)(4) + (-1)(5) = -4 for targets 3, 4, 5 on the three path terms.
+    ASSERT_TRUE(ringFixTruthFrameInteger(T, terms, -4.0, true, 500.0, 230.0, n));
+    EXPECT_EQ(n, 50 - 70 + 30 - 101 + 4);
+    EXPECT_FALSE(ringFixTruthFrameInteger(T, terms, -4.0, false, 500.0, 230.0, n));
+}

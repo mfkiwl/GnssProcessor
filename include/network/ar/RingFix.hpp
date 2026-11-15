@@ -257,6 +257,9 @@ struct RingFixLink {
     bool      monitor_trip{false};   ///< The monitor asks for a release at the next epoch.
     double    released_s{-1.0};      ///< Its last release (-1: never).
     bool      wrong_now{false};      ///< The audit found its held integers wrong at the last epoch.
+    bool      rebase_stamps{false};  ///< A cut release erased its carried entries: take the next stamps as the baseline.
+    bool      inherited{false};      ///< Held as an old host of a cut (not decided by the rule).
+    bool      oracle{false};         ///< Held by the oracle phase.
 };
 
 /// One link as the decision reads it after the solve.
@@ -283,6 +286,9 @@ struct RingFixDecideObs {
     bool      latched{false};          ///< Either band in this epoch's free-epoch latch.
     bool      have_resid{false};       ///< Held links: the post-fit ionosphere-free phase residual was formed.
     double    resid_if_m{0.0};         ///< That residual (m).
+    bool      have_truth{false};       ///< Simulation only: the link's true integers in this epoch's frame are known.
+    long long truth1{0};               ///< Its true band-1 integer.
+    long long truth2{0};               ///< Its true band-2 integer.
 };
 
 /// One link as the release reads it before PASS B.
@@ -309,6 +315,8 @@ struct RingFixEvent {
     RingFixRelease release{RingFixRelease::Slip};   ///< Release: the cause.
     RingFixRefuse  refuse{RingFixRefuse::NotCandidate};  ///< Refuse: the cause.
     RingFixGate    gate;                            ///< The gate's reading (Hold, and Refuse when formed).
+    bool           inherited{false};                ///< Hold: an old host of a cut, held at its moved target.
+    bool           oracle{false};                   ///< Hold: decided by the oracle phase.
 };
 
 /// The run counters (the run-end line).
@@ -329,7 +337,27 @@ struct RingFixCounters {
     long long decided_wrong{0};           ///< Decisions the audit found wrong at the decision.
     long long decided_right{0};           ///< Decisions the audit found right at the decision.
     double    first_hold_s[8]{-1, -1, -1, -1, -1, -1, -1, -1};  ///< First decision by ring (continuous GPS seconds; -1: none).
+    // Stage N2.
+    long long cuts{0};                    ///< Cut releases seen (per band).
+    long long cuts_known{0};              ///< Of them, with a known step.
+    long long cuts_known_zero{0};         ///< Of them, with a step of 0 (the frame kept).
+    long long reexpressed{0};             ///< Held links re-expressed by a known step.
+    long long cut_released{0};            ///< Held links released for crossing a cut with an unknown step (in released[Chain] too).
+    long long to_tree{0};                 ///< Held links that became tree edges (left the held set, the chain pins them).
+    long long inherited{0};               ///< Old hosts held at their moved target.
+    long long root_kept{0};               ///< Held links kept through a pinned root handover.
+    long long stamps_rebased{0};          ///< Stamp rebases after a cut release's erase.
+    long long oracle_decided{0};          ///< Links held by the oracle phase.
+    long long oracle_corrected{0};        ///< Held integers the oracle phase set again (they differed from truth).
+    long long truth_right{0};             ///< Held link-epochs the truth audit found right.
+    long long truth_wrong{0};             ///< Held link-epochs the truth audit found wrong.
+    long long truth_none{0};              ///< Held link-epochs without a true integer (no cycle, no truth row).
+    long long decided_truth_wrong{0};     ///< Decisions the truth audit found wrong at the decision.
+    long long truth_file_checked{0};      ///< Chord-band-epochs where the truth and the audit file both give an integer.
+    long long truth_file_mismatch{0};     ///< Of them, where they differ.
 };
+
+struct RingFixTruth;   // below: the fixture's truth (simulation only)
 
 /**
  * @brief Run-scope state of the ring fix.  Null on every run without @c network.ring_fix.enable.
@@ -365,6 +393,12 @@ struct NetworkRingFix {
     /// value lambda times the integer (m).  Read only inside the parallel PASS B produce.
     std::map<std::tuple<int, std::string, std::string>, double> table;
     RingFixCounters counters;               ///< Run counters.
+    // Stage N2.
+    std::unique_ptr<RingFixTruth> truth;    ///< The fixture's truth (network.ring_fix.truth_root); null without it.
+    double      oracle_until_s{0.0};        ///< The oracle phase's length from the first epoch (s; 0 = none).
+    double      t0_s{-1.0};                 ///< The first epoch the ring fix saw (continuous GPS seconds).
+    /// The previous epoch's tree edges with their targets: (station, satellite, signal) -> target (cycles).
+    std::map<std::tuple<int, std::string, std::string>, double> prev_targets;
 };
 
 // ---- The steps (pure: unit-tested on hand-built epochs) ---------------------------------------
@@ -388,6 +422,10 @@ struct NetworkRingFix {
  * with a float is a candidate, and the links that pass every test are decided after the loop, the
  * highest log-odds of N1 first (ties by link), at most @ref kRingFixMaxDecisionsPerEpoch; the others
  * are refused with the cause cap and keep their persistence count.
+ *
+ * During the oracle phase (simulation only: @c rf.oracle_until_s after @c rf.t0_s) every link with
+ * true integers is held at them at once, and a held link whose integers differ is set to them; the
+ * rule does not run.
  *
  * @param rf     The run state (links and counters written).
  * @param links  This epoch's chords of pair families with their readings.
@@ -450,6 +488,176 @@ enum class RingFixAudit : std::uint8_t {
 RingFixAudit ringFixAuditLink(
     const std::map<std::tuple<std::string, std::string, std::string>, long long>& audit,
     const std::string& station_name, const RingFixLinkId& id, long long n1, long long n2);
+
+// ---- Stage N2: held integers through the chain's events ------------------------------------------
+
+/**
+ * @brief One cut release of the epoch on one band, as the held integers read it.
+ *
+ * The chain re-attached the moved side M (the released vertex and its subtree) through a released
+ * edge; every vertex of M moved by one integer frame step on the band.  The step is known only when
+ * the released edge was a held link before the event (@ref ringFixCutStep).
+ */
+struct RingFixCut {
+    std::string           signal;          ///< The band's phase signal.
+    std::set<int>         stations;        ///< Receivers of M (roster index).
+    std::set<std::string> sats;            ///< Satellites of M.
+    bool                  known{false};    ///< The step is known.
+    long long             delta{0};        ///< M's frame step on the band (cycles), when known.
+    std::string           row;             ///< The releasing row's name ("rehost", "returning", "slip", "merge").
+};
+
+/**
+ * @brief The frame step of a cut's moved side from its released edge.
+ *
+ * With the released edge e' held at N_h before the event and pinned at k' now: delta = N_h - k' when
+ * the moved vertex is e''s satellite, k' - N_h when it is e''s receiver.
+ *
+ * @param held_before   The released edge was held before the event (and not latched, not tripped).
+ * @param n_held        Its held integer on the band.
+ * @param target_cyc    Its target this epoch (cycles), which must be an integer.
+ * @param sat_is_child  The moved vertex is the released edge's satellite.
+ * @param[out] delta    The step, written when known.
+ * @return True when the step is known.
+ */
+bool ringFixCutStep(bool held_before, long long n_held, double target_cyc, bool sat_is_child,
+                    long long& delta);
+
+/// What the cuts of an epoch did to the held links.
+struct RingFixCutOutcome {
+    std::vector<std::pair<RingFixLinkId, std::string>> released;  ///< Links released (crossing a cut with an unknown step), with the cut's row.
+    /// Links re-expressed: (link, step on band 1, step on band 2, the rows).
+    std::vector<std::tuple<RingFixLinkId, long long, long long, std::string>> reexpressed;
+    long long touched{0};   ///< Held links with an end in a moved side (their carries were erased: stamps rebased).
+};
+
+/**
+ * @brief Apply an epoch's cuts to the held links.
+ *
+ * A held link with exactly one end in a cut's moved side on one of its bands is re-expressed by the
+ * cut's step (minus when its satellite is in M, plus when its receiver is) when the step is known,
+ * and released (cause chain) when it is not; one with both ends in M, or none, keeps its integer.
+ * Every held link with an end in a moved side has its carried stamps rebased at the next release step.
+ *
+ * @param rf    The run state (links and counters written).
+ * @param cuts  This epoch's cuts.
+ * @param now_s The epoch (continuous GPS seconds).
+ * @return What the cuts did.
+ */
+RingFixCutOutcome ringFixApplyCuts(NetworkRingFix& rf, const std::vector<RingFixCut>& cuts, double now_s);
+
+/// A tree edge of the previous epoch that is a chord of its pair family now.
+struct RingFixInheritCand {
+    RingFixLinkId id;               ///< The link.
+    long long     k1{0};            ///< Its target on band 1 at the previous epoch (cycles).
+    long long     k2{0};            ///< Its target on band 2 at the previous epoch (cycles).
+    double        lambda1{0.0};     ///< Band-1 wavelength (m).
+    double        lambda2{0.0};     ///< Band-2 wavelength (m).
+    bool          latched{false};   ///< Either band in this epoch's free-epoch latch.
+    int           ring{-1};         ///< Its ring now.
+    std::string   root;             ///< Its component's root now.
+};
+
+/**
+ * @brief Hold the old hosts: each candidate not held and not latched is held at its previous targets
+ *        moved by the steps of the cuts it crosses, when every such step is known.
+ * @param rf    The run state.
+ * @param cands The candidates.
+ * @param cuts  This epoch's cuts.
+ * @param now_s The epoch.
+ * @return One Hold event (flag @c inherited) per link held.
+ */
+std::vector<RingFixEvent> ringFixInherit(NetworkRingFix& rf, const std::vector<RingFixInheritCand>& cands,
+                                         const std::vector<RingFixCut>& cuts, double now_s);
+
+// ---- Truth (simulation only) ----------------------------------------------------------------------
+
+/**
+ * @brief The fixture's truth as the ring fix reads it: each arc's integer and slips, each receiver's
+ *        wind-up per satellite, and the producer's wind-up branch of each arc.
+ *
+ * The producer's integer of an arc is the fixture's slip-accumulated integer plus the branch
+ * round_half_up(wu(t0)), wu the fixture's accumulated wind-up at the arc's first epoch t0, a new arc
+ * after a gap above @ref kRingFixArcGapS (the rule of scripts/simnet_producer_ar_grade.py).
+ */
+struct RingFixTruth {
+    /// One arc's integer and its jumps (continuous GPS seconds, cycles), ascending.
+    struct Arc {
+        long long n_int{0};                              ///< The pre-slip integer.
+        std::vector<std::pair<double, long long>> slips;  ///< (time, jump).
+    };
+    /// One wind-up branch of a (receiver, satellite): its first epoch, its last epoch, its integer.
+    struct Branch {
+        double    start_tow{0.0};  ///< First epoch (time of week, s).
+        double    last_tow{0.0};   ///< Last epoch seen (time of week, s).
+        long long k{0};            ///< The branch integer.
+    };
+    std::map<std::tuple<int, std::string, std::string>, Arc> arcs;          ///< (station, sat, signal) -> the arc.
+    std::map<std::pair<int, std::string>, std::map<double, double>> windup; ///< (station, sat) -> tow -> cycles.
+    std::map<std::pair<int, std::string>, std::vector<Branch>> branches;   ///< (station, sat) -> its branches.
+    long long arcs_without_windup{0};   ///< Branches started without a wind-up row (k = 0).
+};
+
+/// A gap above this ends a (receiver, satellite) arc for the wind-up branch (s).
+inline constexpr double kRingFixArcGapS = 300.0;
+
+/**
+ * @brief round_half_up of a wind-up in cycles: floor(w + 0.5).
+ * @param w The accumulated wind-up (cycles).
+ * @return The branch integer.
+ */
+long long ringFixWindupBranch(double w);
+
+/**
+ * @brief Record that a (receiver, satellite) is seen at an epoch: a new branch at its first epoch or
+ *        after a gap above @ref kRingFixArcGapS, with the wind-up at that epoch.
+ * @param T       The truth.
+ * @param station Roster index.
+ * @param sat     Satellite.
+ * @param tow     Time of week (s).
+ */
+void ringFixTruthObserve(RingFixTruth& T, int station, const std::string& sat, double tow);
+
+/**
+ * @brief The producer's true integer of an arc at an epoch.
+ * @param T       The truth.
+ * @param station Roster index.
+ * @param sat     Satellite.
+ * @param signal  Phase signal.
+ * @param now_s   Continuous GPS seconds (the slips' clock; a slip at now_s counts).
+ * @param tow     Time of week (s), for the branch.
+ * @param[out] n  The integer.
+ * @return False when the arc has no truth row.
+ */
+bool ringFixTruthN(const RingFixTruth& T, int station, const std::string& sat, const std::string& signal,
+                   double now_s, double tow, long long& n);
+
+/**
+ * @brief The true integer of a chord in the frame of an epoch: the sum over its fundamental cycle of
+ *        coefficient times the true integer, less the sum over the tree terms of coefficient times target.
+ * @param T            The truth.
+ * @param terms        The cycle's terms: (station, satellite, signal, coefficient), the chord included (+1).
+ * @param pin_sum_cyc  Sum over the tree terms of coefficient times target (cycles).
+ * @param pins_integer Every target on the path is an integer.
+ * @param now_s        Continuous GPS seconds.
+ * @param tow          Time of week (s).
+ * @param[out] n       The integer.
+ * @return False when a target is not an integer, a term has no truth, or the sum is not an integer.
+ */
+bool ringFixTruthFrameInteger(const RingFixTruth& T,
+                              const std::vector<std::tuple<int, std::string, std::string, int>>& terms,
+                              double pin_sum_cyc, bool pins_integer, double now_s, double tow, long long& n);
+
+/**
+ * @brief Read one receiver's truth_windup.csv.
+ *
+ * Header contract: the line begins `week,tow_s,satellite,windup_cycles`.
+ *
+ * @param path File to read.
+ * @return satellite -> tow -> accumulated wind-up (cycles).
+ * @throws std::runtime_error on a missing file or a malformed header or row.
+ */
+std::map<std::string, std::map<double, double>> ringFixParseWindupCsv(const std::string& path);
 
 // ---- The network seams ----------------------------------------------------------------------
 

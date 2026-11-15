@@ -14,6 +14,10 @@
 #include "network/assembly/StationBuild.hpp"    // StationBuild, StationCarryFrame
 #include "network/diag/AmbStateTrace.hpp"       // ambStateNoteDrop
 #include "network/diag/RunTraces.hpp"
+#include "network/driver/RunGroups.hpp"           // NetworkEngines (the slip channel)
+#include "network/slip/OraclePin.hpp"            // networkOraclePinParseAmbCsv
+#include "network/slip/RawObservables.hpp"       // SlipQcChannel (the truth's arcs)
+#include "network/slip/SlipOracle.hpp"           // networkSlipOracleParseCsv
 #include "network/driver/Epoch.hpp"
 #include "network/driver/Run.hpp"
 #include "network/driver/RunTypes.hpp"
@@ -30,6 +34,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <limits>
 #include <optional>
 
 namespace GnssProcessor {
@@ -60,6 +66,17 @@ struct ChainFacts {
     /// group -> vertex key -> its component's root receiver.
     std::map<std::string, std::map<std::string, std::string>> root_of;
     std::set<std::string> cut_vertices;   ///< Vertices on a cut release's moved side ("R:<i>", "S:<sat>").
+    /// group -> vertex key -> its depth below its component's root.
+    std::map<std::string, std::map<std::string, int>> depth_of;
+    /// @brief A link's ring in a group (the larger depth of its two vertices; -1 when unknown).
+    /// @param g The group. @param r The receiver key. @param v The satellite key. @return The ring.
+    int ring(const std::string& g, const std::string& r, const std::string& v) const {
+        const auto gi = depth_of.find(g);
+        if (gi == depth_of.end()) return -1;
+        const auto a = gi->second.find(r), b = gi->second.find(v);
+        if (a == gi->second.end() || b == gi->second.end()) return -1;
+        return std::max(a->second, b->second);
+    }
     /// @brief The root of a vertex's component in a group ("" when unknown).
     /// @param g The group. @param v The vertex key. @return The root receiver's name.
     std::string root(const std::string& g, const std::string& v) const {
@@ -77,6 +94,8 @@ ChainFacts chainFacts(const ChainEpochObs* obs) {
         f.tree.insert({e.station, e.sat, e.signal});
         f.root_of[e.group][e.child] = e.r1;
         f.root_of[e.group][e.parent] = e.r1;
+        f.depth_of[e.group][e.child] = e.depth;
+        f.depth_of[e.group].emplace(e.parent, e.depth - 1);
     }
     for (const ChainChordCycle& c : obs->chords) f.chords.insert({c.station, c.sat, c.signal});
     for (const ChainReleaseObs& r : obs->releases) {
@@ -141,6 +160,45 @@ void networkRingFixArm(NetworkRun& run) {
               kRingFixHoldSigmaM, rf->max_gap_s, kRingFixMonitorBoundM, kRingFixMonitorEpochs,
               rf->audit_file.empty() ? std::string("none")
                                      : fmt::format("'{}' ({} arcs)", rf->audit_file, rf->audit.size()));
+    // Stage N2, simulation only: the fixture's truth (the audit in every epoch's frame) and the oracle phase.
+    rf->oracle_until_s = nc.ring_fix.oracle_until_s;
+    if (!nc.ring_fix.truth_root.empty()) {
+        auto T = std::make_unique<RingFixTruth>();
+        const std::filesystem::path root(nc.ring_fix.truth_root);
+        long long n_arcs = 0, n_slips = 0;
+        for (std::size_t i = 0; i < run.setup.stations.size(); ++i) {
+            const std::string& name = run.setup.stations[i].name;
+            const auto amb_file = root / name / "truth_ambiguities.csv";
+            const auto slip_file = root / name / "truth_slips.csv";
+            const auto wu_file = root / name / "truth_windup.csv";
+            for (const auto* f : {&amb_file, &slip_file, &wu_file})
+                if (!std::filesystem::exists(*f))
+                    throw std::runtime_error("network.ring_fix.truth_root: no truth file for roster station '" + name
+                                             + "' at '" + f->string() + "' (simulation only).");
+            const auto ambs = networkOraclePinParseAmbCsv(amb_file.string());
+            const auto slips = networkSlipOracleParseCsv(slip_file.string());
+            for (const auto& [key, nv] : ambs) {
+                RingFixTruth::Arc a;
+                a.n_int = nv.first;
+                const auto sit = slips.find(key);
+                if (sit != slips.end())
+                    for (const auto& sl : sit->second) {
+                        a.slips.emplace_back(sl.s, sl.delta_cyc);
+                        ++n_slips;
+                    }
+                T->arcs[{static_cast<int>(i), key.first, key.second}] = std::move(a);
+                ++n_arcs;
+            }
+            for (auto& [sat, series] : ringFixParseWindupCsv(wu_file.string()))
+                T->windup[{static_cast<int>(i), sat}] = std::move(series);
+        }
+        log->warn("Network (ring fix): TRUTH from '{}' (simulation only): {} arcs, {} slips; every held integer is "
+                  "audited in the frame of its epoch.", nc.ring_fix.truth_root, n_arcs, n_slips);
+        rf->truth = std::move(T);
+    }
+    if (rf->oracle_until_s > 0.0)
+        log->warn("Network (ring fix): ORACLE PHASE for the first {:.0f} s (simulation only): every chord with a true "
+                  "integer is held at it; afterwards the rule alone decides.", rf->oracle_until_s);
     // The options of stage N1b, named only when armed (a run under the defaults logs what it logged before).
     if (rf->order == RingFixOrder::Certain)
         log->warn("Network (ring fix): order CERTAIN: every chord with a float is a candidate (rings reported, not "
@@ -160,20 +218,137 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
     NetworkRunTraces& traces = run.traces;
     const GnssConfig& config_ = run.config;
     const std::vector<NetStation>& stations = run.setup.stations;
+    const SlipQcChannel& qc = run.engines.slip_qc;
     const GnssTime& t = ep.se.time;
     const double now_s = ep.clock.pl_now_s;
     const ChainEpochObs* obs_rec = ep.events.phase_datum.chain.get();
     const RelevelEpochState& relevel = ep.events.slip.relevel;
+    const std::vector<bool>& present = ep.pass_a.present;
     net::ArcTable& arc_rows = ctx.entities.arcs;   // written: the released links' carried entries
     // ---- End of the bindings ----
     if (!ctx.carry.ring_fix) return;
     NetworkRingFix& rf = *ctx.carry.ring_fix;
     rf.table.clear();
-    const bool any_held = std::any_of(rf.links.begin(), rf.links.end(),
-                                      [](const auto& kv) { return kv.second.held; });
-    if (any_held) {
-        const std::set<net::ArcTuple> latched = latchedArcs(relevel);
-        const ChainFacts facts = chainFacts(obs_rec);
+    const auto nameOf = [&](int i) {
+        return (i >= 0 && static_cast<std::size_t>(i) < stations.size()) ? stations[static_cast<std::size_t>(i)].name
+                                                                           : std::string{};
+    };
+    // The truth's arcs (simulation only): every (receiver, satellite) the slip channel modelled this
+    // epoch, the rows network_slip_raw.csv writes.
+    if (rf.truth && qc.epoch.computed) {
+        for (std::size_t i = 0; i < qc.epoch.rows.size() && i < present.size(); ++i) {
+            if (!present[i]) continue;
+            for (const auto& row : qc.epoch.rows[i])
+                ringFixTruthObserve(*rf.truth, static_cast<int>(i), row.satellite, t.tow);
+        }
+    }
+    const ChainFacts facts = chainFacts(obs_rec);
+    const std::set<net::ArcTuple> latched = latchedArcs(relevel);
+    const auto heldLinkOf = [&](int station, const std::string& sat, const std::string& sig) -> RingFixLink* {
+        for (auto& [id, L] : rf.links)
+            if (L.held && id.station == station && id.sat == sat && (id.sig1 == sig || id.sig2 == sig)) return &L;
+        return nullptr;
+    };
+    const auto idOf = [&](const RingFixLink* p) -> const RingFixLinkId* {
+        for (const auto& [id, L] : rf.links)
+            if (&L == p) return &id;
+        return nullptr;
+    };
+
+    // 1. The cuts of this epoch, with the step of each moved side where its released edge was held.
+    std::vector<RingFixCut> cuts;
+    if (obs_rec != nullptr && obs_rec->armed) {
+        for (const ChainReleaseObs& r : obs_rec->releases) {
+            RingFixCut c;
+            c.signal = r.signal;
+            c.stations.insert(r.stations.begin(), r.stations.end());
+            c.sats.insert(r.sats.begin(), r.sats.end());
+            c.row = chainReleaseRowName(r.row);
+            const RingFixLink* h = heldLinkOf(r.station, r.sat, r.signal);
+            const RingFixLinkId* hid = h != nullptr ? idOf(h) : nullptr;
+            double target_cyc = std::numeric_limits<double>::quiet_NaN();
+            for (const ChainEdgeObs& e : obs_rec->edges)
+                if (e.station == r.station && e.sat == r.sat && e.signal == r.signal && e.lambda_m > 0.0) {
+                    target_cyc = e.target_m / e.lambda_m;
+                    break;
+                }
+            const bool usable = h != nullptr && hid != nullptr && !h->monitor_trip
+                             && latched.count({r.station, r.sat, r.signal}) == 0;
+            const long long n_held = (usable && hid->sig1 == r.signal) ? h->n1 : (usable ? h->n2 : 0);
+            c.known = ringFixCutStep(usable, n_held, target_cyc, r.sat_is_child, c.delta);
+            cuts.push_back(std::move(c));
+        }
+    }
+
+    // 2. The held links through the cuts: re-expressed by a known step, released across an unknown one.
+    const long long now_ep = static_cast<long long>(ctx.counters.n_loop_epochs);
+    const double elev_power = config_.getCodeElevationPower();
+    const auto reopen = [&](const RingFixLinkId& id, const std::string& sig, double stamp) {
+        const net::ArcTuple key{id.station, id.sat, sig};
+        LocalCarry* lc = net::getArc(arc_rows, key, &net::ArcState::amb);
+        if (lc == nullptr || lc->relevel_s > stamp) return;
+        if (ctx.knobs.amb_float_kf) {
+            const double drop_base = ambFloatDropFloorNow(ctx.knobs.amb_drop_var_floor, now_ep,
+                                                          ctx.knobs.amb_drop_floor_after_ep);
+            ambFloatDropFloored(*lc, ambFloatBirthFloor(ctx.knobs.amb_birth_var_floor, -1.0, elev_power),
+                                ambFloatBirthFloor(drop_base, -1.0, elev_power), now_s, now_ep,
+                                ctx.knobs.amb_drop_decouple_always);
+            if (ctx.knobs.trace_amb_state)
+                ambStateNoteDrop(ctx, t.week, t.tow, nameOf(id.station), id.sat, sig, *lc, "ring_fix_release");
+        } else {
+            net::dropArc(arc_rows, key, &net::ArcState::amb);
+        }
+        ++rf.counters.carry_reopened;
+    };
+    const RingFixCutOutcome cut_out = ringFixApplyCuts(rf, cuts, now_s);
+    for (const auto& [id, row] : cut_out.released) {
+        const RingFixLink& L = rf.links.at(id);
+        reopen(id, id.sig1, L.stamp1);
+        reopen(id, id.sig2, L.stamp2);
+        traces.emitEvent(t, "RINGFIX", "release", id.sat, nameOf(id.station), std::nullopt, std::nullopt, "chain",
+                         fmt::format("sig1={} sig2={} n1={} n2={} ring={} held_s={:.0f} cut={} step=unknown",
+                                     id.sig1, id.sig2, L.n1, L.n2, L.ring, now_s - L.decided_s, row));
+    }
+    for (const auto& [id, d1, d2, rows] : cut_out.reexpressed) {
+        const RingFixLink& L = rf.links.at(id);
+        traces.emitEvent(t, "RINGFIX", "reexpress", id.sat, nameOf(id.station), std::nullopt, std::nullopt, "cut",
+                         fmt::format("sig1={} sig2={} n1={} n2={} d1={} d2={} cut={}", id.sig1, id.sig2, L.n1, L.n2,
+                                     d1, d2, rows));
+    }
+
+    // 3. A held link that became a tree edge leaves the held set: the chain pins it.
+    for (auto& [id, L] : rf.links) {
+        if (!L.held) continue;
+        if (facts.tree.count({id.station, id.sat, id.sig1}) == 0 && facts.tree.count({id.station, id.sat, id.sig2}) == 0)
+            continue;
+        L.held = false;
+        L.streak = 0;
+        L.monitor_bad = 0;
+        L.monitor_trip = false;
+        L.rebase_stamps = false;
+        ++rf.counters.to_tree;
+        traces.emitEvent(t, "RINGFIX", "to_tree", id.sat, nameOf(id.station), std::nullopt, std::nullopt, "chain",
+                         fmt::format("sig1={} sig2={} n1={} n2={}", id.sig1, id.sig2, L.n1, L.n2));
+    }
+
+    // 4. A root handover the root row pinned at the carried receiver phase bias keeps the frame.
+    if (obs_rec != nullptr && obs_rec->armed && !obs_rec->roots.empty()) {
+        for (auto& [id, L] : rf.links) {
+            if (!L.held || L.root.empty()) continue;
+            const std::string g = groupOf(id.sat, id.sig1);
+            const std::string now_root = facts.root(g, rxKey(id.station));
+            if (now_root.empty() || now_root == L.root) continue;
+            for (const ChainRootObs& ro : obs_rec->roots)
+                if (ro.group == g && ro.new_root == now_root && ro.outcome == ChainRootOutcome::Pinned) {
+                    L.root = now_root;
+                    ++rf.counters.root_kept;
+                    break;
+                }
+        }
+    }
+
+    // 5. The release step.
+    {
         std::map<RingFixLinkId, RingFixHoldObs> obs;
         for (const auto& [id, L] : rf.links) {
             if (!L.held) continue;
@@ -182,8 +357,7 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
                       || facts.tree.count({id.station, id.sat, id.sig2}) > 0;
             o.present = facts.chords.count({id.station, id.sat, id.sig1}) > 0
                      && facts.chords.count({id.station, id.sat, id.sig2}) > 0;
-            o.in_cut = facts.cut_vertices.count(rxKey(id.station)) > 0
-                    || facts.cut_vertices.count(svKey(id.sat)) > 0;
+            o.in_cut = false;   // the cuts were applied above
             o.root = facts.root(groupOf(id.sat, id.sig1), rxKey(id.station));
             o.latched = latched.count({id.station, id.sat, id.sig1}) > 0
                      || latched.count({id.station, id.sat, id.sig2}) > 0;
@@ -198,27 +372,6 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
         // A slip is answered by the vehicle's drop pass of this epoch and a refloat already was:
         // the other causes re-open the carried entries here, unless something re-levelled them
         // since the decision.
-        const long long now_ep = static_cast<long long>(ctx.counters.n_loop_epochs);
-        const double elev_power = config_.getCodeElevationPower();
-        const auto reopen = [&](const RingFixLinkId& id, const std::string& sig, double stamp) {
-            const net::ArcTuple key{id.station, id.sat, sig};
-            LocalCarry* lc = net::getArc(arc_rows, key, &net::ArcState::amb);
-            if (lc == nullptr || lc->relevel_s > stamp) return;
-            const std::string name = (id.station >= 0 && static_cast<std::size_t>(id.station) < stations.size())
-                                         ? stations[static_cast<std::size_t>(id.station)].name : std::string{};
-            if (ctx.knobs.amb_float_kf) {
-                const double drop_base = ambFloatDropFloorNow(ctx.knobs.amb_drop_var_floor, now_ep,
-                                                              ctx.knobs.amb_drop_floor_after_ep);
-                ambFloatDropFloored(*lc, ambFloatBirthFloor(ctx.knobs.amb_birth_var_floor, -1.0, elev_power),
-                                    ambFloatBirthFloor(drop_base, -1.0, elev_power), now_s, now_ep,
-                                    ctx.knobs.amb_drop_decouple_always);
-                if (ctx.knobs.trace_amb_state)
-                    ambStateNoteDrop(ctx, t.week, t.tow, name, id.sat, sig, *lc, "ring_fix_release");
-            } else {
-                net::dropArc(arc_rows, key, &net::ArcState::amb);
-            }
-            ++rf.counters.carry_reopened;
-        };
         for (const RingFixEvent& ev : events) {
             const RingFixLink& L = rf.links.at(ev.id);
             if (ev.release == RingFixRelease::Chain || ev.release == RingFixRelease::Monitor
@@ -226,14 +379,57 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
                 reopen(ev.id, ev.id.sig1, L.stamp1);
                 reopen(ev.id, ev.id.sig2, L.stamp2);
             }
-            const std::string name = (ev.id.station >= 0 && static_cast<std::size_t>(ev.id.station) < stations.size())
-                                         ? stations[static_cast<std::size_t>(ev.id.station)].name : std::string{};
-            traces.emitEvent(t, "RINGFIX", "release", ev.id.sat, name, std::nullopt, std::nullopt,
+            traces.emitEvent(t, "RINGFIX", "release", ev.id.sat, nameOf(ev.id.station), std::nullopt, std::nullopt,
                              ringFixReleaseName(ev.release),
                              fmt::format("sig1={} sig2={} n1={} n2={} ring={} held_s={:.0f}", ev.id.sig1,
                                          ev.id.sig2, L.n1, L.n2, L.ring, now_s - L.decided_s));
         }
     }
+
+    // 6. The old hosts: last epoch's tree edges that are chords of their pair family now.
+    if (!rf.prev_targets.empty() && obs_rec != nullptr && obs_rec->armed) {
+        std::map<std::pair<int, std::string>, std::map<std::string, double>> prev_of;   // (sta, sat) -> sig -> k
+        for (const auto& [key, k] : rf.prev_targets) prev_of[{std::get<0>(key), std::get<1>(key)}][std::get<2>(key)] = k;
+        std::vector<RingFixInheritCand> cands;
+        for (const auto& [ss, sigs] : prev_of) {
+            std::set<std::string> names;
+            for (const auto& kv : sigs) names.insert(kv.first);
+            for (const auto& [s1, s2] : chainPairFamilies(names)) {
+                const int sta = ss.first;
+                const std::string& sat = ss.second;
+                if (facts.tree.count({sta, sat, s1}) || facts.tree.count({sta, sat, s2})) continue;
+                if (!facts.chords.count({sta, sat, s1}) || !facts.chords.count({sta, sat, s2})) continue;
+                const double k1 = sigs.at(s1), k2 = sigs.at(s2);
+                if (std::abs(k1 - std::round(k1)) > 1e-6 || std::abs(k2 - std::round(k2)) > 1e-6) continue;
+                RingFixInheritCand c;
+                c.id = {sta, sat, s1, s2};
+                c.k1 = std::llround(k1);
+                c.k2 = std::llround(k2);
+                c.lambda1 = chainWavelengthM(sat, s1);
+                c.lambda2 = chainWavelengthM(sat, s2);
+                c.latched = latched.count({sta, sat, s1}) > 0 || latched.count({sta, sat, s2}) > 0;
+                const std::string g = groupOf(sat, s1);
+                c.ring = facts.ring(g, rxKey(sta), svKey(sat));
+                c.root = facts.root(g, rxKey(sta));
+                if (!(c.lambda1 > 0.0 && c.lambda2 > c.lambda1)) continue;
+                cands.push_back(c);
+            }
+        }
+        for (const RingFixEvent& ev : ringFixInherit(rf, cands, cuts, now_s))
+            traces.emitEvent(t, "RINGFIX", "hold", ev.id.sat, nameOf(ev.id.station), std::nullopt, std::nullopt,
+                             "inherit",
+                             fmt::format("sig1={} sig2={} ring={} n1={} n2={} wl={} old_host=1", ev.id.sig1,
+                                         ev.id.sig2, rf.links.at(ev.id).ring, ev.gate.n1, ev.gate.n2, ev.gate.wl));
+    }
+
+    // 7. This epoch's targets, for the next epoch's old hosts.
+    if (obs_rec != nullptr && obs_rec->armed) {
+        rf.prev_targets.clear();
+        for (const ChainEdgeObs& e : obs_rec->edges)
+            if (e.lambda_m > 0.0) rf.prev_targets[{e.station, e.sat, e.signal}] = e.target_m / e.lambda_m;
+    }
+
+    // 8. The hold table PASS B folds.
     for (const auto& [id, L] : rf.links) {
         if (!L.held) continue;
         rf.table[{id.station, id.sat, id.sig1}] = L.lambda1 * static_cast<double>(L.n1);
@@ -387,6 +583,33 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
             if (cy1 != cyc_of.end()) o.have_lat1 = chainLatticeChordInteger(lattice, *cy1->second, o.lat1);
             const auto cy2 = cyc_of.find({ii, r.sat, r.sig2});
             if (cy2 != cyc_of.end()) o.have_lat2 = chainLatticeChordInteger(lattice, *cy2->second, o.lat2);
+            if (rf.truth) {
+                long long n1 = 0, n2 = 0;
+                const auto trueOf = [&](const std::string& sig, long long& n) {
+                    const auto cy = cyc_of.find({ii, r.sat, sig});
+                    if (cy == cyc_of.end()) return false;
+                    std::vector<std::tuple<int, std::string, std::string, int>> terms;
+                    for (const arcgraph::CycleTerm& term : cy->second->cycle.terms)
+                        terms.emplace_back(term.arc.station.index, term.arc.sat.str(), sig, term.coeff);
+                    return ringFixTruthFrameInteger(*rf.truth, terms, cy->second->pin_sum_cyc,
+                                                    cy->second->pins_integer, now_s, t.tow, n);
+                };
+                const bool h1 = trueOf(r.sig1, n1), h2 = trueOf(r.sig2, n2);
+                o.have_truth = h1 && h2;
+                o.truth1 = n1;
+                o.truth2 = n2;
+                if (!rf.audit.empty()) {
+                    const auto check = [&](bool have, const std::string& sig, long long n) {
+                        if (!have) return;
+                        const auto f = rf.audit.find({stations[i].name, r.sat, sig});
+                        if (f == rf.audit.end()) return;
+                        ++rf.counters.truth_file_checked;
+                        if (f->second != n) ++rf.counters.truth_file_mismatch;
+                    };
+                    check(h1, r.sig1, n1);
+                    check(h2, r.sig2, n2);
+                }
+            }
             const LocalCarry* lc1 = net::getArc(arc_rows, net::ArcTuple{ii, r.sat, r.sig1}, &net::ArcState::amb);
             const LocalCarry* lc2 = net::getArc(arc_rows, net::ArcTuple{ii, r.sat, r.sig2}, &net::ArcState::amb);
             o.carry_ok = lc1 != nullptr && lc2 != nullptr;
@@ -412,7 +635,22 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
         }
     }
 
-    // The audit of every link held in this epoch's solve.
+    // The audit of every link held in this epoch's solve: against truth in this epoch's frame when it is
+    // armed (simulation only), and against the audit file.
+    std::map<RingFixLinkId, RingFixAudit> truth_of;
+    if (rf.truth) {
+        std::map<RingFixLinkId, const RingFixDecideObs*> obs_of;
+        for (const RingFixDecideObs& o : links) obs_of[o.id] = &o;
+        for (auto& [id, L] : rf.links) {
+            if (!L.held) continue;
+            const auto o = obs_of.find(id);
+            if (o == obs_of.end() || !o->second->have_truth) { ++rf.counters.truth_none; continue; }
+            const bool right = L.n1 == o->second->truth1 && L.n2 == o->second->truth2;
+            truth_of[id] = right ? RingFixAudit::Right : RingFixAudit::Wrong;
+            if (right) ++rf.counters.truth_right;
+            else ++rf.counters.truth_wrong;
+        }
+    }
     std::map<RingFixLinkId, RingFixAudit> audit_of;
     for (auto& [id, L] : rf.links) {
         if (!L.held) continue;
@@ -443,7 +681,20 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                                                 : ringFixAuditLink(rf.audit, name, ev.id, ev.gate.n1, ev.gate.n2);
         if (a == RingFixAudit::Wrong) ++rf.counters.decided_wrong;
         else if (a == RingFixAudit::Right) ++rf.counters.decided_right;
-        traces.emitEvent(t, "RINGFIX", "hold", ev.id.sat, name, ev.gate.sigma_if, kRingFixMaxSigmaCyc, "decide",
+        std::string truth_tok;
+        if (rf.truth) {
+            for (const RingFixDecideObs& o : links)
+                if (o.id < ev.id || ev.id < o.id) continue;
+                else {
+                    if (o.have_truth && (o.truth1 != ev.gate.n1 || o.truth2 != ev.gate.n2)) ++rf.counters.decided_truth_wrong;
+                    truth_tok = o.have_truth ? ((o.truth1 == ev.gate.n1 && o.truth2 == ev.gate.n2) ? " truth=right"
+                                                                                                 : " truth=WRONG")
+                                             : " truth=none";
+                    break;
+                }
+        }
+        traces.emitEvent(t, "RINGFIX", "hold", ev.id.sat, name, ev.gate.sigma_if, kRingFixMaxSigmaCyc,
+                         ev.oracle ? "oracle" : "decide",
                          fmt::format("sig1={} sig2={} ring={} n1={} n2={} wl={} frac_if={:.3f} sigma_if={:.3f} "
                                      "frac_wl={:.3f} rule={} audit={}",
                                      ev.id.sig1, ev.id.sig2, rf.links.at(ev.id).ring, ev.gate.n1, ev.gate.n2,
@@ -453,7 +704,8 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                              + (rf.gate_rule == RingFixGateRule::Odds
                                     ? fmt::format(" gate=odds log_odds_if={:.2f} log_odds_wl={:.2f}",
                                                   ev.gate.log_odds_if, ev.gate.log_odds_wl)
-                                    : std::string()));
+                                    : std::string())
+                             + truth_tok);
     }
 
     // network_ring_fix.csv: one row per pair-family chord.
@@ -469,8 +721,10 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
             const auto g = gate_of.find(o.id);
             const RingFixGate gr = g != gate_of.end() ? g->second : RingFixGate{};
             const auto au = audit_of.find(o.id);
+            const auto tr = truth_of.find(o.id);
             std::string audit;
-            if (au != audit_of.end()) audit = auditName(au->second);
+            if (tr != truth_of.end()) audit = auditName(tr->second);
+            else if (au != audit_of.end()) audit = auditName(au->second);
             else if (state[0] == 'd' && !rf.audit.empty())
                 audit = auditName(ringFixAuditLink(rf.audit, stations[static_cast<std::size_t>(o.id.station)].name,
                                                    o.id, L.n1, L.n2));
@@ -542,6 +796,23 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
               "decided {} = released {} + held {}: {}.  Refused link-epochs: {}.",
               rel_total, released, C.carry_reopened, C.decided, rel_total, held_end,
               C.decided == rel_total + held_end ? "closed" : "NOT CLOSED", refused);
+    if (C.cuts > 0 || C.to_tree > 0 || C.inherited > 0 || C.root_kept > 0)
+        log->warn("Network (ring fix, the chain's events): {} cut(s) on a band, {} with a known step ({} of 0); {} held "
+                  "link(s) re-expressed, {} released across an unknown step; {} became tree edges; {} old host(s) "
+                  "inherited; {} kept through a pinned root handover; {} stamp rebase(s) after a cut's erase.",
+                  C.cuts, C.cuts_known, C.cuts_known_zero, C.reexpressed, C.cut_released, C.to_tree, C.inherited,
+                  C.root_kept, C.stamps_rebased);
+    if (rf.oracle_until_s > 0.0)
+        log->warn("Network (ring fix, oracle phase of {:.0f} s): {} link(s) held at their true integers, {} held "
+                  "integer(s) set again.", rf.oracle_until_s, C.oracle_decided, C.oracle_corrected);
+    if (rf.truth)
+        log->warn("Network (ring fix truth audit, in each epoch's frame): held link-epochs right {}, WRONG {}, without "
+                  "a true integer {}; decisions WRONG {}; {} branch(es) started without a wind-up row{}.",
+                  C.truth_right, C.truth_wrong, C.truth_none, C.decided_truth_wrong, rf.truth->arcs_without_windup,
+                  C.truth_file_checked > 0
+                      ? fmt::format("; against the audit file {} chord-band-epochs compared, {} differ",
+                                    C.truth_file_checked, C.truth_file_mismatch)
+                      : std::string());
     if (rf.audit.empty())
         log->warn("Network (ring fix audit): no audit file; nothing was compared against truth.");
     else

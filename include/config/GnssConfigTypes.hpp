@@ -1891,6 +1891,12 @@ namespace GnssProcessor {
         /// @c network.ring_fix.gate: "sigma" (the frozen gate, default) or "odds" (the log-odds of N1 and of the
         /// wide lane at least ln 1e6, the fraction bound kept).
         std::string gate{ "sigma" };
+        /// @c network.ring_fix.truth_root: a simulator fixture whose truth audits every held integer in the frame of
+        /// its epoch (simulation only; default empty).
+        std::string truth_root{};
+        /// @c network.ring_fix.oracle_until_s: an oracle phase of this many seconds from the first epoch, during which
+        /// every chord with a true integer is held at it (simulation only, needs truth_root; default 0, none).
+        double oracle_until_s{ 0.0 };
         /// @c network.ring_fix.audit_frame_file: a frame-target file (station,sat,signal,frame_int,...)
         /// against which every held integer is audited each epoch (simulation only; default empty).
         std::string audit_frame_file{};

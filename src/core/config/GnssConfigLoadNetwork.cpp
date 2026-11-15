@@ -1496,6 +1496,15 @@ namespace GnssProcessor {
             if (rf.gate != "sigma" && rf.gate != "odds")
                 throw std::runtime_error("network.ring_fix.gate ('" + rf.gate
                                          + "') must be \"sigma\" or \"odds\".");
+            rf.truth_root = jval<std::string>(json, "network.ring_fix.truth_root", "network_ring_fix_truth_root",
+                                              std::string{});
+            rf.oracle_until_s = jval<double>(json, "network.ring_fix.oracle_until_s",
+                                             "network_ring_fix_oracle_until_s", 0.0);
+            if (!(rf.oracle_until_s >= 0.0))
+                throw std::runtime_error("network.ring_fix.oracle_until_s must be 0 or more.");
+            if (rf.oracle_until_s > 0.0 && rf.truth_root.empty())
+                throw std::runtime_error("network.ring_fix.oracle_until_s needs network.ring_fix.truth_root (the oracle "
+                                         "reads the fixture's truth; simulation only).");
         }
     }
 
@@ -10803,12 +10812,16 @@ namespace GnssProcessor {
             const std::string& af = network_config_.ring_fix.audit_frame_file;
             if (!af.empty() && !std::filesystem::exists(af))
                 throw std::runtime_error("network.ring_fix.audit_frame_file ('" + af + "') does not exist.");
+            const std::string& tr = network_config_.ring_fix.truth_root;
+            if (!tr.empty() && !std::filesystem::exists(tr))
+                throw std::runtime_error("network.ring_fix.truth_root ('" + tr + "') does not exist.");
             log->warn("Network: network.ring_fix ARMED (rule {}, audit {}): chord integers of the eq34 chain "
                       "are decided ring by ring, held in the solve and released at every event "
                       "(include/network/ar/RingFix.hpp).",
                       network_config_.ring_fix.rule, af.empty() ? std::string("none") : af);
         } else if (network_config_.ring_fix.rule != "gated" || !network_config_.ring_fix.audit_frame_file.empty()
-                   || network_config_.ring_fix.order != "ring" || network_config_.ring_fix.gate != "sigma") {
+                   || network_config_.ring_fix.order != "ring" || network_config_.ring_fix.gate != "sigma"
+                   || !network_config_.ring_fix.truth_root.empty() || network_config_.ring_fix.oracle_until_s > 0.0) {
             log->warn("Network: network.ring_fix.rule / order / gate / audit_frame_file are INERT without "
                       "network.ring_fix.enable.");
         }
