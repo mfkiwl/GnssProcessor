@@ -53,6 +53,8 @@ USER_SETS = {
     "ud": {"network.closed_loop.consumer_undifferenced": True},
     # Card IRDU section 12.8: carry the float ambiguity across a declared phase-bias step instead of resetting it.
     "pc": {"network.closed_loop.pb_disc_carry": True},
+    # Card IRDU section 12.8's addendum: exclude the satellites the thin bed's stream does not correct.
+    "xs": {"processing.excluded_satellites": ["G12", "G20", "G25"]},
 }
 
 
