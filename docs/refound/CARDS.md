@@ -117,4 +117,9 @@ and [record/refound/CARDS_part2.md](../record/refound/CARDS_part2.md).
   discontinuity). Stage A the controls, stage B the chain on or off by the emission holds on or off on r3c, stage C one
   event per bed ranked by its cost to the user, stage D the network's certified integers at re-hosts and a default-off
   research switch that takes them.
+- [NRF](NRF_network_ring_fixing_2026-11-14.md): open, 2026-11-14: integer fixing in the network, ring by ring from
+  the chain's root, on the simulator (the author's instruction of 2026-11-14 lifts the do-not-build verdict for this
+  work). Pre-registered: chord integers decided by the gated rounding of card IRDU 12.4 (b) behind a damage gate, held
+  in the solve by the oracle pin's row, released at every event with the variance re-opened, audited against truth;
+  stages N1 (bed without re-seats), N2 (r3c and event beds), N3 (6 h bed); serves IRD-5, IRD-8 and card ARL's rungs.
 - [DRF](DRF_docs_record_folder_2026-11-09.md): open, 2026-11-09: the docs working set and one record folder: `scripts/docs_record.py` moves closed cards and uncited documents into `docs/record/` (old layout mirrored, links re-pointed, nothing rewritten); 145 of 602 files stay; rehearsed on branch `docs/record-folder`, every docs check passes; landing and the rule text wait for the author.

@@ -22,6 +22,7 @@
 #include "network/assembly/Responses.hpp"
 #include <Eigen/Dense>   // LLT in networkWriteWhitenedRows
 #include "network/slip/OraclePin.hpp"
+#include "network/ar/RingFix.hpp"
 #include "network/qc/Congruence.hpp"
 #include "network/assembly/IonoConstraintRows.hpp"
 #include "network/carry/LevelingCarry.hpp"
@@ -74,6 +75,7 @@ void networkAssemblyTally(NetworkRun& run, const NetworkEpoch& ep,
     networkParamInventoryDrain(ctx.param_inventory, asm_res, present, se.time.week, se.time.tow);
     networkResponsesStationTally(ctx, asm_res);
     networkOraclePinStationTally(ctx, asm_res);
+    networkRingFixStationTally(ctx, asm_res);
     networkAmbiguityStaleSkipTally(ctx, asm_res, se);
     // A non-SPD block under float_kf is a vehicle change on one station-epoch: the arc
     // reverts to the per-column route the vehicle exists to replace, so it is named with
@@ -155,6 +157,7 @@ const StationBuildSteps kStationBuildSteps = {{
      kindBit(CK::BlockAmbiguityCarry) | kindBit(CK::BlockZwdCarry) | kindBit(CK::BlockIonoCarry) |
      kindBit(CK::BlockRxClockCarry) | kindBit(CK::BlockRxCbCarry) | kindBit(CK::BlockRxPbCarry) |
      kindBit(CK::BlockPhaseColourCarry) | kindBit(CK::PriorAmbiguityOraclePin) |
+     kindBit(CK::PriorAmbiguityRingHold) |
      kindBit(CK::PriorZwdCarry) | kindBit(CK::PriorRxCbDatum) | kindBit(CK::PriorRxCbDatumPrePd) |
      kindBit(CK::PriorRxCbCarry),
      &networkStationCarriedPriors},
@@ -193,6 +196,9 @@ const std::array<StationCarryStep, kStationCarryStepCount> kStationCarrySteps = 
     {"oracle_pin", "filter/NetworkOraclePin",
      kindBit(CK::PriorAmbiguityOraclePin),
      &networkOraclePinPriors},
+    {"ring_hold", "filter/NetworkRingFix",
+     kindBit(CK::PriorAmbiguityRingHold),
+     &networkRingFixPriors},
     {"zwd", "filter/NetworkZwdCarry",
      kindBit(CK::PriorZwdCarry) | kindBit(CK::CouplingScalar),
      &networkZwdCarryPrior},

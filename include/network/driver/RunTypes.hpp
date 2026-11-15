@@ -1416,6 +1416,13 @@ struct StationAssembly {
     long long                 opin_rows{0};           ///< …folded as a diagonal pin prior row.
     long long                 opin_gauge_skipped{0};  ///< …skipped: the arc is gauge-pinned (an anchor), whose 1e10 datum pin owns the family's frame.
     long long                 opin_no_column{0};      ///< …skipped: the column is not in this epoch's A_r (or its x_lin / the row is non-finite).
+    /// The ring fix's hold rows at this station (network/ar/RingFix.hpp; 0 on every run
+    /// without network.ring_fix.enable).  Closure: `rfix_offered == rfix_rows +
+    /// rfix_gauge_skipped + rfix_no_column`.
+    long long                 rfix_offered{0};        ///< Ambiguity columns of this station found in the hold table.
+    long long                 rfix_rows{0};           ///< …folded as a diagonal hold row.
+    long long                 rfix_gauge_skipped{0};  ///< …skipped: the arc is a tree edge of the chain, whose 1e10 pin is the frame.
+    long long                 rfix_no_column{0};      ///< …skipped: the column is not in this epoch's A_r (or its x_lin / the row is non-finite).
     /// Per folded (sat, signal) ambiguity column of this station-epoch, the variance
     /// the fold used and the route it took (RF-1 §7.4, @c network.trace_amb_state).
     /// Filled only when the trace is armed; otherwise the map is never touched, and an

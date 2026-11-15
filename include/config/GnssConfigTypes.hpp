@@ -1871,6 +1871,25 @@ namespace GnssProcessor {
      * The datum fields name the network time reference (a pivot receiver clock)
      * and, optionally, a reference satellite per constellation for the clock gauge.
      */
+    /**
+     * @brief Integer fixing in the network, ring by ring outward from the eq34 chain's root
+     *        (@c network.ring_fix.*; include/network/ar/RingFix.hpp).  Default off.
+     *
+     * The rule's numbers are constants of include/network/ar/RingFix.hpp, frozen by the card
+     * that pre-registered the mechanism; only the arming, the rule's name and the audit file
+     * are keys.
+     */
+    struct NetworkRingFixConfig {
+        /// @c network.ring_fix.enable: decide, hold, release and audit the chain's chord integers (default false).
+        bool enable{ false };
+        /// @c network.ring_fix.rule: "gated" (the frozen rule, default) or "plain" (the negative
+        /// control: every candidate with a float is rounded and held at once).
+        std::string rule{ "gated" };
+        /// @c network.ring_fix.audit_frame_file: a frame-target file (station,sat,signal,frame_int,...)
+        /// against which every held integer is audited each epoch (simulation only; default empty).
+        std::string audit_frame_file{};
+    };
+
     struct NetworkConfig {
         std::vector<StationConfig> stations;  ///< Peer stations (>=2); each needs a known ECEF (held fixed).
         NetworkInjectConfig inject;           ///< Event-harness fault injector (network.inject.*; absent => off, byte-identical; docs/record/SPEC_event_harness.md).
@@ -1879,6 +1898,7 @@ namespace GnssProcessor {
         double epoch_sync_tolerance_s{ 0.01 };///< Max time-tag difference when matching epochs across stations.
         ClosedLoopConfig closed_loop;         ///< Optional closed-loop integer-recovery harness (held-out consumer).
         NetworkArConfig  ambiguity_resolution;///< Producer-side integer fixing (default off: float product).
+        NetworkRingFixConfig ring_fix;        ///< Integer fixing ring by ring on the eq34 chain (network.ring_fix.*; default off).
         SdEwlConfig      sd_ewl;              ///< SD pre-reduce EWL constraint (default off, byte-identical; docs/record/SPEC_sd_ewl_prereduce.md).
         SlipQcConfig     slip_qc;             ///< Slip-QC hardening (network.cycle_slip.*; every master default off, byte-identical; docs/record/SPEC_slip_qc_hardening.md).
         SignalIntegrityConfig signal_integrity; ///< Flicker/gap signal integrity: band-state classifier, degraded-phase demotion and re-vet (network.signal_integrity.*; default off, byte-identical; docs/record/SPEC_flicker_gap_integrity.md).

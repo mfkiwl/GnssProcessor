@@ -284,6 +284,7 @@ add_library(gnss_core STATIC
     src/core/network/slip/SlipFunnel.cpp
     src/core/network/solve/ChainDatum.cpp
     src/core/network/solve/ChainFrame.cpp
+    src/core/network/solve/ChainChordTable.cpp
     src/core/network/solve/AnchorHygiene.cpp
     src/core/network/assembly/AprioriClockTrack.cpp
     src/core/network/assembly/SignalIntegrity.cpp
@@ -343,6 +344,8 @@ add_library(gnss_core STATIC
     src/core/network/diag/Leveling.cpp
     src/core/network/diag/StashStatus.cpp
     src/core/network/ar/ProducerAr.cpp
+    src/core/network/ar/RingFix.cpp
+    src/core/network/ar/RingFixSeams.cpp
     src/core/network/ar/ArSuspect.cpp
     src/core/network/ar/ArcGraph.cpp
     src/core/network/ar/ArcLife.cpp
@@ -848,6 +851,7 @@ add_executable(gnss_tests
     tests/network/test_second_band_admission.cpp
     tests/network/test_oracle_pin.cpp
     tests/network/test_oracle_pin_frame.cpp
+    tests/network/test_ring_fix.cpp
     tests/test_warm_resume_require.cpp
     tests/test_anchor_slip_handover.cpp
     tests/network/test_phase_gate_drop_edge.cpp

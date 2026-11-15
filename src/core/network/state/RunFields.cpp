@@ -41,6 +41,7 @@ const std::vector<FieldDecl> kRunFields = {
     {"carry.rxclk_prev_now_s", "rxclk_prev_now_s", Persist::ColdStart, "", "", nullptr, nullptr, nullptr},
     {"carry.slip_oracle", "slip_oracle", Persist::ColdStart, "", "", nullptr, nullptr, nullptr},
     {"carry.oracle_pin", "oracle_pin", Persist::ColdStart, "", "", nullptr, nullptr, nullptr},
+    {"carry.ring_fix", "ring_fix", Persist::ColdStart, "", "", nullptr, nullptr, nullptr},
     {"carry.zwd_seam_ep_left", "zwd_seam_ep_left", Persist::ResumeSeeded, "", "", nullptr, nullptr, nullptr},
     {"carry.resume_slip_warmup_left", "resume_slip_warmup_left", Persist::ResumeSeeded, "", "", nullptr, nullptr, nullptr},
     {"carry.resume_d5_warmup_left", "resume_d5_warmup_left", Persist::ResumeSeeded, "", "", nullptr, nullptr, nullptr},

@@ -210,7 +210,7 @@ struct StationCarryStep {
     ContributionKindSet kinds;   ///< The row and prior kinds this step can create.
     StationCarryFn      build;   ///< Gates itself at its first line.
 };
-inline constexpr std::size_t kStationCarryStepCount = 12;  ///< Number of rows of @c kStationCarrySteps.
+inline constexpr std::size_t kStationCarryStepCount = 13;  ///< Number of rows of @c kStationCarrySteps.
 /// The carried-prior section, in walk order.
 extern const std::array<StationCarryStep, kStationCarryStepCount> kStationCarrySteps;
 

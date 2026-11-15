@@ -455,6 +455,12 @@ IRDU_P5_KEYS = {"iftd_off": "network.cycle_slip.if_phase_td=false",
                 "pv": "network.disc_phase_visible=true"}
 for _name, _kv in IRDU_P5_KEYS.items():
     KNOB_GROUPS["fpin_nr3_all_" + _name] = KNOB_GROUPS["fpin_nr3_all"] + [_kv]
+# Card NRF (integer fixing in the network, ring by ring): the mechanism with its audit against the bed's frame-target
+# file (every tree link and chord of irdu_nr, whose tree is one for the whole run), under the frozen rule (nrf_g) and
+# under the negative control's plain rounding (nrf_p).
+KNOB_GROUPS["nrf_g"] = ["network.ring_fix.enable=true",
+                        "network.ring_fix.audit_frame_file=" + ROOT + "/config/sim/irdu/fpin_nr3_all.csv"]
+KNOB_GROUPS["nrf_p"] = KNOB_GROUPS["nrf_g"] + ["network.ring_fix.rule=plain"]
 
 
 def sha256_bytes(b):

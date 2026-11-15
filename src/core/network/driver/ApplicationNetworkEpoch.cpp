@@ -382,6 +382,10 @@ Application::LoopSignal Application::networkProcessEpoch_(NetworkRun& run,
     // `oracle_pin` event the pointer is null, no branch is reachable, and the output
     // is byte-identical.
     networkOraclePinEpoch(run, ep);
+    // The ring fix (network/ar/RingFix.hpp): this epoch's releases and the hold table PASS B
+    // folds, serially, after the election (the chain record) and PASS A's slip latch and before
+    // the vehicle's drop pass.  No-op without network.ring_fix.enable.
+    networkRingFixHoldEpoch(run, ep);
 
     // The bounded drop (network/ar/AmbFloat.cpp): serially, after PASS A's
     // slip scans latched relevel.free_ambs and before the parallel PASS-B inject reads the carry.
@@ -499,6 +503,10 @@ Application::LoopSignal Application::networkProcessEpoch_(NetworkRun& run,
     // read the held vector (x_emit); every other seam keeps the float x_s.  Unreachable
     // unless the fold is armed or network.ambiguity_resolution.trace_lattice.
     ep.fixed_cycles = networkFixedCycles(run, ep);
+    // The ring fix's monitor, audit and decisions on this epoch's solve, after the lattice step
+    // (its veto reads this epoch's lattice); a decision is held from the next epoch.  Inside
+    // this bracket for the reason given above.  No-op without network.ring_fix.enable.
+    networkRingFixDecide(run, ep);
     ep.prep = networkSolPrep(run, ep, ep.events);
     networkSubEnd(run, SB_SOLPREP);     // close sol-prep and discontinuity signalling
     // Whether this epoch's solution reached the wire.  Every whole-epoch withhold

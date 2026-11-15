@@ -699,6 +699,10 @@ namespace GnssProcessor {
         const std::filesystem::path chain_edges_trace_path;   ///< path of network_chain_edges.csv
         std::ofstream chain_frame_trace;                      ///< the chord table each epoch
         const std::filesystem::path chain_frame_trace_path;   ///< path of network_chain_frame.csv
+        /// The ring fix's decisions, holds and audit, one row per pair-family chord each epoch
+        /// (network.ring_fix.enable, network/ar/RingFix.hpp).
+        std::ofstream ring_fix_trace;
+        const std::filesystem::path ring_fix_trace_path;      ///< path of network_ring_fix.csv
         /// Every emitted satellite phase bias immediately before the phase-bias hold
         /// (network.trace_pb_prehold).
         std::ofstream pb_prehold_trace;

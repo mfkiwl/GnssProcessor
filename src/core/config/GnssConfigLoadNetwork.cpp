@@ -1473,6 +1473,20 @@ namespace GnssProcessor {
                               + (ar.trace_lattice ? "  Lattice observatory ON." : ""));
             }
         }
+        // Integer fixing ring by ring on the eq34 chain (include/network/ar/RingFix.hpp).  The
+        // interlocks with the chain are checked once the chain's keys are read
+        // (loadNetworkSignalIntegrity_, after the eq34 keys).
+        {
+            auto& rf = network_config_.ring_fix;
+            rf.enable = jval<bool>(json, "network.ring_fix.enable", "network_ring_fix_enable", false);
+            rf.rule = jval<std::string>(json, "network.ring_fix.rule", "network_ring_fix_rule",
+                                        std::string("gated"));
+            rf.audit_frame_file = jval<std::string>(json, "network.ring_fix.audit_frame_file",
+                                                    "network_ring_fix_audit_frame_file", std::string{});
+            if (rf.rule != "gated" && rf.rule != "plain")
+                throw std::runtime_error("network.ring_fix.rule ('" + rf.rule
+                                         + "') must be \"gated\" or \"plain\".");
+        }
     }
 
     // =================================================================
@@ -10767,6 +10781,25 @@ namespace GnssProcessor {
             log->warn("Network: network.trace_chain_datum / network.trace_rpb_states are INERT "
                       "without network.phase_datum_eq34 (there is no chain to observe); "
                       "nothing is written.");
+        // The ring fix reads the chain's record (its tree, chords and cut releases), which the
+        // election writes only with the chain trace armed; an audit file that does not exist is a
+        // mis-pointed path, not an empty audit.
+        if (network_config_.ring_fix.enable) {
+            if (!network_phase_datum_eq34_ || !network_config_.trace_chain_datum)
+                throw std::runtime_error(
+                    "network.ring_fix.enable needs network.phase_datum_eq34 and network.trace_chain_datum "
+                    "(the rings are read from the chain's record, which the election writes only with the "
+                    "chain trace armed).");
+            const std::string& af = network_config_.ring_fix.audit_frame_file;
+            if (!af.empty() && !std::filesystem::exists(af))
+                throw std::runtime_error("network.ring_fix.audit_frame_file ('" + af + "') does not exist.");
+            log->warn("Network: network.ring_fix ARMED (rule {}, audit {}): chord integers of the eq34 chain "
+                      "are decided ring by ring, held in the solve and released at every event "
+                      "(include/network/ar/RingFix.hpp).",
+                      network_config_.ring_fix.rule, af.empty() ? std::string("none") : af);
+        } else if (network_config_.ring_fix.rule != "gated" || !network_config_.ring_fix.audit_frame_file.empty()) {
+            log->warn("Network: network.ring_fix.rule / audit_frame_file are INERT without network.ring_fix.enable.");
+        }
 
         // Two-edge continuous handover: inert guards, then the arming line.  Follows the
         // eq34-hygiene / pool-re-host precedent: an arm that cannot change anything is

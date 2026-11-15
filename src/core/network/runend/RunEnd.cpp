@@ -73,6 +73,7 @@
 #include "network/assembly/MeasurementAdmission.hpp"
 #include "network/assembly/MultiGnss.hpp"
 #include "network/slip/OraclePin.hpp"
+#include "network/ar/RingFix.hpp"
 #include "network/assembly/ParamInventory.hpp"
 #include "network/assembly/ParamRegistry.hpp"
 #include "network/carry/PhaseColourCarry.hpp"
@@ -200,6 +201,8 @@ const std::array<NetworkRunEndRow, kNetworkRunEndReportCount> kNetworkRunEndRepo
      "network/carry/LevelAuthority.cpp", networkLevelAuthorityRunEnd},
     {"the sim-only oracle ambiguity pin",
      "network/slip/OraclePin.cpp", networkOraclePinRunEnd},
+    {"the ring fix: decisions, holds, releases and the audit",
+     "network/ar/RingFixSeams.cpp", networkRingFixRunEnd},
     {"the sim-only oracle slip response",
      "network/slip/SlipOracle.cpp", networkSlipOracleRunEnd},
     {"the eq34 chain datum: re-references, pin audit, seed round, slip-aware election",

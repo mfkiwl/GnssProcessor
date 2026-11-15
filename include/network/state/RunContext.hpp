@@ -61,6 +61,7 @@
 #include "network/slip/RawObservables.hpp" // IonoCsState, the CS-GF authority (successor to QUEUE 8b)
 #include "network/slip/SlipOracle.hpp"  // NetworkSlipOracle (sim-only oracle slip response)
 #include "network/slip/OraclePin.hpp"  // NetworkOraclePin (sim-only oracle ambiguity pin)
+#include "network/ar/RingFix.hpp"      // NetworkRingFix (integer fixing ring by ring)
 #include "network/solve/Sbasis.hpp"     // NetworkSbasis::Plan (lifecycle-fn params)
 #include "network/assembly/BiasAdmission.hpp" // latched W6 code-bias admission census, ctx.admission (CB-ADM)
 #include "network/carry/Inject.hpp"        // NetworkInjectState: the event-harness fault schedule and ledger
@@ -1704,6 +1705,12 @@ namespace GnssProcessor {
         /// satellite, signal).  Not snapshotted: a diagnostic, and a resumed leg re-reads
         /// the fixture anyway.
         std::unique_ptr<NetworkOraclePin> oracle_pin;
+        /// The ring fix (network.ring_fix.*, include/network/ar/RingFix.hpp): its links, the held
+        /// set, this epoch's hold table and the run-end counters.  Null on every run without
+        /// network.ring_fix.enable; every call site and the PASS-B row test the pointer first, so
+        /// the off path is structurally byte-identical (standing invariant 6).  Not snapshotted: a
+        /// resumed leg starts with nothing held, which is the conservative direction.
+        std::unique_ptr<NetworkRingFix> ring_fix;
         // zwd_carry: moved to net::StationState::zwd (network/state/Entities.hpp).
         /// Seam-scoped ZWD re-seed window (network.zwd_seam_reseed): emitted epochs
         /// remaining in the post-resume inject window.  Armed by networkTryWarmResume when
