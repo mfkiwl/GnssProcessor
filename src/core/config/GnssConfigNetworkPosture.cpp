@@ -327,6 +327,19 @@ namespace GnssProcessor {
               "a drop clears the arc's border regression and block row even at birth strength "
               "(without it the field level jumps by metres at the first fold under the exact "
               "update); a companion of the exact update" },
+            // --- The bad-epoch response at a return after a gap, in the chain posture with network integer
+            //     fixing (adopted 2026-11-15; the main posture's goldens do not run the ring fix).
+            { nc.ring_fix.enable,
+              nc.amb_float_drop_gap_cover == NetworkAmbGapCover::Free,
+              Tier::SCOPED, false, "network.amb_float_drop_gap_cover",
+              "free a band whose return after a gap the gap instrument declares shifted: the drop kept the "
+              "pre-gap value at the first-stash sigma (DOY 144: 9 / 11 returns more than 3 sigma off -> 0 / 0, "
+              "T4 refloats 15 -> 0, RAIM wet-delay erases 9 -> 0)" },
+            { nc.ring_fix.enable,
+              nc.zwd_event_inflate_m > 0.0,
+              Tier::SCOPED, false, "network.zwd_event_inflate_m",
+              "keep a receiver's wet delay with 2 cm of sigma added at a slip latch or a RAIM flag instead of "
+              "erasing it; the companion of the gap cover (KIT300UZB's step at a return 1.02 -> 0.88 cm)" },
             { !network_carry_invariant_ && network_phase_leveling_,
               network_shared_carry_full_cov_,
               Tier::SCOPED, false, "network.shared_carry_full_cov",

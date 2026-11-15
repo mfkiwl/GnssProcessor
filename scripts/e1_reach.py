@@ -14,6 +14,11 @@ Reads, all after the event epoch unless said:
                  every arc but the event arc, per receiver
   stream         products.txt: satellite clocks (C) and phase biases (P) of every satellite, event - control, the
                  epoch's median over the constellation's satellites removed; max per satellite, the event satellite apart
+  phase-bias     the same phase-bias changes of each satellite's two bands split by direction, GPS and Galileo apart:
+  directions     d1 = I + G and d2 = gamma I + G with gamma = (f1/f2)^2, so G = (gamma d1 - d2)/(gamma - 1) is the
+                 ionosphere-free part a user's position feels (reported with the satellite clock's change added),
+                 I = (d2 - d1)/(gamma - 1) the part a slant ionosphere absorbs, and d1/lambda1 - d2/lambda2 the wide
+                 lane in cycles
   events         logs/network_events.csv rows of the event run at the event epoch and the next one that the control
                  does not have, by tier, event and action
 """
@@ -28,6 +33,12 @@ import sys
 RUNS = os.environ.get("RAPID_RUNS_ROOT") or "D:/GnssProcessorSupport/runs_nom"
 # Carrier wavelengths (m) of the bed's phase signals (GPS L1/L2/L5, Galileo E1/E5a/E5b).
 LAM = {"L1C": 0.19029367279836487, "L2W": 0.24421021342456825, "L5Q": 0.25482804879085386, "L7Q": 0.24834936958430670}
+SPEED_OF_LIGHT = 299792458.0
+# Carrier frequencies (Hz) by constellation letter and RINEX band digit.
+FREQ = {("G", "1"): 1575.42e6, ("G", "2"): 1227.60e6, ("G", "5"): 1176.45e6,
+        ("E", "1"): 1575.42e6, ("E", "5"): 1176.45e6, ("E", "7"): 1207.14e6, ("E", "6"): 1278.75e6}
+# The second band of a satellite's pair, in order of preference, by constellation.
+SECOND_BAND = {"G": ("2", "5"), "E": ("5", "7", "6")}
 
 
 def resolve(run):
@@ -76,6 +87,55 @@ def demedian(d_ev, d_ct, group_of, tmin):
         m = statistics.median(dd.values())
         for k, v in dd.items():
             out[k[1:]] = max(out[k[1:]], abs(v - m))
+    return out
+
+
+def demedian_epochs(d_ev, d_ct, group_of, tmin):
+    """{key: dx - median of its group at the epoch} for keys (tow, *rest) over epochs > tmin (groups of 3 or more)."""
+    by_t = collections.defaultdict(dict)
+    for k, v in d_ev.items():
+        if k[0] > tmin and k in d_ct:
+            by_t[(k[0], group_of(k))][k] = v - d_ct[k]
+    out = {}
+    for _, dd in by_t.items():
+        if len(dd) < 3:
+            continue
+        m = statistics.median(dd.values())
+        for k, v in dd.items():
+            out[k] = v - m
+    return out
+
+
+def pb_directions(pp_ev, pp_ct, pc_ev, pc_ct, tmin, event_sat):
+    """Per constellation, the largest phase-bias change after the event of each satellite split by direction."""
+    dpb = demedian_epochs(pp_ev, pp_ct, lambda k: (k[1][0], k[2]), tmin)
+    dclk = demedian_epochs(pc_ev, pc_ct, lambda k: k[1][0], tmin)
+    by = collections.defaultdict(dict)          # (tow, sat) -> {band digit: (signal, d)}
+    for (t, sat, sig), d in dpb.items():
+        by[(t, sat)].setdefault(sig[1], (sig, d))
+    best = collections.defaultdict(lambda: collections.defaultdict(lambda: [0.0, 0.0, 0.0, 0.0]))
+    for (t, sat), bands in by.items():
+        c = sat[0]
+        b2 = next((b for b in SECOND_BAND.get(c, ()) if b in bands), None)
+        if "1" not in bands or b2 is None or (c, "1") not in FREQ or (c, b2) not in FREQ:
+            continue
+        f1, f2 = FREQ[(c, "1")], FREQ[(c, b2)]
+        gamma = (f1 / f2) ** 2
+        d1, d2 = bands["1"][1], bands[b2][1]
+        iono = (d2 - d1) / (gamma - 1.0)
+        free = (gamma * d1 - d2) / (gamma - 1.0)
+        wl = d1 / (SPEED_OF_LIGHT / f1) - d2 / (SPEED_OF_LIGHT / f2)
+        rec = best[c][sat]
+        rec[0] = max(rec[0], abs(free + dclk.get((t, sat), 0.0)))
+        rec[1] = max(rec[1], abs(iono))
+        rec[2] = max(rec[2], abs(wl))
+        rec[3] = max(rec[3], abs(free))
+    out = {}
+    for c, sats in best.items():
+        others = {s: v for s, v in sats.items() if s != event_sat}
+        top = lambda i: sorted(((v[i], s) for s, v in others.items()), reverse=True)[:3]
+        out[c] = {"iono_free_with_clock_m": top(0), "iono_like_m": top(1), "wide_lane_cyc": top(2),
+                  "iono_free_m": top(3), "event_sat": sats.get(event_sat)}
     return out
 
 
@@ -134,6 +194,7 @@ def main():
                      "clock_others_top_m": sorted(((v, s[0]) for s, v in dclk.items() if s[0] != a.sat), reverse=True)[:6],
                      "pb_event_sat_m": {s[1]: v for s, v in dpb.items() if s[0] == a.sat},
                      "pb_others_top_m": sorted(((v, "%s %s" % s) for s, v in dpb.items() if s[0] != a.sat), reverse=True)[:6]}
+    res["stream_pb_directions"] = pb_directions(pp_ev, pp_ct, pc_ev, pc_ct, T, a.sat)
     # events
     def rows(run):
         c = collections.Counter()
@@ -160,6 +221,13 @@ def main():
         ", ".join("%s %.4f" % (s, v) for v, s in res["stream"]["clock_others_top_m"][:5])))
     print("  stream phase biases (median removed): %s %s; others top %s" % (
         a.sat, res["stream"]["pb_event_sat_m"], ", ".join("%s %.4f" % (s, v) for v, s in res["stream"]["pb_others_top_m"][:5])))
+    for c, d in sorted(res["stream_pb_directions"].items()):
+        print("  phase biases of the other satellites by direction, %s: ionosphere-free with the clock %s m; "
+              "ionosphere-like %s m; wide lane %s cycles" % (
+                  {"G": "GPS", "E": "Galileo"}.get(c, c),
+                  ", ".join("%s %.5f" % (s, v) for v, s in d["iono_free_with_clock_m"]),
+                  ", ".join("%s %.5f" % (s, v) for v, s in d["iono_like_m"]),
+                  ", ".join("%s %.4f" % (s, v) for v, s in d["wide_lane_cyc"])))
     print("  events of the event run at the event epoch and the next that the control lacks: %s" % (
         "; ".join("%s x%d" % kv for kv in list(res["events_extra_at_event"].items())[:25])))
     if a.json:
