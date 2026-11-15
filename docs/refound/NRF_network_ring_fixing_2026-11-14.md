@@ -5,10 +5,10 @@
 - **id:** NRF
 - **topic:** network-vehicle
 - **status:** open
-- **summary:** Pre-registered 2026-11-14 (night), before any graded run, on the author's instruction to build integer fixing in the network by the ring method of card IRDU section 12: a chord's integers are decided ring by ring outward from the chain's root, held in the network's own solve, released at every event that can invalidate them, and every held integer is audited against truth. Simulator only, default off. Stages: N1 the bed without re-seats, N2 r3c with re-seats and event beds, N3 the 6 h reference bed; observed data only after the three pass and are re-graded. Serves card IRD's steps IRD-5 and IRD-8 and card ARL's rungs, with their frozen bars. Results are appended below. 2026-11-15, N1 (section 9): every bar holds (off identity, 0 wrong holds, the negative control seen by the audit, both edges, every epoch emitted); 11 of 186 links held in 2 h, all right, from 40 min; the stream and the users read the plain chain arm's level; the limit is the floats' precision against the gate and the ring order, not wrong integers.
+- **summary:** Pre-registered 2026-11-14 (night), before any graded run, on the author's instruction to build integer fixing in the network by the ring method of card IRDU section 12: a chord's integers are decided ring by ring outward from the chain's root, held in the network's own solve, released at every event that can invalidate them, and every held integer is audited against truth. Simulator only, default off. Stages: N1 the bed without re-seats, N2 r3c with re-seats and event beds, N3 the 6 h reference bed; observed data only after the three pass and are re-graded. Serves card IRD's steps IRD-5 and IRD-8 and card ARL's rungs, with their frozen bars. Results are appended below. 2026-11-15, N1 (section 9): every bar holds (off identity, 0 wrong holds, the negative control seen by the audit, both edges, every epoch emitted); 11 of 186 links held in 2 h, all right, from 40 min; the stream and the users read the plain chain arm's level; the limit is the floats' precision against the gate and the ring order, not wrong integers. 2026-11-15, N1b (sections 10 and 11): with the order free and an odds gate (ln 1e6 on N1 and on the wide lane) 170 of 186 links are held by 2 h, 0 wrong, and the stream's narrow lane reaches Q1's level at depths 1 and 3 in the second hour (D_NL 0.036 over hour 2 against 0.081); the users fix worse during that move (HELD 8 % against 25 %, wrong pair integers at one user).
 - **source:** the author's two messages of 2026-11-14 (section 1); [IRDU part 3](IRDU_user_integers_on_the_chain_2026-11-14_part3.md) section 12 (the rings, Q1 to Q4, the gated rounding and the log-only search); [IRD](IRD_integer_recovering_datum_2026-10-13.md) sections 9 to 11 (bars, rules, increments); card ARL section 2026-10-24 and card FCFC section 9 (both in the record); [IRDC](IRDC_integer_recovering_datum_events_2026-11-02.md) section 6; [IRDD](IRDD_integer_recovering_datum_rows_2026-11-03.md) sections 2 to 4
 
-**Outcome.** Question: do chord integers decided ring by ring from the chain's root, held in the network's solve and released at every event, take only right integers, and how far do they bring the stream towards the level the truth-fed chain reached (card IRDU section 12.1)? Result, stage N1 (section 9): the frozen rule held 11 of 186 links in 2 h on the bed without re-seats, every one right (777 held link-epochs, 0 wrong), and its audit saw the plain-rounding control's 40 138 wrong link-epochs; too few links were held to move the stream or the users, which read the plain chain arm's level. Standing: built default off on branch `irdu/user-integers`; N2 waits for a decision on the gate, the order or the bed.
+**Outcome.** Question: do chord integers decided ring by ring from the chain's root, held in the network's solve and released at every event, take only right integers and bring the stream to the truth-fed chain's level? On the bed without re-seats the frozen rule holds 11 of 186 links in 2 h (N1); with the order free and an odds gate it holds 170, still 0 wrong, and the stream's narrow lane reaches Q1's level in the second hour, while the users fix worse during that move (N1b). Standing: built default off on branch `irdu/user-integers`; N2 is next.
 
 ## 1. The author's words and the assignment
 
@@ -232,3 +232,66 @@ The users on N1-G's stream read the plain arm's within 3 mm in every bin and hol
 **Then N2**, as soon as N1b's runs are graded and reported, on the arm or arms of N1b that took 0 wrong: section 4.4 built (held integers through re-seats, root changes, returning satellites, splits and merges, re-expressed exactly where the path is held and released where it is not), r3c and the event beds with the truth-fed run on r3c as the ceiling, and a steady-state harness (the oracle holds every link until a cut-over at 30 min, after which every link born, re-seated or released is decided by the ring fix alone). N2 is pre-registered in its own section before its runs.
 
 **Decisions in the author's absence, for review.** The requesting session's: both changes and their numbers (the odds at 1e6, deliberately not 1e4; the same rule on the wide lane; the fraction bound kept; the frozen gate kept for N1b-O); the arms; no tuning after the runs; N2 without waiting for the re-grade. This card's: (1) the cap of 3 decisions per epoch; (2) the certainty that orders them is the log-odds of N_1 in both arms; (3) a link passed over by the cap keeps its count; (4) under change O the trace's candidate column reads 1 for every link with a float; (5) the run-end line prints the counts of the causes `odds` and `cap` only on a run that arms the change that owns them, so a run under the defaults prints what it printed before.
+
+### 11. 2026-11-15: stage N1b results: both arms take 0 wrong; the order with the odds gate holds 170 of 186 links by 2 h and brings the stream's narrow lane to Q1's level; its users fix worse
+
+**What ran.** Build of commit `efcf888` (exe `gnss_processor_irdu_nrf3.exe`, sha256[:16] `c7e594ca105d3d53`): `_rap_nrf_o_nr3` (N1b-O, change O with the frozen gate) and `_rap_nrf_ol_nr3` (N1b-OL, changes O and L); the identity runs `_rap_nrf3_g_nr3` (the defaults, key on), `_rap_nrf3off_{zw,q1}_nr3` (key off) and `_rap_nrf2_g_nr3` (the defaults on the previous build, `gnss_processor_irdu_nrf2.exe`); the smoke `_rap_nrf_smk_ol_nr3`. Every run exit 0, 240 of 240 epochs. Users: 40 replays on the two new streams (five users, float and fixing, from 0 and 30 min) on the users' build (`gnss_processor_irdu_users_rscb3.exe`), read beside section 9's. Grades `runs_nom/_irdu_grades/nrf_n1b_*`.
+
+**N1b-B0: PASSES.** Key off, against the previous build (pv1): IDENTICAL whole on both controls. Key on under the defaults, against the same arm on the previous build of this card (nrf2): IDENTICAL whole. Against N1-G as run (nrf1) the defaults differ in one log line only: the first-epoch "contributions as armed" line, which since commit `335235e` names the hold kind once it has folded a row, and at the first emitted epoch no row had folded.
+
+**N1b-B1, 0 wrong holds: PASSES on both arms.** N1b-O: 19 links decided (ring 2: 10, ring 3: 6, ring 5: 3), 1 036 held link-epochs, 0 wrong. N1b-OL: 170 links decided (ring 2: 27, ring 3: 64, ring 4: 37, ring 5: 42), 12 194 held link-epochs, 0 wrong. The code's audit, the independent re-grade against the frame file and the re-grade against truth per epoch (`nrf_audit.py --fixture`) agree to the count.
+
+**N1b-B2: PASSES.** No release on either arm (a quiet bed); decided = released + held (19 = 0 + 19; 170 = 0 + 170); 240 of 240 epochs emitted.
+
+**Links held against time** (minutes from the run's first epoch):
+
+| arm | first hold, rings 2 / 3 / 4 / 5 | held at 30 | 60 | 90 | 119.5 min | ring complete |
+| --- | --- | --- | --- | --- | --- | --- |
+| N1-G (the frozen rule) | 40.5 / 97.5 / - / - | 0 | 3 | 5 | 11 | none |
+| N1b-O | 40.5 / 85.0 / - / 92.0 | 0 | 3 | 6 | 19 | none |
+| N1b-OL | 20.5 / 54.5 / 39.0 / 66.0 | 3 | 16 | 105 | 170 | ring 2 at 85.0 min |
+
+Refusals, link-epochs: N1b-O window 3 749, sigma 38 522, persistence 193, fraction 5; N1b-OL window 3 749, odds 13 834, fraction 11 800, persistence 1 667, cap 110. Change O alone adds 8 links in 2 h: with the order free, the frozen gate's sigma bound is what holds the links back. With change L the odds rule accepts links whose formal sigma is above 0.10 when their fraction is small (the 16 links not held at 119.5 min have sigma p50 0.215 to 0.279 by ring).
+
+**Feedback** (the links not yet held: formal sigma of N_1, p50 by ring, and how many round right):
+
+| arm, time | held | not held, rounding right | sigma p50, rings 2 / 3 / 4 / 5 |
+| --- | --- | --- | --- |
+| plain chain arm, 90 min | 0 | 186, 184 | 0.166 / 0.209 / 0.262 / 0.239 |
+| N1b-OL, 90 min | 105 | 81, 81 | - / 0.198 / 0.215 / 0.192 |
+| plain chain arm, 119.5 min | 0 | 186, 186 | 0.123 / 0.158 / 0.202 / 0.197 |
+| N1b-OL, 119.5 min | 170 | 16, 16 | - / 0.279 / 0.215 / 0.278 |
+
+**Stream** (per-pair offset p50 against truth by depth class, cycles; N1b-OL / N1b-O / plain chain arm / Q1):
+
+| channel, depth | 15 to 30 min | 45 to 60 min | 60 to 75 min | 75 to 90 min | 90 to 105 min | 105 to 120 min |
+| --- | --- | --- | --- | --- | --- | --- |
+| D_NL, 1 | 0.079 / 0.080 / 0.080 / 0.021 | 0.063 / 0.058 / 0.045 / 0.016 | 0.052 / 0.047 / 0.048 / 0.020 | 0.015 / 0.060 / 0.055 / 0.010 | 0.016 / 0.036 / 0.048 / 0.015 | 0.018 / 0.038 / 0.023 / 0.025 |
+| D_NL, 3 | 0.152 / 0.155 / 0.155 / 0.016 | 0.119 / 0.107 / 0.105 / 0.019 | 0.094 / 0.094 / 0.094 / 0.015 | 0.037 / 0.130 / 0.097 / 0.016 | 0.027 / 0.063 / 0.065 / 0.017 | 0.013 / 0.055 / 0.048 / 0.013 |
+| D_NL, 5 | 0.174 / 0.184 / 0.184 / 0.030 | 0.110 / 0.103 / 0.102 / 0.028 | 0.115 / 0.092 / 0.091 / 0.015 | 0.114 / 0.163 / 0.142 / 0.017 | 0.032 / 0.100 / 0.101 / 0.019 | 0.022 / 0.070 / 0.075 / 0.015 |
+| D_WL, 1 | 0.142 / 0.131 / 0.131 / 0.079 | 0.084 / 0.071 / 0.071 / 0.056 | 0.043 / 0.058 / 0.035 / 0.031 | 0.035 / 0.065 / 0.058 / 0.027 | 0.046 / 0.067 / 0.041 / 0.043 | 0.032 / 0.048 / 0.037 / 0.028 |
+| D_WL, 3 | 0.128 / 0.131 / 0.131 / 0.085 | 0.083 / 0.087 / 0.087 / 0.062 | 0.054 / 0.065 / 0.064 / 0.051 | 0.048 / 0.065 / 0.067 / 0.056 | 0.052 / 0.063 / 0.068 / 0.052 | 0.048 / 0.049 / 0.052 / 0.049 |
+| D_WL, 5 | 0.124 / 0.123 / 0.123 / 0.069 | 0.090 / 0.091 / 0.087 / 0.052 | 0.079 / 0.080 / 0.081 / 0.051 | 0.050 / 0.091 / 0.095 / 0.050 | 0.054 / 0.081 / 0.088 / 0.052 | 0.049 / 0.061 / 0.073 / 0.048 |
+
+Card IRD's stream bars over hour 2: N1b-OL D_WL p50 0.052 with 98.9 % within 0.20 and D_NL p50 0.036 with 95.5 % within 0.25; N1b-O 0.065 (96.6 %) and 0.084 (91.3 %); the plain arm 0.067 (96.2 %) and 0.081 (92.9 %); Q1 0.051 (100 %) and 0.020 (100 %). From 75 min, as the held links pass half of the network, N1b-OL's narrow lane comes to Q1's level at depths 1 and 3 (0.013 against 0.013 at depth 3 in the last bin) and close to it at depth 5 (0.022 against 0.015), where the plain arm reads 0.048 and 0.075; its wide lane comes to Q1's at depths 3 and 5. In the first hour it reads the plain arm's level, slightly worse in some cells (all depths at 45 to 60 min: 0.111 against 0.100). The stream's declared steps are unchanged (1 789 against 1 798 on the plain arm), and its step p95 per bin is no larger than the plain arm's.
+
+**Users** (the users' build; float 3D median over the users by 15 min from each user's start, mm; HELD; WRONG, UNRESOLVED of the fixing users):
+
+| stream, start | 45-60 | 60-75 | 75-90 | 90-105 | 105-120 | sustained 5 cm (min) | HELD; WRONG, UNRESOLVED (compared) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| N1b-OL, 0 | 289 | 276 | 225 | 76 | 82 | SZZ 74.0, S32 93.0 | 7.9 %; 2, 54 (126) |
+| N1b-O, 0 | 287 | 320 | 236 | 81 | 84 | none | 24.9 %; 0, 108 (108) |
+| plain chain arm, 0 | 286 | 317 | 236 | 84 | 86 | none | 24.5 %; 0, 106 (106) |
+| Q1, 0 | 209 | 165 | 115 | 109 | 106 | SZZ 58.0 | 50.2 %; 0, 0 (1 357) |
+| N1b-OL, 30 | 211 | 74 | 81 | | | SZZ 43.0, S32 65.5 | 8.0 %; 6, 78 (110) |
+| N1b-O, 30 | 222 | 89 | 98 | | | none | 31.4 %; 0, 104 (104) |
+| plain chain arm, 30 | 221 | 86 | 96 | | | none | 26.4 %; 0, 104 (104) |
+| Q1, 30 | 101 | 119 | 119 | | | none | 53.0 %; 0, 0 (1 178) |
+
+On N1b-OL's stream the float users are a little better in the second hour (76 to 82 mm against 84 to 86 from the start; 74 to 81 against 86 to 96 from 30 min) and two of the five reach a sustained 5 cm, where none does on the plain arm. The fixing users hold three times less (8 % against 25 %), and S40000SIM, started at 30 min, holds three wrong pair integers (G05-G15, G05-G23, G15-G23, off by 1 to 2 cycles) in its first half hour, 6 wrong pair-epochs; from the start, 2. On the plain arm and on N1b-O no user integer is wrong. Not traced. The candidate: in the second hour the stream moves from the float's level to the integer level as links are held (the narrow lane by up to 0.1 cycle per satellite pair between 60 and 105 min), in small undeclared steps, so a user that fixes during that move fixes on a stream that keeps moving; Q1, held from its start, does not move.
+
+**Verdict.** Every bar of N1b holds on both arms: 0 wrong network holds (1 036 and 12 194 held link-epochs), both edges closed, byte-identical when off and under the defaults. Change O alone barely moves the count (19 links). Changes O and L together hold 170 of 186 links by 2 h (more than the predicted half), complete ring 2 at 85 min, and bring the stream's narrow lane to Q1's level at depths 1 and 3 and near it at depth 5 in the second hour, passing the stream bars with margin (D_NL 0.036 over hour 2 against 0.081). The prediction holds for the count and the stream and FAILS for the users: they hold less, with wrong fixes at one user, while the stream moves to the integer level.
+
+**For N2.** N1b-OL took 0 wrong network holds; N2 is built on it (and N1b-O, also 0 wrong, is kept as its control). The users' loss during the move to the integer level is the question N2's steady-state harness asks from the other side: whether a stream that is already integer stays integer, and still, without moving under the users.
+
+**Not verified.** One bed, 2 h; no release occurred on either arm (the release paths are covered by N1-P and the unit tests); the users' wrong fixes and their lower HELD share are not traced.
