@@ -5,6 +5,7 @@
  */
 
 #include "network/ar/RingFix.hpp"
+#include "common/GnssIdentity.hpp"   // systemOfSat, constellationKey
 
 #include <algorithm>
 #include <cmath>
@@ -451,6 +452,11 @@ bool ringFixCutStep(bool held_before, long long n_held, double target_cyc, bool 
     return true;
 }
 
+int ringFixCutBand(const RingFixCut& c, const RingFixLinkId& id) {
+    if (!c.sys.empty() && c.sys != constellationKey(systemOfSat(id.sat))) return 0;
+    return c.signal == id.sig1 ? 1 : (c.signal == id.sig2 ? 2 : 0);
+}
+
 RingFixCutOutcome ringFixApplyCuts(NetworkRingFix& rf, const std::vector<RingFixCut>& cuts, double now_s) {
     RingFixCutOutcome out;
     if (cuts.empty()) return out;
@@ -472,7 +478,7 @@ RingFixCutOutcome ringFixApplyCuts(NetworkRingFix& rf, const std::vector<RingFix
         bool unknown = false, touched = false;
         std::string rows, unknown_row;
         for (const RingFixCut& c : cuts) {
-            const int band = c.signal == id.sig1 ? 1 : (c.signal == id.sig2 ? 2 : 0);
+            const int band = ringFixCutBand(c, id);
             if (band == 0) continue;
             const bool in_s = c.sats.count(id.sat) > 0;
             const bool in_r = c.stations.count(id.station) > 0;
@@ -504,7 +510,7 @@ RingFixCutOutcome ringFixApplyCuts(NetworkRingFix& rf, const std::vector<RingFix
         }
         for (std::size_t k = 0; k < cuts.size(); ++k) {
             const RingFixCut& c = cuts[k];
-            if (c.signal != id.sig1 && c.signal != id.sig2) continue;
+            if (ringFixCutBand(c, id) == 0) continue;
             if ((c.sats.count(id.sat) > 0) != (c.stations.count(id.station) > 0)) out.kept_by_cut[k].push_back(id);
         }
         if (touched) {
@@ -525,7 +531,7 @@ std::vector<RingFixEvent> ringFixInherit(NetworkRingFix& rf, const std::vector<R
         long long n1 = c.k1, n2 = c.k2;
         bool ok = true;
         for (const RingFixCut& cut : cuts) {
-            const int band = cut.signal == c.id.sig1 ? 1 : (cut.signal == c.id.sig2 ? 2 : 0);
+            const int band = ringFixCutBand(cut, c.id);
             if (band == 0) continue;
             const bool in_s = cut.sats.count(c.id.sat) > 0;
             const bool in_r = cut.stations.count(c.id.station) > 0;

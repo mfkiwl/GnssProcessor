@@ -771,3 +771,31 @@ TEST(RingFixNames, TheRulesHaveNames) {
     EXPECT_STREQ(ringFixRuleName(RingFixRule::Plain), "plain");
     EXPECT_STREQ(ringFixRuleName(RingFixRule::Log), "log");
 }
+
+TEST(RingFixCutsN2b, ACutOnOneConstellationLeavesTheOtherConstellationsLinks) {
+    // GPS L1 and Galileo E1 are both L1C: a GPS cut whose moved side holds receiver 3 says nothing about
+    // the Galileo link at receiver 3, with an unknown step or a known one.
+    NetworkRingFix rf = heldState(5000.0);   // kId: receiver 3, G05 (L1C, L2W)
+    const RingFixLinkId gal{3, "E11", "L1C", "L5Q"};
+    RingFixLink& L = rf.links[gal];
+    L.held = true; L.n1 = 78; L.n2 = -82; L.lambda1 = kL1; L.lambda2 = 0.25482804879840194;
+    RingFixCut gps;
+    gps.sys = "G"; gps.signal = "L1C"; gps.stations = {3}; gps.known = false; gps.row = "rehost";
+    EXPECT_EQ(ringFixCutBand(gps, kId), 1);
+    EXPECT_EQ(ringFixCutBand(gps, gal), 0);
+    ringFixApplyCuts(rf, {gps}, 5000.0);
+    EXPECT_FALSE(rf.links.at(kId).held);   // the GPS link across the unknown step: released
+    EXPECT_TRUE(rf.links.at(gal).held);    // the Galileo link: kept
+    EXPECT_EQ(rf.links.at(gal).n1, 78);
+    RingFixCut known = gps;
+    known.known = true;
+    known.delta = 2;
+    NetworkRingFix rk = heldState(5000.0);
+    rk.links[gal] = L;
+    ringFixApplyCuts(rk, {known}, 5000.0);
+    EXPECT_EQ(rk.links.at(kId).n1, 12);    // the GPS link re-expressed by the known step
+    EXPECT_EQ(rk.links.at(gal).n1, 78);    // the Galileo link untouched
+    RingFixCut any = gps;
+    any.sys.clear();
+    EXPECT_EQ(ringFixCutBand(any, gal), 1);   // an empty constellation matches any (the signal alone)
+}

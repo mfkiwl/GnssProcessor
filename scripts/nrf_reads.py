@@ -34,8 +34,13 @@ def resolve(run):
 
 
 def first_tow(logs):
-    with open(os.path.join(logs, "network_chain_edges.csv"), newline="") as fh:
-        return float(next(csv.DictReader(fh))["tow"])
+    """The run's first epoch: the first row of the chain's record, else of the epoch status (a run without the chain)."""
+    for name in ("network_chain_edges.csv", "network_epoch_status.csv"):
+        p = os.path.join(logs, name)
+        if os.path.exists(p):
+            with open(p, newline="") as fh:
+                return float(next(csv.DictReader(fh))["tow"])
+    raise SystemExit("%s: no network_chain_edges.csv or network_epoch_status.csv" % logs)
 
 
 def held_share(logs, t0):

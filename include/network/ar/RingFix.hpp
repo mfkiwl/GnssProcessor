@@ -529,6 +529,7 @@ RingFixAudit ringFixAuditLink(
  * the released edge was a held link before the event (@ref ringFixCutStep).
  */
 struct RingFixCut {
+    std::string           sys;             ///< The band's constellation key ("G", "E"; empty: any), the release's group being "<key>|<signal>".
     std::string           signal;          ///< The band's phase signal.
     std::set<int>         stations;        ///< Receivers of M (roster index).
     std::set<std::string> sats;            ///< Satellites of M.
@@ -582,6 +583,18 @@ struct RingFixCutOutcome {
  * @return What the cuts did.
  */
 RingFixCutOutcome ringFixApplyCuts(NetworkRingFix& rf, const std::vector<RingFixCut>& cuts, double now_s);
+
+/**
+ * @brief The band of a held link that a cut is on.
+ *
+ * A band is a constellation and a phase signal: GPS L1 and Galileo E1 share the code L1C, and a cut
+ * on one says nothing about the other's frame.
+ *
+ * @param c  The cut (an empty @c sys matches any constellation).
+ * @param id The link.
+ * @return 1 or 2 for the link's band 1 or band 2, 0 when the cut is on neither.
+ */
+int ringFixCutBand(const RingFixCut& c, const RingFixLinkId& id);
 
 /// A tree edge of the previous epoch that is a chord of its pair family now.
 struct RingFixInheritCand {

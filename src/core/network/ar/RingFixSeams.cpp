@@ -272,6 +272,7 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
         for (const ChainReleaseObs& r : obs_rec->releases) released_at.insert({r.group, r.vertex});
         for (const ChainReleaseObs& r : obs_rec->releases) {
             RingFixCut c;
+            c.sys = r.group.substr(0, r.group.find('|'));
             c.signal = r.signal;
             c.stations.insert(r.stations.begin(), r.stations.end());
             c.sats.insert(r.sats.begin(), r.sats.end());

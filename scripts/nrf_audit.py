@@ -71,13 +71,14 @@ class DynTruth:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import ird_frame_census as IFC
         self.IFC = IFC
-        self.forest = IFC.Forest(IFC.read_edges(run, ("G",)))
+        self.forest = IFC.Forest(IFC.read_edges(run, ("G", "E")))
         self.truth = IFC.Truth(fixture, run)
         self.tow = None
 
     def get(self, key, default=None):
         sta, sat, sig = key
-        n, _why = self.IFC.frame_integer(self.forest, self.truth, "G", sig, sta, sat, self.tow)
+        # The group of a band is its constellation and signal: GPS L1 and Galileo E1 are both L1C.
+        n, _why = self.IFC.frame_integer(self.forest, self.truth, sat[:1], sig, sta, sat, self.tow)
         return default if n is None else n
 
 

@@ -152,10 +152,12 @@ def make_one(tag, variant, user, flip, start_min=0, uset="", rinex_dir=""):
     lg["enable_ambiguity_resolver"] = True
     lg.setdefault("levels", {})["ambiguity_resolver"] = "debug"
     cfg["processing"]["eigen_threads"] = 1
-    if start_min:
-        # A late start (card IRDU section 12.4): the epoch loop skips to this elapsed span and the user starts cold,
-        # this many minutes after the network's own start (its start_offset_hours, 0 on the ARL beds).
-        n["start_offset_hours"] = float(n.get("start_offset_hours") or 0.0) + start_min / 60.0
+    if start_min or n.get("start_offset_hours"):
+        # A late start (card IRDU section 12.4): the user starts cold this many minutes after the product stream's
+        # first epoch; the replay anchors the offset there (ApplicationConsumerReplay), so the network's own offset
+        # into its observation files (the golden sim bed's 00:30:15) is not added, and a user without a late start
+        # on such a bed starts with the stream.
+        n["start_offset_hours"] = start_min / 60.0
     applied = apply_set(cfg, uset)
     dst.mkdir(parents=True)
     (dst / "arm.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
