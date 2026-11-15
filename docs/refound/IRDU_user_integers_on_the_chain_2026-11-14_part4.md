@@ -199,3 +199,5 @@ This branch's float users against the users' build, Q1's stream from 30 min, key
 **Decisions in the author's absence, for review.** Those of 12.10 and its addendum, and: (6) held and wrong are not read on this build, whose resolver writes none of the lines the grader reads; (7) the byte-identity check leaves out the backlog warning's lines, which print the wall clock; (8) the real-time seam gate scripts (`rt_seam_gate.ps1`) were not run: the replay consumer drives the same engine, and the byte identity was checked on it.
 
 **Not verified.** The rule is not built on the users' build (the requesting session's resolver), so held and wrong with the key are not measured; the readmit edge is exercised only by the gap check (one satellite, one user); observed data are not replayed (as assigned).
+
+Section 13 continues in [part 5](IRDU_user_integers_on_the_chain_2026-11-14_part5.md).
