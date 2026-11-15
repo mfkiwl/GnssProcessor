@@ -5,10 +5,10 @@
 - **id:** NRF-part4
 - **topic:** network-vehicle
 - **status:** open
-- **summary:** Sections 21 onwards of card NRF (2026-11-15). Section 21: stage O2 pre-registered, the first runs that hold integers on observed data (Galileo L1X/L5X, the bed of DOY 144, two starts, the odds computed with one and with two times the formal sigma), with the build it needs: `network.ring_fix.sigma_scale` and the wind-up arc trace `network.trace_windup_arcs`, which lets the two-start audit cover every common arc. Section 22: the results. With the odds at twice the formal sigma the two starts agree on every held integer (0 failing of 78 588 checks over every common arc), every epoch emitted, RAIM unchanged, about 60 % of the chord link-epochs held from hour 3; with the formal sigma (the rule as pre-registered) the audit fails (13 344 of 92 547; 7 held links: three young-network decisions, four L5X closures after a re-seat). The wind-up trace matches truth exactly on the simulator. The audit's failing counts depend on its walk (fixed to a sorted walk; earlier raw counts re-read), its verdicts do not.
+- **summary:** Sections 21 onwards of card NRF (2026-11-15). Section 21: stage O2 pre-registered, the first runs that hold integers on observed data (Galileo L1X/L5X, the bed of DOY 144, two starts, the odds computed with one and with two times the formal sigma), with the build it needs: `network.ring_fix.sigma_scale` and the wind-up arc trace `network.trace_windup_arcs`, which lets the two-start audit cover every common arc. Section 22: the results. With the odds at twice the formal sigma the two starts agree on every held integer (0 failing of 78 588 checks over every common arc), every epoch emitted, RAIM unchanged, about 60 % of the chord link-epochs held from hour 3; with the formal sigma (the rule as pre-registered) the audit fails (13 344 of 92 547; 7 held links: three young-network decisions, four L5X closures after a re-seat). The wind-up trace matches truth exactly on the simulator. The audit's failing counts depend on its walk (fixed to a sorted walk; earlier raw counts re-read), its verdicts do not. Section 21.1: amended on the requesting session's word (same-start pairs with another reference receiver, a GPS and Galileo arm). Section 23: with twice the formal sigma every pairing agrees on every held integer (two receivers at one start, 0 of 82 972; GPS L1C/L2W held beside Galileo, 0 of 126 238); with the formal sigma the late run and the GOPE00CZE run depart from the others (early decisions, one a wrong wide lane behind a perfect N1 fraction), and 22.4's attribution to run A is corrected to run B.
 - **source:** [NRF part 3](NRF_network_ring_fixing_2026-11-14_part3.md) sections 19 and 20; the requesting session's messages of 2026-11-15 (its log-only pilot on the same bed, exe nrf7, four starts)
 
-**Outcome.** Question: on observed data, does the ring fix hold only integers that two runs with different starts agree on, with every epoch emitted and no RAIM excess? With the odds at twice the formal sigma, yes on Galileo L1X/L5X over 6 h of DOY 144: 0 failing of 78 588 checks over every common arc, the wind-up branches removed from a new trace of the stations' accumulators, every epoch emitted, RAIM unchanged. With the formal sigma, no: three young-network decisions and four L5X closures after a re-seat disagree between the starts. Standing: default off; one bed, one pair of starts.
+**Outcome.** Question: on observed data, does the ring fix hold only integers that two runs with different starts agree on, with every epoch emitted and no RAIM excess? With the odds at twice the formal sigma, yes on Galileo L1X/L5X over 6 h of DOY 144: 0 failing of 78 588 checks over every common arc, the wind-up branches removed from a new trace of the stations' accumulators, every epoch emitted, RAIM unchanged. Also between two reference receivers at one start, and with GPS L1C/L2W held beside Galileo (0 of 126 238). With the formal sigma, no: early decisions of the younger network, one a wrong wide lane behind a perfect N1 fraction, depart from the other runs. Standing: default off; one bed of observed data.
 
 Sections 1 to 12 are in [NRF](NRF_network_ring_fixing_2026-11-14.md), 13 to 16.1 in [part 2](NRF_network_ring_fixing_2026-11-14_part2.md), 17 to 20 in [part 3](NRF_network_ring_fixing_2026-11-14_part3.md). Results are appended below, each under its dated heading.
 
@@ -117,3 +117,61 @@ Received after section 22's runs (its words condensed). Two runs from the same s
 - Optional, after the Galileo arms: `o2g_n144` and `o2g_n144r`, the first holding runs on two systems: sigma_scale 2, `wl_frac_max` 0.25, held first, pairs `["E:L1X/L5X", "G:L1C/L2W"]`, from start 0 with the default receiver and with GOPE00CZE. Why now: in log mode GPS L1C/L2W decides little beyond ring 2 (would-hold share by ring 27, 9, 2 and 1 %); whether holds at ring 2 let deeper rings follow under held first only a holding run shows.
 
 **Bars (as section 21, frozen).** The audit of each same-start pair on held integers and tree pins over every common arc: 0 failing checks, reported per band with the sizes of any failing closure (the trace-corrected audit beside it, which must find a whole-cycle difference of 0 on every arc); every epoch emitted; every release named; RAIM rows not above the key off of the same receiver by more than a tenth; every release by the residual monitor listed. **Reads** as section 21, per pair family for `o2g`.
+
+## 23. 2026-11-15: O2's added runs (amendment 21.1) and a correction to 22.4
+
+**What ran.** Exe nrf9 (`a18324f2ed30a1c5`, commit `5747848`; the amendment committed as `f938457` before these runs): `o2s2_n144r`, `o2s1_n144r`, `o2off_n144r`, `o2g_n144`, `o2g_n144r`, all exit 0, 720 epochs each. Roots: the default receiver gives Galileo L1X/L5X at BOGT00COL and GPS L1C/L2W at BOR100POL; `network.phase_datum_eq34_receiver` GOPE00CZE gives both at GOPE00CZE. Grades `runs_nom/_irdu_grades/nrf_o2r_*`.
+
+**The wind-up branch belongs to the receiver and the satellite, not to the datum.** In each same-start pair the two runs' wind-up traces are byte-identical, and the trace-corrected audit finds a whole-cycle difference of 0 on every arc (no link dropped): two runs from one start compare every arc as they stand.
+
+### 23.1 The bars of the same-start pairs (receivers default and GOPE00CZE, start 0)
+
+| bar | o2s2 pair (2 sigma) | o2s1 pair (formal sigma) | o2g pair (2 sigma, GPS and Galileo) |
+|---|---|---|---|
+| 1. audit over every common arc | **0 failing of 82 972: PASS** | **13 008 of 151 698: FAIL** | **0 of 126 238: PASS** |
+| by band | L1X 0 of 41 500, L5X 0 of 41 472 | L1X 4 803 of 75 626, L5X 8 205 of 76 072 | E L1X 0 of 42 918, E L5X 0 of 42 960, G L1C 0 of 20 180, G L2W 0 of 20 180 |
+| 2. every epoch emitted | 720 / 720 | 720 / 720 | 720 / 720 |
+| 3. every release named, closures closed | yes | yes | yes |
+| 4. RAIM rows (key off: 15 default, 17 GOPE00CZE) | 15 / 17: PASS | 15 / 17: PASS | 13 / 16: PASS |
+| 5. monitor releases | none | BOGT00COL-E11 at TOW 17550 (GOPE00CZE run) | none |
+
+### 23.2 Which run is the odd one: the formal-sigma runs against the 2-sigma runs of the same start and receiver
+
+The audit between the two rules at one start and one receiver says which run of a failing pair departs from the others:
+
+| pair (same start, same receiver) | checks | failing | failing held links (attribution of 22.4) |
+|---|---|---|---|
+| `o2s1_n144` against `o2s2_n144` (start 0, default) | 104 457 | 0 | 0 of 56 069 link-band-epochs |
+| `o2s1_n144b` against `o2s2_n144b` (start +1 h, default) | 62 335 | 7 316 | 11 |
+| `o2s1_n144r` against `o2s2_n144r` (start 0, GOPE00CZE) | 99 309 | 11 867 | 7 |
+
+The start-0 formal-sigma run with the default receiver agrees with every 2-sigma run (directly with `o2s2_n144`, and through it with `o2s2_n144b` and `o2s2_n144r`, whose pairs pass). The odd runs are the late formal-sigma run and the formal-sigma run with GOPE00CZE:
+- `o2s1_n144b` (start +1 h): 11 links depart, among them GAMB00PYF-E12, a wide-lane cycle (+3, +4), decided 22 min after the run's start (TOW 4980) at frac_if 0.005, sigma_if 0.109 and log-odds 41.9: an N1 fraction that looks perfect over a wrong wide lane, the E1/E5a case of section 19.3; LMMF00MTQ-E10 (-1, -1), decided 23 min after the start at log-odds 15.6; and a cluster at CPVG00CPV (E31, E28, E19, E23, one N1 cycle each, from TOW 8460).
+- `o2s1_n144r` (GOPE00CZE): 7 links depart, a cluster at CPVG00CPV (E04, E31, E06, E09, one N1 cycle, from TOW 7380; E28 and E23 after TOW 18180) and MRO100AUS-E27. Its CPVG00CPV-E04 was decided at TOW 4560 at sigma_if 0.166 and log-odds 15.5, which twice the formal sigma refuses (log-odds 3.9); the 2-sigma run held that link at 7350, consistently with both default-receiver runs.
+
+**Correction to 22.4.** Its reading named run A's first 30 min as the source of the three failures on both bands; the audit against the 2-sigma runs shows run A's holds of GAMB00PYF-E12, LMMF00MTQ-E10 and LMMF00MTQ-E11 agree with three other runs, and the departing integers are run B's, decided in run B's first 23 min. The reading's substance stands with the runs exchanged: the failures are early decisions of the younger network under the formal sigma. The L5X-only closures of 22.4 at CPVG00CPV are the comparison of run A with run B's CPVG00CPV cluster after run A re-attached CPVG00CPV at TOW 18180 through two different held links (CPVG00CPV-E04 on L5X, CPVG00CPV-E06 on L1X at 18210), not an error introduced by that re-attachment.
+
+### 23.3 Reads
+
+Held share by hour (Galileo L1X/L5X chord link-epochs, %):
+
+| run | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| o2s2_n144r (2 sigma, GOPE00CZE) | 3.6 | 28.0 | 48.4 | 56.7 | 57.9 | 63.3 |
+| o2s1_n144r (formal sigma, GOPE00CZE) | 22.2 | 74.6 | 83.7 | 81.7 | 86.2 | 79.7 |
+| o2g_n144, Galileo L1X/L5X | 0.5 | 33.0 | 60.2 | 60.0 | 65.0 | 61.2 |
+| o2g_n144, GPS L1C/L2W | 0.7 | 8.8 | 12.0 | 16.6 | 25.2 | 21.0 |
+| o2g_n144r, Galileo L1X/L5X | 3.6 | 29.5 | 51.7 | 58.9 | 59.1 | 65.3 |
+| o2g_n144r, GPS L1C/L2W | 1.2 | 13.1 | 16.3 | 18.9 | 25.0 | 16.5 |
+
+- **GPS L1C/L2W by ring** (held share, default / GOPE00CZE): ring 2 31.4 / 40.6 %, ring 3 25.3 / 16.0, ring 4 10.2 / 8.9, ring 5 3.6 / 3.6, ring 6 2.8 / 2.7, deeper rings 0 to 3. The requesting session's log pilot (formal sigma, exe nrf7) read would-hold shares of 27, 9, 2 and 1 % at rings 2 to 5: holding with held first raises rings 3 and 4, and GPS beyond ring 4 stays near zero. The two counts differ in rule and build, so the comparison is indicative.
+- **Links held**: o2s2_n144r 223; o2s1_n144r 319; o2g_n144 370 (Galileo 237, GPS 133); o2g_n144r 363 (231, 132). The Galileo shares of `o2g` match the Galileo-only runs within 1 point: holding GPS beside Galileo did not change the Galileo holds.
+- **Releases** (all named): o2s2_n144r gap 51, slip 3; o2s1_n144r gap 96, slip 21, refloat 3, monitor 1; o2g_n144 gap 87, slip 10, refloat 3; o2g_n144r gap 94, slip 10, refloat 1. Re-attachments through held links: 63, 97, 141 and 120, keeping 507, 1 026, 946 and 791 held links.
+- **Minutes from an arc's birth to its first hold** (p50 / p90): o2s2_n144r 63.5 / 127.5; o2s1_n144r 31.0 / 65.5; o2g_n144 76.5 / 142.5; o2g_n144r 68.5 / 138.5.
+
+### 23.4 What the amendment says
+
+1. With twice the formal sigma, every pairing of O2 agrees on every held integer over every common arc: two starts (0 of 78 588), two reference receivers at one start (0 of 82 972), and two receivers with GPS L1C/L2W held beside Galileo L1X/L5X (0 of 126 238, of them 40 360 GPS checks). Every epoch was emitted and RAIM stayed at the key-off level.
+2. With the formal sigma, a run can be right (the start-0 default run agrees with all 2-sigma runs) or wrong (the late run and the GOPE00CZE run hold early, low-odds or wrong-wide-lane decisions that propagate to a station's other links); the rule as pre-registered is not safe on observed data.
+3. GPS L1C/L2W under holds: 132 to 133 links held, a quarter to two fifths of ring 2, a sixth to a quarter of ring 3, a tenth of ring 4, almost nothing deeper.
+4. The E03 case of the requesting session's pilot is no wind-up branch (21.1): a frame move in one run or a real step, still not traced; Galileo L1C/L5Q stays out of holding.

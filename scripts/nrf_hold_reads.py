@@ -61,6 +61,7 @@ def main():
 
     n_h, h_h = collections.Counter(), collections.Counter()
     n_r, h_r = collections.Counter(), collections.Counter()
+    fam_n, fam_h = collections.Counter(), collections.Counter()   # per pair family: (family, "h<hour>" | "r<ring>")
     first_row = {}
     with open(os.path.join(logs, "network_ring_fix.csv"), newline="") as fh:
         for r in csv.DictReader(fh):
@@ -72,6 +73,10 @@ def main():
             h_h[hour(tow)] += held
             n_r[r["ring"]] += 1
             h_r[r["ring"]] += held
+            fam = "%s:%s/%s" % (r["sat"][:1], r["sig1"], r["sig2"])
+            for k in ("h%d" % hour(tow), "r" + r["ring"]):
+                fam_n[(fam, k)] += 1
+                fam_h[(fam, k)] += held
     dec_h, dec_r = collections.Counter(), collections.Counter()
     rel_c, rel_h = collections.Counter(), collections.Counter()
     monitor, first_hold = [], {}
@@ -137,6 +142,19 @@ def main():
     print("   held share by ring (%): " + "; ".join("ring %s %s (of %d)" % (k, v, n_r[k])
                                                   for k, v in res["held_share_by_ring"].items()))
     print("   held link-epochs %d; links held %d" % (res["held_link_epochs"], len(first_hold)))
+    families = sorted({f for f, _ in fam_n})
+    if len(families) > 1:
+        res["by_family"] = {}
+        for fam in families:
+            hours = sorted((k for f, k in fam_n if f == fam and k[0] == "h"), key=lambda k: int(k[1:]))
+            rings = sorted((k for f, k in fam_n if f == fam and k[0] == "r"),
+                           key=lambda k: int(k[1:]) if k[1:].lstrip("-").isdigit() else 99)
+            sh = {k: share(fam_h, fam_n, (fam, k)) for k in hours + rings}
+            res["by_family"][fam] = {"held_share": sh, "links_held": sum(1 for key in first_hold
+                                                                        if "%s:%s/%s" % (key[1][:1], key[2], key[3]) == fam)}
+            print("   %s: links held %d; held share by hour (%%): %s; by ring: %s" % (
+                fam, res["by_family"][fam]["links_held"], "; ".join("%s %s" % (k, sh[k]) for k in hours),
+                "; ".join("ring %s %s (of %d)" % (k[1:], sh[k], fam_n[(fam, k)]) for k in rings)))
     print("   decisions by hour: %s; by ring: %s" % (dict(sorted(dec_h.items())), dict(sorted(dec_r.items()))))
     print("   releases by cause: %s; by hour: %s" % (dict(rel_c), dict(sorted(rel_h.items()))))
     for m in monitor:
