@@ -513,6 +513,14 @@ NRF_GOLDEN_FIXTURE = "C:/GnssProcessor/runs/simnet60_quiet_col_24h"
 KNOB_GROUPS["nrf_olt_golden"] = ["network.ring_fix.enable=true", "network.ring_fix.order=certain",
                                  "network.ring_fix.gate=odds", "network.ring_fix.truth_root=" + NRF_GOLDEN_FIXTURE]
 KNOB_GROUPS["nrf_hf_golden"] = KNOB_GROUPS["nrf_olt_golden"] + ["network.ring_fix.held_first=true"]
+# Card NRF stage N3b: the held-first arm of the 6 h bed started one hour later (to the same end with --hours 5).
+KNOB_GROUPS["nrf_hf_golden_late"] = KNOB_GROUPS["nrf_hf_golden"] + ["network.start_offset_hours=1.504167"]
+# Card NRF stage N2c: s4 = the s2 bed with the producer's slip flags of S05000SIM-G26 masked at the slip's epoch
+# (simulation only); its key-off arm is the log rule with the mask (nothing held).
+NRF_MASK_S4 = ["network.ring_fix.mask_slip_arc=S05000SIM:G26", "network.ring_fix.mask_slip_tow=265830"]
+KNOB_GROUPS["nrf_logm_nrf_s2"] = KNOB_GROUPS["nrf_olt_nrf_s2"] + ["network.ring_fix.rule=log"] + NRF_MASK_S4
+KNOB_GROUPS["nrf_oltm_nrf_s2"] = KNOB_GROUPS["nrf_olt_nrf_s2"] + NRF_MASK_S4
+KNOB_GROUPS["nrf_hfm_nrf_s2"] = KNOB_GROUPS["nrf_hf_nrf_s2"] + NRF_MASK_S4
 
 
 def sha256_bytes(b):

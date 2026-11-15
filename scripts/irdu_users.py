@@ -158,6 +158,11 @@ def make_one(tag, variant, user, flip, start_min=0, uset="", rinex_dir=""):
         # into its observation files (the golden sim bed's 00:30:15) is not added, and a user without a late start
         # on such a bed starts with the stream.
         n["start_offset_hours"] = start_min / 60.0
+        # The replay's duration counts from the user's start: a late user ends with the stream (on a bed whose
+        # observation files outlast the network run, the 24 h golden fixture, it would run on without products).
+        for sec in (cfg.get("processing", {}), n):
+            if start_min and sec.get("max_duration_s"):
+                sec["max_duration_s"] = max(0.0, float(sec["max_duration_s"]) - 60.0 * start_min)
     applied = apply_set(cfg, uset)
     dst.mkdir(parents=True)
     (dst / "arm.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
