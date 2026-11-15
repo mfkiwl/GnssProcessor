@@ -15,6 +15,15 @@
 
 namespace GnssProcessor {
 
+const char* ringFixRuleName(RingFixRule r) {
+    switch (r) {
+        case RingFixRule::Gated: return "gated";
+        case RingFixRule::Plain: return "plain";
+        case RingFixRule::Log:   return "log";
+    }
+    return "?";
+}
+
 const char* ringFixReleaseName(RingFixRelease c) {
     switch (c) {
         case RingFixRelease::Slip:    return "slip";
@@ -152,6 +161,13 @@ std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
             }
             if (L.held) ++C.held_link_epochs;
             if (!o.have_truth) continue;
+            // No hold in an epoch in which the link was released, its arc latched, re-levelled
+            // (refloated or dropped) or cut (its carried entry erased): from the next epoch, on its new level.
+            if (!L.held && (L.released_s == now_s || o.latched || !o.carry_ok || o.relevel1_s >= now_s - 1e-6
+                            || o.relevel2_s >= now_s - 1e-6)) {
+                ++C.oracle_waited;
+                continue;
+            }
             if (L.held) {
                 if (L.n1 != o.truth1 || L.n2 != o.truth2) {
                     L.n1 = o.truth1;
@@ -280,6 +296,21 @@ std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
             decide = true;
         }
         if (!decide) continue;
+        if (rf.rule == RingFixRule::Log) {
+            ev.kind = RingFixEvent::Kind::Hold;
+            ev.log_only = true;
+            ++C.log_link_epochs;
+            if (!L.log_decided) {
+                L.log_decided = true;
+                L.log_n1 = ev.gate.n1;
+                L.log_n2 = ev.gate.n2;
+                ++C.log_links;
+            } else if (L.log_n1 != ev.gate.n1 || L.log_n2 != ev.gate.n2) {
+                ++C.log_changed;
+            }
+            events.push_back(ev);
+            continue;
+        }
         if (rf.order == RingFixOrder::Certain && rf.rule != RingFixRule::Plain) {
             eligible.emplace_back(&o, ev);
             continue;
@@ -423,11 +454,16 @@ bool ringFixCutStep(bool held_before, long long n_held, double target_cyc, bool 
 RingFixCutOutcome ringFixApplyCuts(NetworkRingFix& rf, const std::vector<RingFixCut>& cuts, double now_s) {
     RingFixCutOutcome out;
     if (cuts.empty()) return out;
+    out.kept_by_cut.resize(cuts.size());
     for (const RingFixCut& c : cuts) {
         ++rf.counters.cuts;
         if (c.known) {
             ++rf.counters.cuts_known;
             if (c.delta == 0) ++rf.counters.cuts_known_zero;
+        }
+        if (c.held_first) {
+            ++rf.counters.cuts_held_first;
+            if (c.known && c.delta == 0) ++rf.counters.cuts_held_first_zero;
         }
     }
     for (auto& [id, L] : rf.links) {
@@ -465,6 +501,11 @@ RingFixCutOutcome ringFixApplyCuts(NetworkRingFix& rf, const std::vector<RingFix
             L.n2 += d2;
             ++rf.counters.reexpressed;
             out.reexpressed.emplace_back(id, d1, d2, rows);
+        }
+        for (std::size_t k = 0; k < cuts.size(); ++k) {
+            const RingFixCut& c = cuts[k];
+            if (c.signal != id.sig1 && c.signal != id.sig2) continue;
+            if ((c.sats.count(id.sat) > 0) != (c.stations.count(id.station) > 0)) out.kept_by_cut[k].push_back(id);
         }
         if (touched) {
             L.rebase_stamps = true;

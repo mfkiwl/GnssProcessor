@@ -78,6 +78,9 @@ inline constexpr double kRingFixHoldSigmaM = 1.0e-4;
 inline constexpr double kRingFixMonitorBoundM = 0.03;
 /// Consecutive epochs above the monitor's bound that release a held link.
 inline constexpr int kRingFixMonitorEpochs = 4;
+/// A released link's carried variance is re-opened to at least this (m^2): a link held from its first
+/// stash has the hold's own variance as its birth variance, which a drop would restore.
+inline constexpr double kRingFixReleaseFloorM2 = 1.0;
 /// Change O: at most this many links are decided per epoch, the most certain first.
 inline constexpr int kRingFixMaxDecisionsPerEpoch = 3;
 /// Change L: the bound on the log of the likelihood ratio between the nearest and the next integer,
@@ -100,6 +103,7 @@ enum class RingFixGateRule : std::uint8_t {
 enum class RingFixRule : std::uint8_t {
     Gated,  ///< The frozen rule: the gate, the damage gate and the persistence count.
     Plain,  ///< The negative control: every candidate with a float is rounded and held at once.
+    Log,    ///< Log only: the frozen rule is evaluated and traced, nothing is held (the products are unchanged).
 };
 
 /// Why a held link was released.
@@ -127,6 +131,13 @@ enum class RingFixRefuse : std::uint8_t {
 };
 /// Number of refusal causes.
 inline constexpr std::size_t kRingFixRefuseCount = 9;
+
+/**
+ * @brief The name of a decision rule ("gated", "plain", "log").
+ * @param r The rule.
+ * @return Its name as a static string; "?" for a value outside the enum.
+ */
+const char* ringFixRuleName(RingFixRule r);
 
 /**
  * @brief The name of a release cause ("slip", "refloat", "gap", "chain", "monitor").
@@ -260,6 +271,9 @@ struct RingFixLink {
     bool      rebase_stamps{false};  ///< A cut release erased its carried entries: take the next stamps as the baseline.
     bool      inherited{false};      ///< Held as an old host of a cut (not decided by the rule).
     bool      oracle{false};         ///< Held by the oracle phase.
+    bool      log_decided{false};    ///< Log rule: the rule would have decided it (at least once).
+    long long log_n1{0};             ///< Log rule: the first would-be band-1 integer.
+    long long log_n2{0};             ///< Log rule: the first would-be band-2 integer.
 };
 
 /// One link as the decision reads it after the solve.
@@ -317,6 +331,7 @@ struct RingFixEvent {
     RingFixGate    gate;                            ///< The gate's reading (Hold, and Refuse when formed).
     bool           inherited{false};                ///< Hold: an old host of a cut, held at its moved target.
     bool           oracle{false};                   ///< Hold: decided by the oracle phase.
+    bool           log_only{false};                 ///< Hold under the log rule: a would-be decision, nothing held.
 };
 
 /// The run counters (the run-end line).
@@ -355,6 +370,20 @@ struct RingFixCounters {
     long long decided_truth_wrong{0};     ///< Decisions the truth audit found wrong at the decision.
     long long truth_file_checked{0};      ///< Chord-band-epochs where the truth and the audit file both give an integer.
     long long truth_file_mismatch{0};     ///< Of them, where they differ.
+    // Stage N2b.
+    long long cuts_held_first{0};         ///< Cuts whose moved side re-attached through a held link the walk took first.
+    long long cuts_held_first_zero{0};    ///< Of them, with a known step of 0.
+    long long reattached{0};              ///< Re-attachments through a held link (one per released edge the walk took first).
+    long long held_first_kept{0};         ///< Held links crossing those cuts, kept at their integers (the entry links not counted).
+    long long cut_released_usable{0};     ///< Held links released across an unknown step while usable (not latched, monitor not tripped).
+    long long cuts_nested{0};             ///< Cuts whose whole moved side holds a release of its own.
+    long long release_floored{0};         ///< Carried entries the release floor re-opened (the vehicle's drop alone stayed tighter).
+    long long log_truth_right{0};         ///< Log rule: would-be decisions at the true integers (simulation only).
+    long long log_truth_wrong{0};         ///< Log rule: would-be decisions off the true integers (simulation only).
+    long long oracle_waited{0};           ///< Oracle holds put off to the next epoch (the link released or latched this epoch).
+    long long log_links{0};               ///< Log rule: links the rule would have decided.
+    long long log_link_epochs{0};         ///< Log rule: link-epochs at which it would have decided.
+    long long log_changed{0};             ///< Log rule: would-be decisions with integers other than the link's first.
 };
 
 struct RingFixTruth;   // below: the fixture's truth (simulation only)
@@ -396,6 +425,7 @@ struct NetworkRingFix {
     // Stage N2.
     std::unique_ptr<RingFixTruth> truth;    ///< The fixture's truth (network.ring_fix.truth_root); null without it.
     double      oracle_until_s{0.0};        ///< The oracle phase's length from the first epoch (s; 0 = none).
+    bool        held_first{false};          ///< The chain's walk re-attaches through held links first (network.ring_fix.held_first).
     double      t0_s{-1.0};                 ///< The first epoch the ring fix saw (continuous GPS seconds).
     /// The previous epoch's tree edges with their targets: (station, satellite, signal) -> target (cycles).
     std::map<std::tuple<int, std::string, std::string>, double> prev_targets;
@@ -505,6 +535,9 @@ struct RingFixCut {
     bool                  known{false};    ///< The step is known.
     long long             delta{0};        ///< M's frame step on the band (cycles), when known.
     std::string           row;             ///< The releasing row's name ("rehost", "returning", "slip", "merge").
+    int                   entry_station{-1};  ///< The released edge's station (the edge that carries M now).
+    std::string           entry_sat;          ///< The released edge's satellite.
+    bool                  held_first{false};  ///< The walk took the released edge first because its integer was held.
 };
 
 /**
@@ -529,6 +562,8 @@ struct RingFixCutOutcome {
     /// Links re-expressed: (link, step on band 1, step on band 2, the rows).
     std::vector<std::tuple<RingFixLinkId, long long, long long, std::string>> reexpressed;
     long long touched{0};   ///< Held links with an end in a moved side (their carries were erased: stamps rebased).
+    /// Per cut, in the order given: the held links that cross it and keep their integers.
+    std::vector<std::vector<RingFixLinkId>> kept_by_cut;
 };
 
 /**
@@ -538,6 +573,8 @@ struct RingFixCutOutcome {
  * cut's step (minus when its satellite is in M, plus when its receiver is) when the step is known,
  * and released (cause chain) when it is not; one with both ends in M, or none, keeps its integer.
  * Every held link with an end in a moved side has its carried stamps rebased at the next release step.
+ * A cut's moved side is the released vertex's whole subtree, so a link that leaves a nested cut and its
+ * outer one crosses both and takes both steps.
  *
  * @param rf    The run state (links and counters written).
  * @param cuts  This epoch's cuts.

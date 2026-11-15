@@ -622,6 +622,8 @@ TEST(RingFixOracle, TheOraclePhaseHoldsEveryLinkAtTruthThenTheRuleDecides) {
     o.have_truth = true;
     o.truth1 = 11;
     o.truth2 = 8;
+    o.relevel1_s = 500.0;   // not re-levelled in the epoch of the hold
+    o.relevel2_s = 500.0;
     const auto ev = ringFixDecideStep(rf, {o}, 1000.0);   // t0 = 1000
     ASSERT_EQ(ev.size(), 1u);
     EXPECT_TRUE(ev[0].oracle);
@@ -668,4 +670,104 @@ TEST(RingFixTruthModel, TheBranchTheSlipsAndTheCycle) {
     ASSERT_TRUE(ringFixTruthFrameInteger(T, terms, -4.0, true, 500.0, 230.0, n));
     EXPECT_EQ(n, 50 - 70 + 30 - 101 + 4);
     EXPECT_FALSE(ringFixTruthFrameInteger(T, terms, -4.0, false, 500.0, 230.0, n));
+}
+
+// ---- Stage N2b ----
+
+TEST(RingFixCutsN2b, ALinkLeavingANestedCutAndItsOuterOneTakesBothSteps) {
+    // The outer side (unknown step) is its released vertex's whole subtree: receivers {3, 4} and
+    // satellites {G05, G06}, the nested side included.  The nested side (G06) re-attached through a
+    // held link the walk took first, with a step of 0.
+    NetworkRingFix rf = heldState(5000.0);                     // kId: receiver 3, G05: both in the outer side
+    const RingFixLinkId leaves{7, "G06", "L1C", "L2W"};       // receiver 7 outside, G06 in both sides
+    const RingFixLinkId across{4, "G06", "L1C", "L2W"};       // receiver 4 in the outer side, G06 nested
+    for (const RingFixLinkId& id : {leaves, across}) {
+        RingFixLink& L = rf.links[id];
+        L.held = true; L.n1 = 20; L.n2 = 15; L.lambda1 = kL1; L.lambda2 = kL2;
+    }
+    RingFixCut outer;
+    outer.signal = "L1C"; outer.stations = {3, 4}; outer.sats = {"G05", "G06"}; outer.known = false;
+    outer.row = "rehost";
+    RingFixCut nested;
+    nested.signal = "L1C"; nested.sats = {"G06"}; nested.known = true; nested.delta = 0; nested.row = "rehost";
+    nested.held_first = true;
+    const RingFixCutOutcome out = ringFixApplyCuts(rf, {outer, nested}, 5000.0);
+    EXPECT_FALSE(rf.links.at(leaves).held);   // across the unknown outer step
+    EXPECT_TRUE(rf.links.at(across).held);    // inside the outer side, across the nested one at 0
+    EXPECT_EQ(rf.links.at(across).n1, 20);
+    EXPECT_TRUE(rf.links.at(kId).held);
+    ASSERT_EQ(out.kept_by_cut.size(), 2u);
+    EXPECT_TRUE(out.kept_by_cut[0].empty());
+    ASSERT_EQ(out.kept_by_cut[1].size(), 1u);
+    EXPECT_EQ(out.kept_by_cut[1][0].station, 4);
+    EXPECT_EQ(rf.counters.cuts_held_first, 1);
+    EXPECT_EQ(rf.counters.cuts_held_first_zero, 1);
+    EXPECT_EQ(rf.counters.cut_released, 1);
+}
+
+TEST(RingFixLogRule, TheLogRuleTracesWouldBeDecisionsAndHoldsNothing) {
+    double now = 100000.0;
+    NetworkRingFix rf = stateWithHistory(kId, now);
+    rf.rule = RingFixRule::Log;
+    for (int k = 1; k < kRingFixPersistEpochs; ++k, now += 30.0)
+        ringFixDecideStep(rf, {obsNear(kId, 10, 7, 0.02, 1e-5)}, now);
+    auto ev = ringFixDecideStep(rf, {obsNear(kId, 10, 7, 0.02, 1e-5)}, now);
+    ASSERT_EQ(ev.size(), 1u);
+    EXPECT_EQ(ev[0].kind, RingFixEvent::Kind::Hold);
+    EXPECT_TRUE(ev[0].log_only);
+    EXPECT_FALSE(rf.links.at(kId).held);
+    EXPECT_EQ(rf.counters.decided, 0);
+    EXPECT_EQ(rf.counters.log_links, 1);
+    EXPECT_EQ(rf.counters.log_link_epochs, 1);
+    now += 30.0;
+    ev = ringFixDecideStep(rf, {obsNear(kId, 10, 7, 0.02, 1e-5)}, now);   // the same integers again
+    ASSERT_EQ(ev.size(), 1u);
+    EXPECT_TRUE(ev[0].log_only);
+    EXPECT_EQ(rf.counters.log_link_epochs, 2);
+    EXPECT_EQ(rf.counters.log_changed, 0);
+    for (int k = 0; k < kRingFixPersistEpochs; ++k) {   // other integers, decided again after the count
+        now += 30.0;
+        ev = ringFixDecideStep(rf, {obsNear(kId, 11, 8, 0.02, 1e-5)}, now);
+    }
+    ASSERT_EQ(ev.size(), 1u);
+    EXPECT_TRUE(ev[0].log_only);
+    EXPECT_EQ(rf.counters.log_links, 1);
+    EXPECT_EQ(rf.counters.log_changed, 1);
+    EXPECT_EQ(rf.counters.decided, 0);
+    EXPECT_FALSE(rf.links.at(kId).held);
+}
+
+TEST(RingFixOracle, TheOracleWaitsOutTheEpochOfAReleaseALatchARelevelOrACut) {
+    NetworkRingFix rf;
+    rf.oracle_until_s = 6000.0;
+    RingFixDecideObs o = obsNear(kId, 10, 7, 0.4, 1.0);
+    o.have_truth = true;
+    o.truth1 = 11;
+    o.truth2 = 8;
+    o.relevel1_s = 500.0;
+    o.relevel2_s = 500.0;
+    rf.links[kId].released_s = 1000.0;   // released in this epoch
+    EXPECT_TRUE(ringFixDecideStep(rf, {o}, 1000.0).empty());
+    EXPECT_FALSE(rf.links.at(kId).held);
+    RingFixDecideObs latched = o;
+    latched.latched = true;
+    EXPECT_TRUE(ringFixDecideStep(rf, {latched}, 1030.0).empty());
+    RingFixDecideObs relevelled = o;
+    relevelled.relevel2_s = 1060.0;
+    EXPECT_TRUE(ringFixDecideStep(rf, {relevelled}, 1060.0).empty());
+    RingFixDecideObs erased = o;
+    erased.carry_ok = false;
+    EXPECT_TRUE(ringFixDecideStep(rf, {erased}, 1090.0).empty());
+    EXPECT_EQ(rf.counters.oracle_waited, 4);
+    const auto ev = ringFixDecideStep(rf, {o}, 1120.0);   // the next quiet epoch: held at truth
+    ASSERT_EQ(ev.size(), 1u);
+    EXPECT_TRUE(rf.links.at(kId).held);
+    EXPECT_EQ(rf.links.at(kId).n1, 11);
+    EXPECT_EQ(rf.links.at(kId).n2, 8);
+}
+
+TEST(RingFixNames, TheRulesHaveNames) {
+    EXPECT_STREQ(ringFixRuleName(RingFixRule::Gated), "gated");
+    EXPECT_STREQ(ringFixRuleName(RingFixRule::Plain), "plain");
+    EXPECT_STREQ(ringFixRuleName(RingFixRule::Log), "log");
 }

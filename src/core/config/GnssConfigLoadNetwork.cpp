@@ -1483,9 +1483,10 @@ namespace GnssProcessor {
                                         std::string("gated"));
             rf.audit_frame_file = jval<std::string>(json, "network.ring_fix.audit_frame_file",
                                                     "network_ring_fix_audit_frame_file", std::string{});
-            if (rf.rule != "gated" && rf.rule != "plain")
+            if (rf.rule != "gated" && rf.rule != "plain" && rf.rule != "log")
                 throw std::runtime_error("network.ring_fix.rule ('" + rf.rule
-                                         + "') must be \"gated\" or \"plain\".");
+                                         + "') must be \"gated\", \"plain\" or \"log\".");
+            rf.held_first = jval<bool>(json, "network.ring_fix.held_first", "network_ring_fix_held_first", false);
             rf.order = jval<std::string>(json, "network.ring_fix.order", "network_ring_fix_order",
                                          std::string("ring"));
             rf.gate = jval<std::string>(json, "network.ring_fix.gate", "network_ring_fix_gate",
@@ -10821,9 +10822,10 @@ namespace GnssProcessor {
                       network_config_.ring_fix.rule, af.empty() ? std::string("none") : af);
         } else if (network_config_.ring_fix.rule != "gated" || !network_config_.ring_fix.audit_frame_file.empty()
                    || network_config_.ring_fix.order != "ring" || network_config_.ring_fix.gate != "sigma"
-                   || !network_config_.ring_fix.truth_root.empty() || network_config_.ring_fix.oracle_until_s > 0.0) {
-            log->warn("Network: network.ring_fix.rule / order / gate / audit_frame_file are INERT without "
-                      "network.ring_fix.enable.");
+                   || !network_config_.ring_fix.truth_root.empty() || network_config_.ring_fix.oracle_until_s > 0.0
+                   || network_config_.ring_fix.held_first) {
+            log->warn("Network: network.ring_fix.rule / order / gate / audit_frame_file / truth_root / oracle_until_s / "
+                      "held_first are INERT without network.ring_fix.enable.");
         }
 
         // Two-edge continuous handover: inert guards, then the arming line.  Follows the

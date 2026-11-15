@@ -755,6 +755,35 @@ arcgraph::ForestRules chainForestRules(const ChainElection& el, std::uint8_t ban
     return rules;
 }
 
+/// The arcs of a family's graph whose integers the ring fix holds (network.ring_fix.held_first): a
+/// held link not latched this epoch, its monitor not tripped, on the family's bands.  The walk tries
+/// them first whenever a vertex needs a new edge, so a re-attachment keeps the held integers' frame.
+/// Empty without the option (the walk as built).
+std::vector<char> chainHeldArcs(const ChainElection& el, const ChainFamily& fam, const ChainGraph& cg) {
+    std::vector<char> held;
+    const NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->held_first) return held;
+    const auto& free_ambs = el.events.slip.relevel.free_ambs;
+    std::set<std::string> fam_sigs;
+    for (const ChainBand& b : fam.bands) fam_sigs.insert(b.signal);
+    std::set<std::pair<std::size_t, std::string>> ok;   // (station index, satellite)
+    for (const auto& [id, L] : rf->links) {
+        if (!L.held || L.monitor_trip) continue;
+        if (!fam_sigs.count(id.sig1) && !fam_sigs.count(id.sig2)) continue;
+        if (free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig1)}) != 0
+            || free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig2)}) != 0)
+            continue;
+        ok.insert({static_cast<std::size_t>(id.station), id.sat});
+    }
+    if (ok.empty()) return held;
+    held.assign(cg.graph.rows.size(), 0);
+    bool any = false;
+    for (std::size_t a = 0; a < cg.graph.rows.size(); ++a)
+        if (ok.count({cg.staIdx(cg.graph.row_station[a]), cg.satName(cg.graph.row_sat[a])}) != 0) held[a] = 1, any = true;
+    if (!any) held.clear();   // no held arc in this family's graph: the walk as built
+    return held;
+}
+
 /// The family's components, each with its datum receiver and forest, in component order.  The
 /// connected components come in the order of their roots: under the shared link rule (a station
 /// is united under a satellite, arc by arc) every root is a satellite, so the components come in
@@ -764,7 +793,9 @@ ChainFamilyPlan planChainFamily(const ChainElection& el, const ChainFamily& fam,
                                 const ChainSeeds& seeds, const std::vector<int>& chain_rank,
                                 const std::vector<int>& station_rank) {
     ChainFamilyPlan fp;
-    const arcgraph::ForestRules rules = chainForestRules(el, fam.mask());
+    arcgraph::ForestRules rules = chainForestRules(el, fam.mask());
+    const std::vector<char> held = chainHeldArcs(el, fam, cg);
+    if (!held.empty()) rules.held_arcs = &held;
     std::size_t best_comp = 0;
     for (const arcgraph::Component& comp : arcgraph::arcComponents(cg.graph, fam.mask(), chain_rank)) {
         std::optional<ChainComponentPlan> plan =
@@ -1649,6 +1680,7 @@ void traceTreeEdge(ChainElection& el, const ChainFamily& fam, const ChainBand& b
                                                   : ChainLegacyCause::FirstSighting;
     o.from_incumbent = edge.from_incumbent;
     o.second_pass = edge.pass == 2;
+    o.held_first = edge.held_first;
     const auto sc = el.stations[ri].pinned_amb_sigma_scale.find(amb);
     if (sc != el.stations[ri].pinned_amb_sigma_scale.end() && sc->second > 1.0) {
         o.sigma_scale = sc->second;
@@ -2022,7 +2054,9 @@ void extendBand(ChainElection& el, const ChainFamily& fam, const ChainGraph& cg,
                 const std::vector<int>& station_rank, BandWalk& walk) {
     const ChainBand& band = fam.bands[static_cast<size_t>(b)];
     const auto bit = static_cast<std::uint8_t>(1u << b);
-    const arcgraph::ForestRules rules = chainForestRules(el, bit);
+    arcgraph::ForestRules rules = chainForestRules(el, bit);
+    const std::vector<char> held = chainHeldArcs(el, fam, cg);
+    if (!held.empty()) rules.held_arcs = &held;
     for (const arcgraph::Component& comp : arcgraph::arcComponents(cg.graph, bit, chain_rank)) {
         std::vector<int> in_pair, band_only;   // the component's vertices, in ascending vertex id
         for (int s : comp.stations) {

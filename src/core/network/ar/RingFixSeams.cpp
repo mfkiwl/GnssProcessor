@@ -142,7 +142,10 @@ void networkRingFixArm(NetworkRun& run) {
     // ---- End of the bindings ----
     if (!nc.ring_fix.enable) return;
     auto rf = std::make_unique<NetworkRingFix>();
-    rf->rule = nc.ring_fix.rule == "plain" ? RingFixRule::Plain : RingFixRule::Gated;
+    rf->rule = nc.ring_fix.rule == "plain" ? RingFixRule::Plain
+             : nc.ring_fix.rule == "log"   ? RingFixRule::Log
+                                           : RingFixRule::Gated;
+    rf->held_first = nc.ring_fix.held_first;
     rf->order = nc.ring_fix.order == "certain" ? RingFixOrder::Certain : RingFixOrder::Ring;
     rf->gate_rule = nc.ring_fix.gate == "odds" ? RingFixGateRule::Odds : RingFixGateRule::Sigma;
     rf->max_gap_s = ctx.knobs.pl_max_gap_s;
@@ -154,8 +157,10 @@ void networkRingFixArm(NetworkRun& run) {
               "integers; the lattice vetoes), held by a prior row of sigma {:g} m from the next epoch, and "
               "released at a slip latch, a refloat, a gap beyond {:.0f} s, a chain event or the residual "
               "monitor ({:.3f} m at {} epochs). Audit: {}.",
-              rf->rule == RingFixRule::Plain ? "plain" : "gated",
-              rf->rule == RingFixRule::Plain ? "NEGATIVE CONTROL: every candidate rounded" : "the frozen rule",
+              ringFixRuleName(rf->rule),
+              rf->rule == RingFixRule::Plain ? "NEGATIVE CONTROL: every candidate rounded"
+              : rf->rule == RingFixRule::Log ? "LOG ONLY: the frozen rule is traced, nothing is held"
+                                             : "the frozen rule",
               kRingFixMaxSigmaCyc, kRingFixMaxFracCyc, kRingFixWindowS, kRingFixPersistEpochs,
               kRingFixHoldSigmaM, rf->max_gap_s, kRingFixMonitorBoundM, kRingFixMonitorEpochs,
               rf->audit_file.empty() ? std::string("none")
@@ -255,21 +260,47 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
         return nullptr;
     };
 
-    // 1. The cuts of this epoch, with the step of each moved side where its released edge was held.
+    // 1. The cuts of this epoch.  Each takes its whole moved side, the released vertex's subtree in this
+    //    epoch's tree on the band: a release nested below another lists only its own part, and a link
+    //    from the nested part to outside the outer side crosses both cuts (the steps add).  The step of
+    //    a moved side is known where its released edge was held.
     std::vector<RingFixCut> cuts;
     if (obs_rec != nullptr && obs_rec->armed) {
+        std::map<std::string, std::map<std::string, std::vector<std::string>>> kids;   // group -> parent -> children
+        for (const ChainEdgeObs& e : obs_rec->edges) kids[e.group][e.parent].push_back(e.child);
+        std::set<std::pair<std::string, std::string>> released_at;   // (group, released vertex)
+        for (const ChainReleaseObs& r : obs_rec->releases) released_at.insert({r.group, r.vertex});
         for (const ChainReleaseObs& r : obs_rec->releases) {
             RingFixCut c;
             c.signal = r.signal;
             c.stations.insert(r.stations.begin(), r.stations.end());
             c.sats.insert(r.sats.begin(), r.sats.end());
             c.row = chainReleaseRowName(r.row);
+            c.entry_station = r.station;
+            c.entry_sat = r.sat;
+            bool nested = false;
+            const auto gk = kids.find(r.group);
+            std::set<std::string> seen;
+            std::vector<std::string> stack{r.vertex};
+            while (!stack.empty()) {
+                const std::string v = stack.back();
+                stack.pop_back();
+                if (!seen.insert(v).second) continue;
+                if (v != r.vertex && released_at.count({r.group, v}) != 0) nested = true;
+                if (v.rfind("S:", 0) == 0) c.sats.insert(v.substr(2));
+                else if (v.rfind("R:", 0) == 0) c.stations.insert(std::stoi(v.substr(2)));
+                if (gk == kids.end()) continue;
+                const auto ch = gk->second.find(v);
+                if (ch != gk->second.end()) stack.insert(stack.end(), ch->second.begin(), ch->second.end());
+            }
+            if (nested) ++rf.counters.cuts_nested;
             const RingFixLink* h = heldLinkOf(r.station, r.sat, r.signal);
             const RingFixLinkId* hid = h != nullptr ? idOf(h) : nullptr;
             double target_cyc = std::numeric_limits<double>::quiet_NaN();
             for (const ChainEdgeObs& e : obs_rec->edges)
-                if (e.station == r.station && e.sat == r.sat && e.signal == r.signal && e.lambda_m > 0.0) {
-                    target_cyc = e.target_m / e.lambda_m;
+                if (e.station == r.station && e.sat == r.sat && e.signal == r.signal) {
+                    c.held_first = e.held_first;
+                    if (e.lambda_m > 0.0) target_cyc = e.target_m / e.lambda_m;
                     break;
                 }
             const bool usable = h != nullptr && hid != nullptr && !h->monitor_trip
@@ -283,26 +314,42 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
     // 2. The held links through the cuts: re-expressed by a known step, released across an unknown one.
     const long long now_ep = static_cast<long long>(ctx.counters.n_loop_epochs);
     const double elev_power = config_.getCodeElevationPower();
+    // A released link's carried entry is re-opened when nothing re-levelled it since the decision, and
+    // also when what did (the vehicle's drop at a slip or a refloat) left it tighter than the release
+    // floor: an entry born under the hold (held from its first stash, or re-created after a cut erased
+    // it) has the hold's own variance as its birth variance, which a drop restores.
     const auto reopen = [&](const RingFixLinkId& id, const std::string& sig, double stamp) {
         const net::ArcTuple key{id.station, id.sat, sig};
         LocalCarry* lc = net::getArc(arc_rows, key, &net::ArcState::amb);
-        if (lc == nullptr || lc->relevel_s > stamp) return;
+        if (lc == nullptr) return;
+        const bool stale = lc->relevel_s <= stamp;
         if (ctx.knobs.amb_float_kf) {
+            if (!stale && !(lc->var < kRingFixReleaseFloorM2)) return;
             const double drop_base = ambFloatDropFloorNow(ctx.knobs.amb_drop_var_floor, now_ep,
                                                           ctx.knobs.amb_drop_floor_after_ep);
-            ambFloatDropFloored(*lc, ambFloatBirthFloor(ctx.knobs.amb_birth_var_floor, -1.0, elev_power),
-                                ambFloatBirthFloor(drop_base, -1.0, elev_power), now_s, now_ep,
+            const double birth_floor = ambFloatBirthFloor(ctx.knobs.amb_birth_var_floor, -1.0, elev_power);
+            const double drop_floor = ambFloatBirthFloor(drop_base, -1.0, elev_power);
+            if (std::max({lc->var_birth, lc->var_first, birth_floor, drop_floor}) < kRingFixReleaseFloorM2)
+                ++rf.counters.release_floored;
+            ambFloatDropFloored(*lc, birth_floor, std::max(drop_floor, kRingFixReleaseFloorM2), now_s, now_ep,
                                 ctx.knobs.amb_drop_decouple_always);
             if (ctx.knobs.trace_amb_state)
                 ambStateNoteDrop(ctx, t.week, t.tow, nameOf(id.station), id.sat, sig, *lc, "ring_fix_release");
         } else {
+            if (!stale) return;
             net::dropArc(arc_rows, key, &net::ArcState::amb);
         }
         ++rf.counters.carry_reopened;
     };
+    std::set<RingFixLinkId> usable_before;   // held, not latched, monitor not tripped
+    for (const auto& [id, L] : rf.links)
+        if (L.held && !L.monitor_trip && latched.count({id.station, id.sat, id.sig1}) == 0
+            && latched.count({id.station, id.sat, id.sig2}) == 0)
+            usable_before.insert(id);
     const RingFixCutOutcome cut_out = ringFixApplyCuts(rf, cuts, now_s);
     for (const auto& [id, row] : cut_out.released) {
         const RingFixLink& L = rf.links.at(id);
+        if (usable_before.count(id) != 0) ++rf.counters.cut_released_usable;
         reopen(id, id.sig1, L.stamp1);
         reopen(id, id.sig2, L.stamp2);
         traces.emitEvent(t, "RINGFIX", "release", id.sat, nameOf(id.station), std::nullopt, std::nullopt, "chain",
@@ -314,6 +361,33 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
         traces.emitEvent(t, "RINGFIX", "reexpress", id.sat, nameOf(id.station), std::nullopt, std::nullopt, "cut",
                          fmt::format("sig1={} sig2={} n1={} n2={} d1={} d2={} cut={}", id.sig1, id.sig2, L.n1, L.n2,
                                      d1, d2, rows));
+    }
+    // The re-attachments through held links (network.ring_fix.held_first): one row per released edge the
+    // walk took first, naming the link and the held links whose integers crossed its cuts unchanged.
+    {
+        std::map<std::pair<int, std::string>, std::vector<std::size_t>> by_entry;
+        for (std::size_t k = 0; k < cuts.size(); ++k)
+            if (cuts[k].held_first) by_entry[{cuts[k].entry_station, cuts[k].entry_sat}].push_back(k);
+        for (const auto& [entry, ks] : by_entry) {
+            std::set<RingFixLinkId> kept;
+            std::string steps;
+            for (std::size_t k : ks) {
+                for (const RingFixLinkId& id : cut_out.kept_by_cut[k])
+                    if (!(id.station == entry.first && id.sat == entry.second)) kept.insert(id);
+                steps += fmt::format("{}{}:{}", steps.empty() ? "" : " ", cuts[k].signal,
+                                     cuts[k].known ? std::to_string(cuts[k].delta) : std::string("unknown"));
+            }
+            ++rf.counters.reattached;
+            rf.counters.held_first_kept += static_cast<long long>(kept.size());
+            const RingFixLink* h = heldLinkOf(entry.first, entry.second, cuts[ks.front()].signal);
+            const RingFixLinkId* hid = h != nullptr ? idOf(h) : nullptr;
+            traces.emitEvent(t, "RINGFIX", "reattach", entry.second, nameOf(entry.first), std::nullopt, std::nullopt,
+                             "held_first",
+                             fmt::format("sig1={} sig2={} n1={} n2={} steps={} kept={} cut={}",
+                                         hid != nullptr ? hid->sig1 : std::string(),
+                                         hid != nullptr ? hid->sig2 : std::string(), h != nullptr ? h->n1 : 0,
+                                         h != nullptr ? h->n2 : 0, steps, kept.size(), cuts[ks.front()].row));
+        }
     }
 
     // 3. A held link that became a tree edge leaves the held set: the chain pins it.
@@ -369,16 +443,13 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
             obs[id] = o;
         }
         const std::vector<RingFixEvent> events = ringFixReleaseStep(rf, obs, now_s);
-        // A slip is answered by the vehicle's drop pass of this epoch and a refloat already was:
-        // the other causes re-open the carried entries here, unless something re-levelled them
-        // since the decision.
+        // Every cause re-opens the carried entries: a slip's and a refloat's drop already ran (the
+        // floor still binds where it left the entry tighter); the other causes re-open them here,
+        // unless something re-levelled them since the decision.
         for (const RingFixEvent& ev : events) {
             const RingFixLink& L = rf.links.at(ev.id);
-            if (ev.release == RingFixRelease::Chain || ev.release == RingFixRelease::Monitor
-                || ev.release == RingFixRelease::Gap) {
-                reopen(ev.id, ev.id.sig1, L.stamp1);
-                reopen(ev.id, ev.id.sig2, L.stamp2);
-            }
+            reopen(ev.id, ev.id.sig1, L.stamp1);
+            reopen(ev.id, ev.id.sig2, L.stamp2);
             traces.emitEvent(t, "RINGFIX", "release", ev.id.sat, nameOf(ev.id.station), std::nullopt, std::nullopt,
                              ringFixReleaseName(ev.release),
                              fmt::format("sig1={} sig2={} n1={} n2={} ring={} held_s={:.0f}", ev.id.sig1,
@@ -679,27 +750,34 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                                      ? stations[static_cast<std::size_t>(ev.id.station)].name : std::string{};
         const RingFixAudit a = rf.audit.empty() ? RingFixAudit::Unlisted
                                                 : ringFixAuditLink(rf.audit, name, ev.id, ev.gate.n1, ev.gate.n2);
-        if (a == RingFixAudit::Wrong) ++rf.counters.decided_wrong;
-        else if (a == RingFixAudit::Right) ++rf.counters.decided_right;
+        if (!ev.log_only) {
+            if (a == RingFixAudit::Wrong) ++rf.counters.decided_wrong;
+            else if (a == RingFixAudit::Right) ++rf.counters.decided_right;
+        }
         std::string truth_tok;
         if (rf.truth) {
             for (const RingFixDecideObs& o : links)
                 if (o.id < ev.id || ev.id < o.id) continue;
                 else {
-                    if (o.have_truth && (o.truth1 != ev.gate.n1 || o.truth2 != ev.gate.n2)) ++rf.counters.decided_truth_wrong;
+                    const bool off = o.have_truth && (o.truth1 != ev.gate.n1 || o.truth2 != ev.gate.n2);
+                    if (ev.log_only) {
+                        if (o.have_truth) ++(off ? rf.counters.log_truth_wrong : rf.counters.log_truth_right);
+                    } else if (off) {
+                        ++rf.counters.decided_truth_wrong;
+                    }
                     truth_tok = o.have_truth ? ((o.truth1 == ev.gate.n1 && o.truth2 == ev.gate.n2) ? " truth=right"
                                                                                                  : " truth=WRONG")
                                              : " truth=none";
                     break;
                 }
         }
-        traces.emitEvent(t, "RINGFIX", "hold", ev.id.sat, name, ev.gate.sigma_if, kRingFixMaxSigmaCyc,
-                         ev.oracle ? "oracle" : "decide",
+        traces.emitEvent(t, "RINGFIX", ev.log_only ? "would_hold" : "hold", ev.id.sat, name, ev.gate.sigma_if,
+                         kRingFixMaxSigmaCyc, ev.oracle ? "oracle" : "decide",
                          fmt::format("sig1={} sig2={} ring={} n1={} n2={} wl={} frac_if={:.3f} sigma_if={:.3f} "
                                      "frac_wl={:.3f} rule={} audit={}",
                                      ev.id.sig1, ev.id.sig2, rf.links.at(ev.id).ring, ev.gate.n1, ev.gate.n2,
                                      ev.gate.wl, ev.gate.frac_if, ev.gate.sigma_if, ev.gate.frac_wl,
-                                     rf.rule == RingFixRule::Plain ? "plain" : "gated", auditName(a))
+                                     ringFixRuleName(rf.rule), auditName(a))
                              + (rf.order == RingFixOrder::Certain ? " order=certain" : "")
                              + (rf.gate_rule == RingFixGateRule::Odds
                                     ? fmt::format(" gate=odds log_odds_if={:.2f} log_odds_wl={:.2f}",
@@ -716,7 +794,9 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
             const char* state = "refused";
             std::string cause;
             if (held_before[o.id]) { state = "held"; }
-            else if (ev != event_of.end() && ev->second->kind == RingFixEvent::Kind::Hold) { state = "decided"; }
+            else if (ev != event_of.end() && ev->second->kind == RingFixEvent::Kind::Hold) {
+                state = ev->second->log_only ? "would_hold" : "decided";
+            }
             else if (ev != event_of.end()) { cause = ringFixRefuseName(ev->second->refuse); }
             const auto g = gate_of.find(o.id);
             const RingFixGate gr = g != gate_of.end() ? g->second : RingFixGate{};
@@ -788,7 +868,7 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
     log->warn("Network (ring fix, rule {}): {} link(s) decided over {} decision epoch(s) ({}); first hold by "
               "ring: {}; held at the end {} ({}); {} held link-epoch(s); {} hold row(s) folded, {} skipped on a "
               "tree edge, {} without a column.",
-              rf.rule == RingFixRule::Plain ? "plain" : "gated", C.decided, C.epochs_decided,
+              ringFixRuleName(rf.rule), C.decided, C.epochs_decided,
               by_ring.empty() ? "none" : by_ring, first.empty() ? "none" : first, held_end,
               held_rings.empty() ? "none" : held_rings, C.held_link_epochs, C.rows_injected,
               C.rows_gauge_skipped, C.rows_no_column);
@@ -804,9 +884,25 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
                   "inherited; {} kept through a pinned root handover; {} stamp rebase(s) after a cut's erase.",
                   C.cuts, C.cuts_known, C.cuts_known_zero, C.reexpressed, C.cut_released, C.to_tree, C.inherited,
                   C.root_kept, C.stamps_rebased);
+    if (C.cuts > 0 || rf.held_first)
+        log->warn("Network (ring fix, cuts by kind): {} held first ({} with a step of 0), {} other known, {} unknown; "
+                  "{} re-attachment(s) through a held link kept {} held link(s); {} usable held link(s) released "
+                  "across an unknown step; {} cut(s) with a nested release; {} carried entr(ies) re-opened to the "
+                  "release floor of {:g} m^2.{}",
+                  C.cuts_held_first, C.cuts_held_first_zero, C.cuts_known - std::min(C.cuts_known, C.cuts_held_first),
+                  C.cuts - C.cuts_known, C.reattached, C.held_first_kept, C.cut_released_usable, C.cuts_nested,
+                  C.release_floored, kRingFixReleaseFloorM2,
+                  rf.held_first ? " Held first ARMED (network.ring_fix.held_first)." : "");
+    if (rf.rule == RingFixRule::Log)
+        log->warn("Network (ring fix, log rule): the frozen rule would have decided {} link(s) at {} link-epoch(s), "
+                  "{} of them with integers other than the link's first{}; nothing was held.",
+                  C.log_links, C.log_link_epochs, C.log_changed,
+                  rf.truth ? fmt::format("; against truth {} right, {} WRONG", C.log_truth_right, C.log_truth_wrong)
+                           : std::string());
     if (rf.oracle_until_s > 0.0)
         log->warn("Network (ring fix, oracle phase of {:.0f} s): {} link(s) held at their true integers, {} held "
-                  "integer(s) set again.", rf.oracle_until_s, C.oracle_decided, C.oracle_corrected);
+                  "integer(s) set again, {} hold(s) put off to the next epoch (released, latched, re-levelled or "
+                  "cut in the epoch).", rf.oracle_until_s, C.oracle_decided, C.oracle_corrected, C.oracle_waited);
     if (rf.truth)
         log->warn("Network (ring fix truth audit, in each epoch's frame): held link-epochs right {}, WRONG {}, without "
                   "a true integer {}; decisions WRONG {}; {} branch(es) started without a wind-up row{}.",

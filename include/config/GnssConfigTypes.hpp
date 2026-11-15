@@ -1882,9 +1882,13 @@ namespace GnssProcessor {
     struct NetworkRingFixConfig {
         /// @c network.ring_fix.enable: decide, hold, release and audit the chain's chord integers (default false).
         bool enable{ false };
-        /// @c network.ring_fix.rule: "gated" (the frozen rule, default) or "plain" (the negative
-        /// control: every candidate with a float is rounded and held at once).
+        /// @c network.ring_fix.rule: "gated" (the frozen rule, default), "plain" (the negative
+        /// control: every candidate with a float is rounded and held at once) or "log" (the frozen rule
+        /// evaluated and traced, nothing held: the products are those of the key off).
         std::string rule{ "gated" };
+        /// @c network.ring_fix.held_first: whenever the chain's tree must change, a held link that can
+        /// re-attach the moved side is taken first, pinned at its held integer (default false).
+        bool held_first{ false };
         /// @c network.ring_fix.order: "ring" (ring by ring, default) or "certain" (every chord with a float is a
         /// candidate; the most certain decided first, a few per epoch).
         std::string order{ "ring" };

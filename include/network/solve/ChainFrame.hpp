@@ -295,6 +295,7 @@ struct ChainEdgeObs {
     bool        incumbent_flipped{false};  ///< This arc was an incumbent tree edge attaching the other endpoint.
     bool        from_incumbent{false};  ///< Grown from the incumbent seed.
     bool        second_pass{false};     ///< Admitted only in the walk's second pass.
+    bool        held_first{false};      ///< A new edge the walk took because the ring fix holds its integer (network.ring_fix.held_first).
     double      sigma_scale{1.0};       ///< The pin's sigma multiplier (a soft pin above 1).
     std::string life_stamp;             ///< The arc's life stamp, as a token.
     // Filled by the classification.

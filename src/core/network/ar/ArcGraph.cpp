@@ -539,6 +539,29 @@ SpanningForest growChainForest(const ArcGraph& g, const Component& c, const std:
             for (int v : chainFrontier(visited, frontier_rank)) new_q.push_back(v);
         }
         while (!inc_q.empty() || !new_q.empty()) {
+            if (inc_q.empty() && rules.held_arcs != nullptr && n_visited < comp_vertices) {
+                // Held first: a held arc from an attached vertex to an unattached one, the
+                // attached vertices in attachment order and each one's candidates in the walk's
+                // own order; the incumbent queue then re-attaches the rest of a fragment.
+                bool took = false;
+                for (int v : new_q) {
+                    for (int a : chainCandidates(g, v, rules, station_rank)) {
+                        if (a < 0 || static_cast<std::size_t>(a) >= rules.held_arcs->size()
+                            || !(*rules.held_arcs)[static_cast<std::size_t>(a)])
+                            continue;
+                        const int u = otherEnd(g, a, v);
+                        if (visited[static_cast<std::size_t>(u)]) continue;
+                        if (!newEdgeOk(a)) continue;
+                        record(a, u, /*from_incumbent=*/false);
+                        f.edges.back().held_first = true;
+                        attach(u);
+                        took = true;
+                        break;
+                    }
+                    if (took) break;
+                }
+                if (took) continue;
+            }
             if (!inc_q.empty()) {   // the incumbent queue drains before any new edge
                 const int v = inc_q.front();
                 inc_q.pop_front();
@@ -548,7 +571,7 @@ SpanningForest growChainForest(const ArcGraph& g, const Component& c, const std:
                     record(a, u, /*from_incumbent=*/true);
                     attach(u);
                 }
-            } else {
+            } else if (rules.held_arcs == nullptr) {
                 const int v = new_q.front();
                 new_q.pop_front();
                 for (int a : chainCandidates(g, v, rules, station_rank)) {
@@ -558,6 +581,21 @@ SpanningForest growChainForest(const ArcGraph& g, const Component& c, const std:
                     record(a, u, /*from_incumbent=*/false);
                     attach(u);
                 }
+            } else {
+                // Held first: one new edge at a time, so the incumbent queue re-attaches the
+                // fragment it reached and that fragment's held arcs are tried before the next one.
+                const int v = new_q.front();
+                bool took = false;
+                for (int a : chainCandidates(g, v, rules, station_rank)) {
+                    const int u = otherEnd(g, a, v);
+                    if (visited[static_cast<std::size_t>(u)]) continue;
+                    if (!newEdgeOk(a)) continue;
+                    record(a, u, /*from_incumbent=*/false);
+                    attach(u);
+                    took = true;
+                    break;
+                }
+                if (!took) new_q.pop_front();
             }
         }
     }

@@ -391,6 +391,15 @@ BEDS = {
                     "IRD msr on the microscope", pure_cut_ops(CUT_ROOT, CUT_ROOT_BRIDGE)),
     "ird_msr_ctl_mic": ("sim", "runs/simarl_r1c", ARL_GPS_ONLY + MICROSCOPE,
                         "IRD msr's control on the microscope", pure_cut_ops(CUT_ROOT, CUT_ROOT_BRIDGE, split=False)),
+    # Card NRF stage N2b-3: rung 3c with one scripted, unflagged slip at TOW 265830 (80 min), made by
+    # scripts/nrf_slip_bed.py under FIXTURES_ROOT (simnrf_<name>); the links are named from N2-r3c's trace.
+    "nrf_s1": ("sim", FIXTURES_ROOT + "/simnrf_s1", ARL_GPS_ONLY,
+               "NRF s1: L1C +25 on S05000SIM G26 (a chord held 62 min in N2-r3c), TOW 265830", []),
+    "nrf_s2": ("sim", FIXTURES_ROOT + "/simnrf_s2", ARL_GPS_ONLY,
+               "NRF s2: L1C +1 and L2W +1 on S05000SIM G26 (a chord held 62 min in N2-r3c), TOW 265830", []),
+    "nrf_s3": ("sim", FIXTURES_ROOT + "/simnrf_s3", ARL_GPS_ONLY,
+               "NRF s3: L1C +1 and L2W +1 on S03000SIM G25, a tree edge in both bands all run with 15 vertices below "
+               "it and 38 held links across it at the slip in N2-r3c, TOW 265830", []),
 }
 
 # Card IRDU section 11 B: the no-re-seat bed, rung 3c with only the arcs the network tracked through the whole 2 h
@@ -486,6 +495,18 @@ for _bed in NRF_N2_BEDS:
     KNOB_GROUPS["nrf_olt_" + _bed] = _base + ["network.ring_fix.truth_root=" + _nrf_fixture(_bed)]
     KNOB_GROUPS["nrf_olc_" + _bed] = KNOB_GROUPS["nrf_olt_" + _bed] + ["network.ring_fix.oracle_until_s=1000000"]
     KNOB_GROUPS["nrf_ols_" + _bed] = KNOB_GROUPS["nrf_olt_" + _bed] + ["network.ring_fix.oracle_until_s=1800"]
+# Card NRF section 14 (stage N2b): held-first re-attachment (_hf) on N2's beds and on the slip beds of N2b-3, and the
+# log rule on r3c (the frozen rule traced, nothing held; its products are the key off's).
+NRF_N2B_SLIP_BEDS = ("nrf_s1", "nrf_s2", "nrf_s3")
+for _bed in NRF_N2_BEDS + NRF_N2B_SLIP_BEDS:
+    if _bed not in BEDS or BEDS[_bed][1] is None:
+        continue
+    if _bed in NRF_N2B_SLIP_BEDS:
+        KNOB_GROUPS["nrf_olt_" + _bed] = ["network.ring_fix.enable=true", "network.ring_fix.order=certain",
+                                          "network.ring_fix.gate=odds",
+                                          "network.ring_fix.truth_root=" + _nrf_fixture(_bed)]
+    KNOB_GROUPS["nrf_hf_" + _bed] = KNOB_GROUPS["nrf_olt_" + _bed] + ["network.ring_fix.held_first=true"]
+KNOB_GROUPS["nrf_log_r3c"] = KNOB_GROUPS["nrf_olt_r3c"] + ["network.ring_fix.rule=log"]
 
 
 def sha256_bytes(b):
