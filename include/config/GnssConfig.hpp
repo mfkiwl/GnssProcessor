@@ -773,11 +773,23 @@ namespace GnssProcessor {
 
         /// @brief Leave out of the solution every satellite the stream holds no record for
         ///        (@c processing.ssr_drop_unrecorded, or derived from
-        ///        @c network.closed_loop.drop_unrecorded; card IRDU section 12.10).
+        ///        @c network.closed_loop.drop_unrecorded).
         ///        See @c RealTimeEngine::dropUnrecorded and @c UnrecordedSatGate.
         /// @return True when a satellite without a stream clock record is left out; false
         ///         (default) keeps it with the a priori clock (byte-identical).
         bool ssrDropUnrecorded() const { return ssr_drop_unrecorded_; }
+
+        /// @brief Leave out of the solution, besides every satellite without a stream clock
+        ///        record, every satellite without a phase-bias record for a raw phase signal the
+        ///        receiver uses for it (@c processing.ssr_drop_unrecorded_phase_bias, or derived
+        ///        from @c network.closed_loop.drop_unrecorded_phase_bias).  The phase-bias test is
+        ///        the apply site's (the bias age limit times the stale-hold factor when the bias
+        ///        staleness gate is on); the whole satellite is left out when one of its signals
+        ///        lacks the record, and a missing code bias is no reason.  See
+        ///        @c RealTimeEngine::dropUnrecorded and @c UnrecordedSatGate.
+        /// @return True when the phase-bias rule is armed (it includes the clock rule); false
+        ///         (default) keeps such satellites (byte-identical).
+        bool ssrDropUnrecordedPhaseBias() const { return ssr_drop_unrecorded_phase_bias_; }
 
         /// @brief Translate the float ambiguity by @c −Δ on every change in the
         ///        applied SSR phase bias, declared or not, rather than only on a
@@ -9974,7 +9986,8 @@ namespace GnssProcessor {
         bool   enable_ssr_bias_max_age_explicit_{ false };///< True iff the config sets processing.enable_ssr_bias_max_age (either key form), so applyNetworkConsumerProfile can arm the gate under bias consumption while respecting an explicit false (RTA-9(a)).
         double ssr_bias_stale_hold_factor_{ 2.0 };        ///< Apply-gate drop limit = factor × ssr_bias_max_age_s_ (A5): the last bias is held over sub-limit staleness gaps, so no artificial model step or burst of resets occurs; 1.0 = drop exactly at max age.  Only meaningful when enable_ssr_bias_max_age_.
         bool   ssr_phase_bias_disc_carry_{ false };       ///< Carry the float ambiguity across a declared phase-bias step (amb − Δ, value-only) instead of resetting it; off = the existing reset path (byte-identical).  Set directly (processing.ssr_phase_bias_disc_carry) or derived from network.closed_loop.pb_disc_carry.
-        bool   ssr_drop_unrecorded_{ false };             ///< Leave out of the solution every satellite the stream holds no clock record for (card IRDU 12.10); off = such a satellite keeps the a priori clock (byte-identical).  Set directly (processing.ssr_drop_unrecorded) or derived from network.closed_loop.drop_unrecorded.
+        bool   ssr_drop_unrecorded_{ false };             ///< Leave out of the solution every satellite the stream holds no clock record for ; off = such a satellite keeps the a priori clock (byte-identical).  Set directly (processing.ssr_drop_unrecorded) or derived from network.closed_loop.drop_unrecorded.
+        bool   ssr_drop_unrecorded_phase_bias_{ false };  ///< Also leave out every satellite without a phase-bias record for a phase signal the receiver uses (processing.ssr_drop_unrecorded_phase_bias, derived from network.closed_loop.drop_unrecorded_phase_bias); off = byte-identical.
         bool   ssr_level_step_inflate_{ false };      ///< Raise the variance along a stepped satellite's phase-blind ionosphere-ambiguity direction by its declared code-level step (C and B record lvl=). OFF = byte-identical.  Set directly (processing.ssr_level_step_inflate) or derived from network.closed_loop.level_step_inflate.
         double ssr_level_step_inflate_k_{ 1.0 };      ///< The inflation's standard deviation over the declared code step.
         bool   ephemeris_jump_reseed_{ false };       ///< Re-seed a satellite whose broadcast record change moves its modelled range by more than the threshold (processing.ephemeris_jump_reseed). OFF = byte-identical.

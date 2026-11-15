@@ -12876,10 +12876,11 @@ namespace GnssProcessor {
             // fingerprint.
             clc.pb_disc_carry            = cl.value("pb_disc_carry", false);
             // The consumer's rule for satellites without a stream record (derived into the
-            // consumer engine as processing.ssr_drop_unrecorded; card IRDU section 12.10).
-            // Default false ⇒ byte-identical; it never reaches the producer's solve or its
-            // resume fingerprint.
+            // consumer engine as processing.ssr_drop_unrecorded), and its extension to the
+            // phase biases (processing.ssr_drop_unrecorded_phase_bias).  Both default false ⇒
+            // byte-identical; neither reaches the producer's solve or its resume fingerprint.
             clc.drop_unrecorded          = cl.value("drop_unrecorded", false);
+            clc.drop_unrecorded_phase_bias = cl.value("drop_unrecorded_phase_bias", false);
             // The presence edges of a held phase bias (derived into the
             // consumer engine as processing.ssr_pb_hold_presence_flip).  Same contract
             // as pb_disc_carry: default false, and it never reaches the producer's solve
@@ -13278,6 +13279,8 @@ namespace GnssProcessor {
         // cleared here: an explicit processing.ssr_drop_unrecorded on the base config is kept.
         if (cl.drop_unrecorded)
             c.ssr_drop_unrecorded_ = true;
+        if (cl.drop_unrecorded_phase_bias)
+            c.ssr_drop_unrecorded_phase_bias_ = true;
         // The same derivation for the presence edges of a held phase bias.
         // Never cleared here: an explicit processing.ssr_pb_hold_presence_flip on the
         // base config is kept.
@@ -13777,7 +13780,7 @@ namespace GnssProcessor {
                               return n;
                           }(), root);
             }
-            // The chain-frame targets (card IRDU section 12) are read by the oracle pin alone: without an armed
+            // The chain-frame targets are read by the oracle pin alone: without an armed
             // event they would be read by nothing (armed and inert, invariant 4), and a missing file is a
             // mis-pointed path, not an empty target set.
             const auto& frame_file = network_config_.slip_qc.oracle_pin_frame_file;

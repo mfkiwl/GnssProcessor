@@ -230,3 +230,73 @@ The key is a measured instrument, not a candidate setting: it stays default off,
 - Observed data (not run, as assigned).
 - The fixing users.
 - Grading on the users' pivot pairs (the audit counts every pair of corrected satellites, a superset of the pairs a user forms).
+
+### 15 2026-11-14: the users' rule extended to satellites without a phase-bias record (built; the graded runs pre-registered before they run)
+
+**Assigned** by the requesting session after the author's approval. The author was asked "Have Opus extend the user-side rule to satellites without a phase-bias record?" and answered "Yes, add it". Default off. The requesting session re-graded section 14 (stream and users) and reproduced it; that key stays off, and nothing more is asked on it now.
+
+**Why**, measured by the requesting session on observed data, offline (card ARNC and card ARNB sections 10 and 11, in the uncommitted worktree `rx_sat_bias`, read only):
+- On the observed-data stream one Galileo satellite-epoch in eight offers a receiver of the L1C/L5Q type no complete pair of bias records, although the stream carries the satellite on L1X/L5X; the receiver then uses the satellite with the clock alone.
+- Under the emission hold in its phase-clock mode, the clock less the phase bias is the constant of a generation. The clock record alone wanders by 83 mm (median, 30-minute windows) in the network's first hour.
+- With those satellite-epochs left out (a filtered copy of the receiver's observation file), a user that starts with a cold network stays below 10 cm from 13 min in place of 52 (HARB00ZAF) and from 19 in place of 47 (DAV100ATA).
+- The rule of 12.11 asks the store for a clock record; these satellites have one, so it leaves them in.
+
+**What is built** (this branch; committed with this section, before any graded run):
+
+1. **A second key**, `network.closed_loop.drop_unrecorded_phase_bias` (default false), derived into the consumer engine as `processing.ssr_drop_unrecorded_phase_bias`.
+   - It includes the clock rule. The key of 12.11 keeps its meaning alone: the clock rule only, with its log lines and run-end line as before.
+   - A second key rather than a widened first one, so that the behaviour of 12.11 with its key on cannot change.
+2. **The criterion.** A satellite is left out when it has no clock record (as before), or when one of the raw phase signals the receiver uses for it has no phase-bias record.
+   - The signals are the phase keys of the satellite's modelled observation, ionosphere-free labels excluded.
+   - The phase-bias test is the apply site's own (`ObservationEquation` `addSsrBias`): `getPhaseBias` at the observation time with the bias age limit times the stale-hold factor when the bias staleness gate is on, and the latest record otherwise. The closed-loop consumer arms the gate (30 s times 2, so a record counts for 60 s), so a stale record counts as absent at both places.
+   - A missing code bias is no reason: on the observed-data stream every GPS L1C row of an L1C/L2W receiver has a phase bias and no code-bias record, by the stream's convention.
+   - When one signal lacks its record and the other has it, the whole satellite is left out, as the requesting session's measurement did.
+3. **Both edges** (standing invariant 7), in the pure gate `UnrecordedSatGate`.
+   - A Drop at the first sighting without the records, or when a record is lost. It names the missing record: the clock, or the phase bias of a named signal.
+   - A Readmit with fresh states when every record is back.
+   - A dropped satellite whose missing record changes kind stays out without a second Drop.
+   - Counters by reason, and a run-end line naming the phase-bias drops.
+4. **The freshness flip** (`flip_to_fresh`, `reset_flip` in `resetOnPhaseBiasDisc`). The rule runs in the epoch's preparation, before that reaction, so a satellite left out never reaches the flip test.
+   - Its last applied state stays as it was while the satellite was in the solution (applied, or no entry at a first sighting), so the returning record makes no flip.
+   - The readmit's fresh start takes the place of the reset the flip gave before (E02 at 19:46 on observed data: `flip_to_fresh;reset_flip`).
+   - Unchanged: a satellite that stays in the solution (all its records present) and a satellite the rule does not see (the key off).
+5. **Tests and records.** Unit tests on hand-built epochs (4 new cases, 11 in all: a missing phase bias naming the signal, its loss and return, a change of the missing record, the clock form equal to the state form), a ledger row (UNVALIDATED), loader text and Doxygen.
+6. **Cleanup.** The card numbers in the comments of 12.10, 12.11 and section 12's oracle pin are removed; two log strings that name the oracle pin's card are kept.
+
+**Tools.**
+- `scripts/irdu_pb_remove.py`: a copy of a product stream without chosen satellites' code-bias and phase-bias records for chosen spans, clocks kept.
+- `scripts/irdu_users.py`: user sets `dp` (the key) and `fr` (a filtered observation file, `make --rinex-dir`).
+- The requesting session's `rinex_drop.py` and `conv_curve.py` (`D:/GnssProcessorSupport/presentation/agu26/fixing_control/tools/`), read and run, not changed.
+
+#### 15.1 The runs, pre-registered
+
+Executables: this section's build, copied as `gnss_processor_irdu_pb1.exe` (network not run; users, folders `_bpb1`). Each new configuration is smoked first (10 epochs). Simulator first.
+
+- **S1. Key off.** The users are byte-identical to the previous user build's (`pv1`) on the same streams, by `scripts/irdu_build_identity.py`:
+  - Q1's control stream, starts 0, 15 and 30 min, with the recipe and with the clock rule (`du`): 30 pairs;
+  - r3c's control stream from 30 min: 5 pairs.
+- **S2. Key on where every used signal has its record.** On r3c (the stream as emitted, `_rap_irdu_zwc_r3c`, and the reference arm with the holds, `_rap_irdu_g_r3c`), five users from 30 min, float and fixing, with the key and without: identical, 20 of 20. Otherwise, the satellite-epochs the key leaves out are listed and explained (a phase-bias record withheld while the clock is emitted would be such a case).
+- **S3. The made case, a simulated stream with the hold.**
+  - **The stream:** `_rap_irdu_gpb_r3c` is `_rap_irdu_g_r3c` (holds on, `pbhold=2`) without these code- and phase-bias records, all other lines byte-identical:
+    - G13, both signals, 20.0 to 45.0 min (49 epochs: a record lost and returning);
+    - G23, both signals, from the first epoch to 70.0 min (141 epochs; SZZ000SIM sees it rise at 51.5 min: a first sighting without records);
+    - G05, L2W and C2W only, 60.0 to 80.0 min (40 epochs: one signal missing).
+  - **The users:** five, from 0 and 30 min, float:
+    - (a) the key off on the edited stream;
+    - (b) the key off with each user's observation file filtered by `rinex_drop.py` from (a)'s trace (every satellite-epoch with a row without a phase bias removed);
+    - (c) the key on with the user's own file.
+  - **Bar:** (c)'s position trace identical to (b)'s, byte for byte, or every difference explained; the satellite-epochs the key leaves out equal the filter's.
+- **O1. Observed data, user replays only** (no network run, no chain run).
+  - **Receivers and streams:** HARB00ZAF, DAV100ATA and SCRZ00BOL, from 00:00 on `_rap_p26_n144` and from 18:00 on `_rap_nww24_n144`, on this branch's executable.
+  - **Arms:**
+    - (a) the configuration of `_rap_nw_obs_144_<site>` (from 00:00) and `_rap_nw_obsw18_144_<site>` (from 18:00) as it is;
+    - (b) their filtered twins `_rap_nw_obsc00x_144_<site>` and `_rap_nw_obsw18x_144_<site>`;
+    - (c) (a) with the key.
+  - **Smoke:** these configurations were written for another executable, so a smoke first, and the keys of those configurations that this executable's loader does not read are listed.
+  - **Bar:** (c) equals (b) in the position trace, or every difference is explained; the satellite-epochs the key leaves out equal the filter's: 1 298, 1 503 and 2 321 from 00:00; 1 277, 1 292 and 166 from 18:00.
+- **O2. The gain on this executable:** the minute from which the 3D error stays below 10 cm, (a) against (c), at HARB00ZAF and DAV100ATA from 00:00. The requesting session's figures on its executable are 52 and 47 min against 13 and 19 min.
+- **Optional:** the holds-off stream (`_rap_nwh24_n144`, filtered files `h00`, `h18`), reported beside without a bar.
+
+**Prediction.** S1 identical. S2 identical unless the stream withholds a phase-bias record while emitting the clock. S3 and O1 (c) equal to (b) except where a stage ahead of the rule reads the satellite's observations (the coverage logs and traces of the epoch's opening, which do not reach the position). A position difference would be traced to its stage.
+
+**Standing, 2026-11-14 (night).** Interrupted by the author's new priority (integer fixing in the network, ring by ring, on the simulator). The code, its 11 gate unit tests and the ledger row are committed with this section; the Debug build passes the 11 gate cases and the 91 tests of the neighbouring user-engine suites (102 in all), and the Release build links. None of the runs of 15.1 has run: S1 to S3, O1 and O2 wait, with their bars as written above. The edited stream of S3 exists (`_rap_irdu_gpb_r3c`); no user replay was made on it.

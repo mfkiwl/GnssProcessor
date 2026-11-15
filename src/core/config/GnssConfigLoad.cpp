@@ -647,7 +647,7 @@ namespace GnssProcessor {
         // Default false keeps the reset reaction (byte-identical).  The closed-loop
         // harness derives it from network.closed_loop.pb_disc_carry
         // (deriveClosedLoopConsumerConfig); a standalone consumer sets it here.
-        // Satellites without a stream record (card IRDU section 12.10).  Default false keeps
+        // Satellites without a stream record.  Default false keeps
         // them in the solution with the a priori clock (byte-identical).  The closed-loop
         // harness derives it from network.closed_loop.drop_unrecorded; a standalone consumer
         // sets it here.
@@ -657,6 +657,18 @@ namespace GnssProcessor {
             log->info("SSR unrecorded-satellite rule ON: a satellite the stream holds no clock "
                       "record for is left out of the solution until its record arrives (its "
                       "ambiguity and ionosphere then start afresh).");
+        // The same rule extended to the phase biases: also a satellite with the stream's clock
+        // and without a phase-bias record for a phase signal it is used on.  Default false
+        // (byte-identical); derived from network.closed_loop.drop_unrecorded_phase_bias by the
+        // closed-loop harness, set here by a standalone consumer.
+        ssr_drop_unrecorded_phase_bias_ = jval<bool>(json,
+            "processing.ssr_drop_unrecorded_phase_bias", "ssr_drop_unrecorded_phase_bias", false);
+        if (ssr_drop_unrecorded_phase_bias_)
+            log->info("SSR unrecorded-satellite rule ON with phase biases: a satellite the stream "
+                      "holds no clock record for, or no phase-bias record for one of the phase "
+                      "signals it is used on (the apply site's freshness test), is left out of the "
+                      "solution until its records arrive (its ambiguity and ionosphere then start "
+                      "afresh); a missing code bias is no reason.");
         ssr_phase_bias_disc_carry_ = jval<bool>(json,
             "processing.ssr_phase_bias_disc_carry", "ssr_phase_bias_disc_carry", false);
         if (ssr_phase_bias_disc_carry_)

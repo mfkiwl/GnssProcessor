@@ -177,8 +177,8 @@ namespace GnssProcessor {
          */
         bool          pb_disc_carry{ false };
         /**
-         * @brief Leave out of the consumer's solution every satellite the stream holds no record
-         *        for (card IRDU section 12.10).
+         * @brief Leave out of the consumer's solution every satellite the stream holds no clock
+         *        record for.
          *
          * Key @c network.closed_loop.drop_unrecorded, default false (byte-identical).
          * @c deriveClosedLoopConsumerConfig copies it into the consumer engine's config as
@@ -188,6 +188,22 @@ namespace GnssProcessor {
          * It never reaches the producer's solve or its resume fingerprint.
          */
         bool          drop_unrecorded{ false };
+        /**
+         * @brief Leave out of the consumer's solution, besides every satellite without a clock
+         *        record, every satellite without a phase-bias record for a phase signal the
+         *        receiver uses for it.
+         *
+         * Key @c network.closed_loop.drop_unrecorded_phase_bias, default false (byte-identical).
+         * @c deriveClosedLoopConsumerConfig copies it into the consumer engine's config as
+         * @c processing.ssr_drop_unrecorded_phase_bias (@c GnssConfig::ssrDropUnrecordedPhaseBias);
+         * a standalone consumer sets that @c processing key directly.  It includes the clock rule
+         * of @ref drop_unrecorded, which keeps its own meaning when this key is off.  The whole
+         * satellite is left out when one of its signals lacks the record; a missing code bias is
+         * no reason.  The rule and its edges are in @c UnrecordedSatGate and
+         * @c RealTimeEngine::dropUnrecorded (RealTimeEnginePrepare.cpp).  It never reaches the
+         * producer's solve or its resume fingerprint.
+         */
+        bool          drop_unrecorded_phase_bias{ false };
         /**
          * @brief Answer a presence edge of a held phase bias.
          *
@@ -884,7 +900,7 @@ namespace GnssProcessor {
         /// @ref oracle_relevel is on and the directory does not exist; that error is
         /// what keeps the oracle inert on field data.
         std::string oracle_truth_root{};
-        /// Simulation only (card IRDU section 12): the chain-frame target file of the oracle pin
+        /// Simulation only: the chain-frame target file of the oracle pin
         /// (@c network.cycle_slip.oracle_pin_frame_file, default empty).  When it names a file, every armed
         /// @c oracle_pin event holds every link the file lists that the chain does not pin at lambda times its
         /// integer in the chain's frame (columns station, sat, signal, frame_int, role), and checks every listed

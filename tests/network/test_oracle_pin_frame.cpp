@@ -1,6 +1,6 @@
 /**
  * @file test_oracle_pin_frame.cpp
- * @brief The oracle pin's chain-frame mode (network.cycle_slip.oracle_pin_frame_file, card IRDU section 12):
+ * @brief The oracle pin's chain-frame mode (network.cycle_slip.oracle_pin_frame_file):
  *        the frame-target file parser and the frame table's decisions (links the chain does not pin held at
  *        lambda times their frame integer, links it pins checked at that integer, the latch when the chain pins a
  *        link elsewhere, the release at a true slip).

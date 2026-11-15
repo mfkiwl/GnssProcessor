@@ -226,7 +226,7 @@ struct NetworkOraclePin {
     /// onset rows misses every arc that joined later.
     std::set<std::tuple<int, std::string, std::string>> prev_keys;
 
-    // ---- Chain-frame mode (card IRDU section 12) --------------------------------
+    // ---- Chain-frame mode -------------------------------------------------------
     // With network.cycle_slip.oracle_pin_frame_file set, the table is read from the file
     // (@ref networkOraclePinFrameTable) instead of the anchor-frame fit: under the
     // integer-recovering chain of card IRD every tree link is pinned at an integer target,
@@ -262,7 +262,7 @@ struct NetworkOraclePin {
 };
 
 /**
- * @brief Parse a chain-frame target file (card IRDU section 12).
+ * @brief Parse a chain-frame target file.
  *
  * Header contract: the line begins `station,sat,signal,frame_int,role`; a column appended after
  * `role` is ignored.  `role` is `tree` (a link of the reference tree) or `chord`.
@@ -275,7 +275,7 @@ std::map<std::tuple<std::string, std::string, std::string>, NetworkOraclePin::Fr
 networkOraclePinParseFrameCsv(const std::string& path);
 
 /**
- * @brief Build this epoch's pin table from the chain-frame targets (card IRDU section 12).
+ * @brief Build this epoch's pin table from the chain-frame targets.
  *
  * Every listed link the chain pins this epoch (its pinned_amb_targets) is checked at lambda times the file's
  * integer, whatever role the file gave it: a pin at another value means the frame has stepped, the first such

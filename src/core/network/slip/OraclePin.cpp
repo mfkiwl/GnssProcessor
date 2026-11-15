@@ -255,7 +255,7 @@ int networkOraclePinTrueN(const NetworkOraclePin::Truth& t, double now_s) {
 }
 
 // ===========================================================================
-// The chain-frame targets (card IRDU section 12)
+// The chain-frame targets
 // ===========================================================================
 
 std::map<std::tuple<std::string, std::string, std::string>, NetworkOraclePin::FrameTarget>
@@ -477,7 +477,7 @@ std::unique_ptr<NetworkOraclePin> networkOraclePinLoad(
         }
     }
 
-    // ---- chain-frame mode (card IRDU section 12) ----------------------------
+    // ---- chain-frame mode ---------------------------------------------------
     pin->frame_file = nc.slip_qc.oracle_pin_frame_file;
     if (!pin->frame_file.empty()) {
         pin->frame_mode = true;

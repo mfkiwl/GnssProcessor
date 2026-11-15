@@ -767,8 +767,8 @@ public:
     void logInnovationScreenSummary(const char* tag) const;
 
     /**
-     * @brief One INFO line with the counters of the rule for satellites without a stream
-     *        record (card IRDU section 12.10). Silent unless armed. Called at the same tails
+     * @brief One INFO line with the counters of the rule for satellites without their stream
+     *        records. Silent unless armed. Called at the same tails
      *        as @c logInnovationScreenSummary.
      *
      * @param tag Where the line comes from (for example "closed loop", "end of replay").
@@ -1083,7 +1083,7 @@ private:
 
     // --- Measurement-set conditioning (RealTimeEnginePrepare.cpp) ---------
     void dropBroadcastGrade(RtEpochContext& ctx); ///< Drop broadcast-grade sats from the precise solution.
-    void dropUnrecorded(RtEpochContext& ctx);     ///< Leave out sats the stream holds no record for (processing.ssr_drop_unrecorded; card IRDU 12.10).
+    void dropUnrecorded(RtEpochContext& ctx);     ///< Leave out sats without their stream records (processing.ssr_drop_unrecorded, ssr_drop_unrecorded_phase_bias).
     void seedClockFromWls(RtEpochContext& ctx);   ///< WLS clock seed; runs only with a receiver clock state (not BSSD; see regaugeBssd).
     void regaugeBssd(RtEpochContext& ctx);        ///< BSSD code/phase re-gauge; BSSD only, so mutually exclusive with the above.
 
@@ -1588,8 +1588,8 @@ private:
     /// (the streak that triggers a re-float); they are not part of the RT snapshot, so a
     /// restored consumer starts with no open episode.
     InnovationScreen innovation_screen_;
-    /// The rule for satellites without a stream record (card IRDU section 12.10): which satellites
-    /// are left out, across epochs; decided only when processing.ssr_drop_unrecorded is armed.
+    /// The rule for satellites without their stream records: which satellites are left out, across
+    /// epochs; decided only when processing.ssr_drop_unrecorded or ssr_drop_unrecorded_phase_bias is armed.
     UnrecordedSatGate unrecorded_gate_;
     bool             innovation_screen_configured_{ false };   ///< The knobs have been resolved onto innovation_screen_ (@c GnssProcessor::RealTimeEngine::innovation_screen_).
     /// Generations of the two selected ambiguity signals at the last ALC sample.

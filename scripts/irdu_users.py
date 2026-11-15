@@ -57,6 +57,10 @@ USER_SETS = {
     "xs": {"processing.excluded_satellites": ["G12", "G20", "G25"]},
     # Card IRDU section 12.10: the consumer's rule for satellites without a stream record (default-off key).
     "du": {"network.closed_loop.drop_unrecorded": True},
+    # Card IRDU section 15: the rule extended to the phase biases (default-off key).
+    "dp": {"network.closed_loop.drop_unrecorded_phase_bias": True},
+    # Card IRDU section 15: the recipe on a filtered observation file (the path is set by make --rinex-dir).
+    "fr": {},
 }
 # Card IRDU section 12.10: runs of another executable than the users' build keep their own folders, suffix _b<tag>
 # (environment IRDU_USER_BUILD, read by every grader through user_dir).
@@ -112,7 +116,7 @@ def station_entry(fixture, user):
     raise SystemExit("%s: station %s not in network_fixture.json" % (fixture, user))
 
 
-def make_one(tag, variant, user, flip, start_min=0, uset=""):
+def make_one(tag, variant, user, flip, start_min=0, uset="", rinex_dir=""):
     net = net_dir(tag)
     dst = user_dir(tag, variant, user, start_min, uset)
     if dst.exists():
@@ -130,6 +134,9 @@ def make_one(tag, variant, user, flip, start_min=0, uset=""):
     cl["ar_mode"] = 1
     cl["ar_wl_only"] = False
     cl["station"] = station_entry(fixture, user)
+    if rinex_dir:
+        # Card IRDU section 15: the user's own observation file replaced by its filtered copy (same file name).
+        cl["station"]["rinex_path"] = (Path(rinex_dir) / Path(cl["station"]["rinex_path"]).name).as_posix()
     cl["pb_hold_presence_flip"] = hold if flip == "auto" else (flip == "true")
     n["trace_consumer_sat"] = True
     cfg["estimation"]["ambiguity_resolution"] = dict(AR, **VARIANT[variant])
@@ -174,12 +181,14 @@ def main():
                     help="a late start: the user starts this many minutes after the network (card IRDU 12.4)")
     ap.add_argument("--user-set", default="", choices=[""] + sorted(USER_SETS),
                     help="a user configuration set applied on top of the recipe (card IRDU 12.6)")
+    ap.add_argument("--rinex-dir", default="",
+                    help="make only: take each user's observation file from this folder (card IRDU 15)")
     a = ap.parse_args()
     items = [(v, u) for v in a.variants.split(",") for u in a.users.split(",")]
     s, us = a.start_min, a.user_set
     if a.action == "make":
         for v, u in items:
-            make_one(a.tag, v, u, a.flip, s, us)
+            make_one(a.tag, v, u, a.flip, s, us, a.rinex_dir)
         return 0
     if a.action == "list":
         for v, u in items:

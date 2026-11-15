@@ -16,7 +16,7 @@
 #include "common/GnssIdentity.hpp"
 #include "math/TimeUtils.hpp"
 #include "math/WlsEstimator.hpp"
-#include "products/SsrCorrectionStore.hpp"   // getOrbitClock (the unrecorded-satellite rule)
+#include "products/SsrCorrectionStore.hpp"   // getOrbitClock, getPhaseBias (the unrecorded-satellite rule)
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -51,21 +51,31 @@ void RealTimeEngine::dropBroadcastGrade(RtEpochContext& ctx) {
 }
 
 /**
- * @brief Leave out of the solution every satellite the stream holds no record for (card IRDU
- *        section 12.10; armed by processing.ssr_drop_unrecorded, derived from
- *        network.closed_loop.drop_unrecorded).
+ * @brief Leave out of the solution every satellite that lacks its stream records (the clock rule,
+ *        processing.ssr_drop_unrecorded, derived from network.closed_loop.drop_unrecorded; the
+ *        phase-bias rule, processing.ssr_drop_unrecorded_phase_bias, derived from
+ *        network.closed_loop.drop_unrecorded_phase_bias).
  *
- * A satellite has a record when the store returns a clock for it at the model's own freshness
- * limit (getSsrMaxAge), the test by which the model applies the stream's correction.  A satellite
- * without one keeps the a priori clock and no bias, so a term the stream's corrections share would
- * be a between-satellite term in every single difference that pairs it with a corrected satellite.
- * The decisions and counters are UnrecordedSatGate's; this seam asks the store, erases the
- * satellites the gate leaves out (before the model chooses its pivot and builds its rows) and logs
- * each edge with its satellite.  At a drop the model prunes the satellite's ambiguity and
- * ionosphere states as for a satellite out of view; at a readmit they are seeded afresh.
+ * A satellite has its clock record when the store returns a clock for it at the model's own
+ * freshness limit (getSsrMaxAge), the test by which the model applies the stream's correction.  A
+ * satellite without one keeps the a priori clock and no bias, so a term the stream's corrections
+ * share would be a between-satellite term in every single difference that pairs it with a corrected
+ * satellite.  Under the phase-bias rule a satellite with its clock also needs a phase-bias record for
+ * every raw phase signal the receiver uses for it, asked with the phase-bias apply site's own test
+ * (ObservationEquation addSsrBias: the bias age limit times the stale-hold factor at the observation
+ * time when the bias staleness gate is on, the latest record otherwise); a missing code bias is no
+ * reason to leave a satellite out.  The decisions and counters are UnrecordedSatGate's; this seam
+ * asks the store, erases the satellites the gate leaves out (before the model chooses its pivot and
+ * builds its rows) and logs each edge with its satellite and missing record.  At a drop the model
+ * prunes the satellite's ambiguity and ionosphere states as for a satellite out of view; at a
+ * readmit they are seeded afresh.  The seam runs before the phase-bias reaction of the epoch
+ * (resetOnPhaseBiasDisc), so a satellite left out is not seen by its freshness-flip test: its last
+ * applied state stays as it was while the satellite was in the solution, and the readmit's fresh
+ * start takes the place of the flip's reset.
  */
 void RealTimeEngine::dropUnrecorded(RtEpochContext& ctx) {
-    if (!config_.ssrDropUnrecorded()) return;
+    const bool phase_rule = config_.ssrDropUnrecordedPhaseBias();
+    if (!config_.ssrDropUnrecorded() && !phase_rule) return;
     auto log = log_manager_.getLogger("rt_engine");
     const std::string& epoch_prefix = ctx.epoch_prefix;
     const GnssTime& current_time = ctx.current_time;
@@ -73,15 +83,42 @@ void RealTimeEngine::dropUnrecorded(RtEpochContext& ctx) {
 
     const SsrCorrectionStore& store = ssrStore();
     const double max_age = config_.getSsrMaxAge();
-    std::vector<std::pair<std::string, bool>> sats;
+    // The phase-bias apply site's own freshness test (ObservationEquation addSsrBias).
+    const bool   bias_age_gate = config_.enableSsrBiasMaxAge();
+    const double bias_max_age  = config_.getSsrBiasMaxAge() * config_.getSsrBiasStaleHoldFactor();
+    std::vector<UnrecordedSatGate::SatState> sats;
     sats.reserve(modeled_obs.size());
     for (const auto& obs : modeled_obs) {
+        UnrecordedSatGate::SatState st;
+        st.sat = obs.satellite;
         const auto oc = store.getOrbitClock(obs.satellite, current_time, max_age);
-        sats.emplace_back(obs.satellite, oc.has_value() && oc->has_clock);
+        if (!(oc.has_value() && oc->has_clock)) {
+            st.missing = UnrecordedSatGate::Missing::Clock;
+        } else if (phase_rule) {
+            for (const auto& kv : obs.modeled) {
+                const std::string& code = kv.first;
+                if (obsTypeOf(code) != ObsType::Phase || isIonoFreePairLabel(code)) continue;
+                const bool has = bias_age_gate
+                    ? store.getPhaseBias(obs.satellite, code, obs.time, bias_max_age).has_value()
+                    : store.getPhaseBias(obs.satellite, code).has_value();
+                if (!has) {
+                    st.missing = UnrecordedSatGate::Missing::PhaseBias;
+                    st.signal  = code;
+                    break;
+                }
+            }
+        }
+        sats.push_back(st);
     }
     std::set<std::string> out;
     for (const auto& ev : unrecorded_gate_.step(sats, out)) {
-        if (ev.kind == UnrecordedSatGate::EventKind::Drop)
+        if (ev.kind == UnrecordedSatGate::EventKind::Drop
+            && ev.missing == UnrecordedSatGate::Missing::PhaseBias)
+            log->info("{}Unrecorded-satellite rule: DROP {} ({}): no phase-bias record for {}; left "
+                      "out of the solution, its ambiguity and ionosphere pruned",
+                      epoch_prefix, ev.sat, ev.first_sighting ? "first sighting" : "record lost",
+                      ev.signal);
+        else if (ev.kind == UnrecordedSatGate::EventKind::Drop)
             log->info("{}Unrecorded-satellite rule: DROP {} ({}): no stream record; left out of "
                       "the solution, its ambiguity and ionosphere pruned",
                       epoch_prefix, ev.sat, ev.first_sighting ? "first sighting" : "record lost");
@@ -97,15 +134,26 @@ void RealTimeEngine::dropUnrecorded(RtEpochContext& ctx) {
 }
 
 void RealTimeEngine::logUnrecordedGateSummary(const char* tag) const {
-    if (!config_.ssrDropUnrecorded()) return;   // knob off: never printed (byte-identical)
+    const bool phase_rule = config_.ssrDropUnrecordedPhaseBias();
+    if (!config_.ssrDropUnrecorded() && !phase_rule) return;   // both off: never printed (byte-identical)
     const auto& c = unrecorded_gate_.counters();
     std::string still;
     for (const auto& s : unrecorded_gate_.dropped()) still += (still.empty() ? "" : ",") + s;
+    if (!phase_rule) {
+        log_manager_.getLogger("rt_engine")->info(
+            "[RT] Unrecorded-satellite rule ({}): epochs {}; drops {} (first sightings {}), "
+            "readmits {}; satellite-epochs left out {} of {}; still out at the end: {}",
+            tag, c.epochs, c.drops, c.drops_first_sighting, c.readmits, c.sat_epochs_out,
+            c.sat_epochs_seen, still.empty() ? "none" : still);
+        return;
+    }
     log_manager_.getLogger("rt_engine")->info(
-        "[RT] Unrecorded-satellite rule ({}): epochs {}; drops {} (first sightings {}), "
-        "readmits {}; satellite-epochs left out {} of {}; still out at the end: {}",
-        tag, c.epochs, c.drops, c.drops_first_sighting, c.readmits, c.sat_epochs_out,
-        c.sat_epochs_seen, still.empty() ? "none" : still);
+        "[RT] Unrecorded-satellite rule with phase biases ({}): epochs {}; drops {} (first "
+        "sightings {}; {} for a missing phase-bias record), readmits {}; satellite-epochs left out "
+        "{} of {} ({} for a missing phase-bias record); still out at the end: {}",
+        tag, c.epochs, c.drops, c.drops_first_sighting, c.drops_no_phase_bias, c.readmits,
+        c.sat_epochs_out, c.sat_epochs_seen, c.sat_epochs_out_no_phase_bias,
+        still.empty() ? "none" : still);
 }
 
 /**
