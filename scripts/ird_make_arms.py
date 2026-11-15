@@ -450,7 +450,8 @@ for _case, _file in IRDU_FRAME_PIN_FILES.items():
 # change per arm and Q1 is itself a group, so each case is Q1's keys plus the key under test; on the plain chain arm
 # the same key is the arm's --knob.
 IRDU_P5_KEYS = {"iftd_off": "network.cycle_slip.if_phase_td=false",
-                "disc_off": "network.disc_threshold_frac_cycles=1000"}
+                "disc_off": "network.disc_threshold_frac_cycles=1000",
+                "rxclk": "network.carry_rx_clock_in_block=true"}
 for _name, _kv in IRDU_P5_KEYS.items():
     KNOB_GROUPS["fpin_nr3_all_" + _name] = KNOB_GROUPS["fpin_nr3_all"] + [_kv]
 
