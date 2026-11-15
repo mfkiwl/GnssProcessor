@@ -2365,6 +2365,12 @@ namespace GnssProcessor {
         /// Not fingerprinted, for the same reason RF-1's drop is not: it is a
         /// forward-only variance at a response and changes no carried state's meaning.
         double amb_float_drop_var_m2{ 0.0 };
+        /// @c network.amb_float_drop_jump_k (the response to a bad epoch): the drop of an arc latched by a slip takes
+        /// at least (k times the band's phase-minus-code step across the epoch) squared as its variance, so a
+        /// slip of tens of metres frees its band instead of leaving a prior at the pre-slip level with the
+        /// birth variance, which the epoch's solve would spread into the line of sight's ionosphere, the other
+        /// band and the receiver's states.  0 (default): the drop as before.  Read only on the float vehicle.
+        double amb_float_drop_jump_k{ 0.0 };
         /// Warm-up gate on @ref amb_float_drop_var_m2 (RF-3c): the floor applies only to
         /// a drop taken at processed epoch >= this value; before it, a drop restores
         /// @c max(var_birth, var_first, amb_float_birth_var_m2).  0 (default) = no gate,
@@ -3711,6 +3717,12 @@ namespace GnssProcessor {
         /// (network/diag/WindupArcs.hpp).  Measure-only; empty unless
         /// @c estimation.accumulate_phase_windup.  Off by default, byte-identical when off.
         bool trace_windup_arcs{ false };
+        /// @c network.zwd_event_inflate_m: the wet delay's event response (a slip latch at the station, a RAIM per-arc
+        /// attribution, a RAIM flag on the wet delay's own prior row) keeps the carried wet delay and adds this
+        /// standard deviation (m) to it in quadrature, instead of erasing it and re-seeding it from one epoch.  0
+        /// (default): erase, as before.  Read only where the event response is armed (the float vehicle with
+        /// @c network.carry_zwd_in_block).
+        double zwd_event_inflate_m{ 0.0 };
         bool trace_events{ false };       ///< Emit @c network_events.csv (L2): one structured long-format row per discrete QC action (tiers T1 IF-slip … T6 clock-monitor, plus GATE / SIGMA0 / PIVOT / RETRO), in place of scraping spdlog with regular expressions for which satellite, station or arc was acted on and when.  Pivot handover and retro-bump arming are logged nowhere else.  Rows are written even on epochs that are later withheld (they are part of the disposition record).  O(QC events); off by default, byte-identical when off (no new file).
         /// Replay a product file that has no S contract line.  Such a
         /// wire (from before the S contract line) replays with the default emitter (no

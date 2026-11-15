@@ -221,6 +221,29 @@ TEST(ZwdCoupleEdgeTest, EraseOpensTheRecordOnlyWhenItErasedAnEntry) {
     EXPECT_EQ(c.n_zwd_superseded_by[at(ZwdEdgeCause::RaimArc)], 1);
 }
 
+TEST(ZwdCoupleEdgeTest, AnInflatingResponseKeepsTheValueAddsTheSigmaAndOpensTheRecord) {
+    net::StationTable rows;
+    net::put(rows, StationId{0}, &net::StationState::zwd) = entryAt(990.0);
+    const LocalCarry before = *net::get(rows, StationId{0}, &net::StationState::zwd);
+    ZwdCarryCounters c;
+    EXPECT_TRUE(zwdEventRespond(rows, 0, ZwdEdgeCause::SlipLatch, 1000.0, 0.02, c));
+    const LocalCarry* after = net::get(rows, StationId{0}, &net::StationState::zwd);
+    ASSERT_NE(after, nullptr) << "kept, not erased";
+    EXPECT_EQ(after->value_abs, before.value_abs);
+    EXPECT_NEAR(after->var, before.var + 0.02 * 0.02, 1e-15);
+    ASSERT_TRUE(zwdEdgeOf(rows, 0).has_value()) << "the decoupling edge opens the record";
+    EXPECT_EQ(zwdEdgeOf(rows, 0)->cause, ZwdEdgeCause::SlipLatch);
+    EXPECT_EQ(c.n_zwd_event_inflated, 1);
+    // A station with no carried entry: nothing kept, no record, no count.
+    EXPECT_FALSE(zwdEventRespond(rows, 1, ZwdEdgeCause::RaimArc, 1000.0, 0.02, c, "G07", "t4_attrib"));
+    EXPECT_FALSE(zwdEdgeOf(rows, 1).has_value());
+    EXPECT_EQ(c.n_zwd_event_inflated, 1);
+    // A sigma of 0 is the erase, as before.
+    EXPECT_TRUE(zwdEventRespond(rows, 0, ZwdEdgeCause::RaimPrior, 1030.0, 0.0, c));
+    EXPECT_EQ(net::get(rows, StationId{0}, &net::StationState::zwd), nullptr);
+    EXPECT_EQ(c.n_zwd_event_inflated, 1);
+}
+
 TEST(ZwdCoupleEdgeTest, IdentityRowNamesTheCauseAndTheFoldsStep) {
     const fs::path dir = gnss_test::tempDir() / "zwd_couple_edge_rows";
     fs::create_directories(dir);

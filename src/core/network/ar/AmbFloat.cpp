@@ -181,10 +181,10 @@ void networkAmbFloatApplyDrops(
     bool last_decoupled_idem = false;
     // One lambda, so the two populations below cannot take the drop at different
     // floors. Both floors are mapped at this line of sight's elevation.
-    const auto dropAt = [&](LocalCarry& lc, int sta, const std::string& sat) {
+    const auto dropAt = [&](LocalCarry& lc, int sta, const std::string& sat, double cover_m2 = 0.0) {
         const double e = elevOf(sta, sat);
         const AmbDropOutcome o = ambFloatDropFloored(
-            lc, ambFloatBirthFloor(floor_base, e, elev_power),
+            lc, std::max(ambFloatBirthFloor(floor_base, e, elev_power), cover_m2),
             ambFloatBirthFloor(drop_base,  e, elev_power), pl_now_s, now_ep,
             ctx.knobs.amb_drop_decouple_always);
         if (o.decoupled_idem) ++counters.n_amb_drop_decoupled_idem;
@@ -218,7 +218,19 @@ void networkAmbFloatApplyDrops(
             net::putAmbFlagEp(entities, sta, amb_key) = now_ep;
         const auto it = net::get(ctx.entities.arcs, *arc, &net::ArcState::amb);
         if (it == nullptr) continue;      // nothing carried, nothing to drop
-        const bool acted = dropAt((*it), sta, net::satKey(arc->sat));
+        // network.amb_float_drop_jump_k: the restored variance covers the band's observed step, so a slip of
+        // tens of metres frees its band instead of keeping a prior at the pre-slip level that the solve would
+        // spread into the line of sight's ionosphere, its other band and the receiver's states.
+        double cover_m2 = 0.0;
+        if (ctx.knobs.amb_drop_jump_k > 0.0) {
+            const auto jt = relevel.pmc_jump_m.find({sta, amb_key});
+            if (jt != relevel.pmc_jump_m.end()) cover_m2 = std::pow(ctx.knobs.amb_drop_jump_k * jt->second, 2);
+        }
+        const bool acted = dropAt((*it), sta, net::satKey(arc->sat), cover_m2);
+        if (acted && cover_m2 > 0.0 && std::abs((*it).var - cover_m2) <= 1e-9 * cover_m2) {
+            ++counters.n_amb_drop_jump_cover;
+            counters.max_amb_drop_jump_cover_m = std::max(counters.max_amb_drop_jump_cover_m, std::sqrt(cover_m2));
+        }
         if (acted) ++n_free;
         else       ++n_idem;
         // Tally a drop that changed the carried prior (the variance moved, or the
@@ -501,6 +513,11 @@ int networkAmbVehicleRunEnd(const NetworkRunEndView& v) {
                  C.n_amb_birth_floored, C.n_cr_gap_prune,
                  C.n_relevel_free_skips, C.n_cr_inject_stale);
     }
+    if (ctx.knobs.amb_drop_jump_k > 0.0)
+        log->info("Network (drop covering the step, network.amb_float_drop_jump_k {:.2f}): {} slip-latched drop(s) "
+                  "took their variance from the band's phase-minus-code step (largest sigma {:.2f} m).",
+                  ctx.knobs.amb_drop_jump_k, ctx.counters.n_amb_drop_jump_cover,
+                  ctx.counters.max_amb_drop_jump_cover_m);
     // Drops that found the arc at birth strength and still decoupled it.
     if (ctx.knobs.amb_drop_decouple_always)
         log->info("Network (drop decouple): {} drop(s) found the arc already at "

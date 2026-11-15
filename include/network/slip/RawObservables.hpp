@@ -197,6 +197,8 @@ struct RawSlipVerdict {
     bool   gf_step{false};    ///< |ΔGF| exceeded the empirical GF gate.
     double d_mw{0.0};         ///< ΔMW across the epoch (m); 0 when !measured or !dual.
     double d_gf{0.0};         ///< ΔGF across the epoch (m); 0 when !measured or !dual.
+    double d_l1c1{0.0};       ///< Δ(sig1 phase minus sig1 code) across the epoch (m); 0 when !measured.
+    double d_gf_code{0.0};    ///< ΔGF of the code (P1 - P2) across the epoch (m); 0 when !measured.
     double gate_mw{0.0};      ///< Effective MW gate applied (m): max(k·scale, floor).
     double gate_gf{0.0};      ///< Effective GF gate applied (m).
     /// The adjacent predecessor used a different (sig1, sig2) pair, so @ref d_mw
@@ -1179,6 +1181,26 @@ void networkComputeRawObservables(const std::vector<std::vector<PppObservation>>
  *                    else filled.
  * @param cnt         Run-end counters; accumulated into.
  */
+/**
+ * @brief The phase-minus-code step of each band of one raw row across the epoch (m, absolute values).
+ *
+ * The primary band's step is the step of its phase minus its code; the second band's is that step less the
+ * phase GF step plus the code GF step (L2 - C2 = (L1 - C1) - GF + GF_code).  Each is the band's carrier step
+ * (a slip, in metres) plus code noise, whatever the other band did.
+ * @param r The epoch's raw row.
+ * @param v Its step verdict (@ref networkQualifyRawObservables).
+ * @return {primary band, second band}; both 0 when the step was not measured or the pair changed.
+ */
+std::pair<double, double> rawSlipBandJumps(const RawSlipObs& r, const RawSlipVerdict& v);
+
+/**
+ * @brief Records the phase-minus-code step of each band of every row with a measured step
+ *        (@ref rawSlipBandJumps), keyed (station index, "<satellite>_<signal>") like the free-epoch latch.
+ * @param ep  The epoch's raw rows and verdicts.
+ * @param out The map (written; existing keys overwritten).
+ */
+void networkRawSlipBandJumps(const RawSlipEpoch& ep, std::map<std::pair<int, std::string>, double>& out);
+
 void networkQualifyRawObservables(const std::vector<std::vector<PppObservation>>& modeled,
                                   const std::vector<bool>& present,
                                   int n_sta_total,

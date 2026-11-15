@@ -1002,10 +1002,14 @@ struct RelevelEpochState {
     /// Arcs whose carry was delta-bridged this epoch (station, sat, signal), for the
     /// harvest-side statistics guard (excluded from LS-VCE, relabelled in prires).
     std::set<std::tuple<int, std::string, std::string>> bridged;
+    /// |phase-minus-code step| across the epoch (m) of each band of every arc with a measured raw step, by
+    /// (station idx, amb key); filled in PASS A only under network.amb_float_drop_jump_k, read by the float
+    /// vehicle's drop of a latched arc (network/ar/AmbFloat.hpp).
+    std::map<std::pair<int, std::string>, double> pmc_jump_m;
 
     /// @brief Empties every set and map (called at the next epoch's PASS-A entry).
     void clear() {
-        free_ambs.clear(); free_cause.clear(); mw_cands.clear(); bridged.clear();
+        free_ambs.clear(); free_cause.clear(); mw_cands.clear(); bridged.clear(); pmc_jump_m.clear();
     }
 };
 

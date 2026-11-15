@@ -382,6 +382,8 @@ struct EpochEvents;   // network/driver/Epoch.hpp
 struct AmbFloatCounters {
     long long n_amb_drop_epochs       = 0;  ///< epochs on which at least one drop happened.
     long long n_amb_drop_relevel_free = 0;  ///< …of which from the detectors' latched free-epoch set (the level vehicle skips one inject instead).
+    long long n_amb_drop_jump_cover   = 0;  ///< …of those, drops whose variance was set by the band's phase-minus-code step (network.amb_float_drop_jump_k).
+    double    max_amb_drop_jump_cover_m = 0.0;  ///< The largest such covering sigma (m).
     long long n_amb_drop_stale_gap    = 0;  ///< …of which from the inject-site gap cliff (the level vehicle skips one inject instead).
     long long n_amb_drop_idempotent   = 0;  ///< drop calls that found the arc already at or below birth strength: two detectors on one arc in one epoch, or an arc that never converged.  The age clock still restarts; the variance does not move.
     long long n_amb_stransform        = 0;  ///< declared anchor S-transformations applied to the carry, one per (sat,signal) family per handover.

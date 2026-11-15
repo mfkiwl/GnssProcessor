@@ -297,6 +297,20 @@ bool zwdEventErase(net::StationTable& sta_rows, int station, ZwdEdgeCause cause,
     return true;
 }
 
+bool zwdEventRespond(net::StationTable& sta_rows, int station, ZwdEdgeCause cause, double now_s,
+                     double inflate_m, ZwdCarryCounters& counters, const std::string& sat,
+                     const std::string& via) {
+    if (!(inflate_m > 0.0)) return zwdEventErase(sta_rows, station, cause, now_s, counters, sat, via);
+    LocalCarry* z = net::get(sta_rows, StationId{station}, &net::StationState::zwd);
+    if (z == nullptr) return false;   // nothing carried, nothing to keep
+    z->var += inflate_m * inflate_m;
+    if (const std::optional<ZwdEdgeCause> lost =
+            zwdEdgeDecouple(zwdEdgeOf(sta_rows, station), cause, now_s, sat, via))
+        ++counters.n_zwd_superseded_by[static_cast<std::size_t>(*lost)];
+    ++counters.n_zwd_event_inflated;
+    return true;
+}
+
 void zwdNoteRecouple(ZwdCarryCounters& counters, NetworkRunTraces& traces, const GnssTime& t,
                      const std::string& station, const ZwdRecouple& rc, double step_m,
                      double fold_sd_m) {
@@ -327,14 +341,17 @@ void networkZwdEventResponse(NetworkRun& run, const NetworkEpoch& ep, const Epoc
     // epoch's posterior. The re-coupling edge is that entry's first fold, counted and
     // identified at the harvest (zwdNoteRecouple) from the record the erase opens.
     for (const int i : zwdSlipLatchStations(relevel)) {
-        if (!zwdEventErase(sta_rows, i, ZwdEdgeCause::SlipLatch, pl_now_s, ctx.counters))
-            continue;   // nothing carried, nothing to erase
+        const double inflate_m = ctx.knobs.zwd_event_inflate_m;
+        if (!zwdEventRespond(sta_rows, i, ZwdEdgeCause::SlipLatch, pl_now_s, inflate_m, ctx.counters))
+            continue;   // nothing carried, nothing to erase or keep
         ++ctx.counters.n_zwd_event_drop_slip;
         prmRespond(ctx.counters.prm_resp, ResponseSite::ZwdSlipErase);
         traces.emitEvent(se.time, "ZWD", "slip_latch", std::string(),
                          (i >= 0 && i < static_cast<int>(stations.size()))
                              ? stations[static_cast<std::size_t>(i)].name : std::string(),
-                         std::nullopt, std::nullopt, "erase", "no_prior_this_epoch");
+                         std::nullopt, std::nullopt, inflate_m > 0.0 ? "inflate" : "erase",
+                         inflate_m > 0.0 ? fmt::format("kept;sigma_added_m={:.3f}", inflate_m)
+                                         : std::string("no_prior_this_epoch"));
     }
 }
 

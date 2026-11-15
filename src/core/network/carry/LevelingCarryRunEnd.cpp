@@ -218,6 +218,10 @@ static int networkLevelingRetirementRunEnd(const NetworkRunEndView& v) {
                   cell(C.n_zwd_recouple_by, ZwdEdgeCause::FirstSighting),
                   cell(C.n_zwd_superseded_by, ZwdEdgeCause::FirstSighting),
                   cell(open_at_end, ZwdEdgeCause::FirstSighting));
+        if (C.n_zwd_event_inflated > 0)
+            log->info("Network (ZWD event response, network.zwd_event_inflate_m): {} of those decoupling edges kept "
+                      "the carried wet delay with an inflated sigma instead of erasing it.",
+                      C.n_zwd_event_inflated);
     }
     return 0;
 }

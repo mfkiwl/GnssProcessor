@@ -311,6 +311,22 @@ bool networkLliCredibilityStep(bool credible_in, double frac_ewma, long count,
 // Qualification pass (serial, station-ordered → deterministic)
 // =====================================================================
 
+std::pair<double, double> rawSlipBandJumps(const RawSlipObs& r, const RawSlipVerdict& v) {
+    if (!v.measured || v.pair_changed) return {0.0, 0.0};
+    return {std::abs(v.d_l1c1), r.dual ? std::abs(v.d_l1c1 - v.d_gf + v.d_gf_code) : 0.0};
+}
+
+void networkRawSlipBandJumps(const RawSlipEpoch& ep, std::map<std::pair<int, std::string>, double>& out) {
+    for (std::size_t i = 0; i < ep.rows.size() && i < ep.verdict.size(); ++i)
+        for (const RawSlipObs& r : ep.rows[i]) {
+            const auto it = ep.verdict[i].find(r.satellite);
+            if (it == ep.verdict[i].end() || !it->second.measured || it->second.pair_changed) continue;
+            const auto [j1, j2] = rawSlipBandJumps(r, it->second);
+            out[{static_cast<int>(i), r.satellite + "_" + r.sig1}] = j1;
+            if (r.dual) out[{static_cast<int>(i), r.satellite + "_" + r.sig2}] = j2;
+        }
+}
+
 void networkQualifyRawObservables(const std::vector<std::vector<PppObservation>>& modeled,
                                   const std::vector<bool>& present,
                                   int n_sta_total,
@@ -352,6 +368,8 @@ void networkQualifyRawObservables(const std::vector<std::vector<PppObservation>>
                               || (pit->second.obs.sig2 != r.sig2);
                 v.d_mw = r.mw_m - pit->second.obs.mw_m;
                 v.d_gf = r.gf_m - pit->second.obs.gf_m;
+                v.d_l1c1 = r.l1_c1_m - pit->second.obs.l1_c1_m;
+                v.d_gf_code = r.gf_code_m - pit->second.obs.gf_code_m;
                 mw_abs.push_back(std::abs(v.d_mw));
                 gf_abs.push_back(std::abs(v.d_gf));
             }

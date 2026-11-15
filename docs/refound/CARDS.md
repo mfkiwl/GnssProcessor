@@ -123,3 +123,9 @@ and [record/refound/CARDS_part2.md](../record/refound/CARDS_part2.md).
   in the solve by the oracle pin's row, released at every event with the variance re-opened, audited against truth;
   stages N1 (bed without re-seats), N2 (r3c and event beds), N3 (6 h bed); serves IRD-5, IRD-8 and card ARL's rungs.
 - [DRF](DRF_docs_record_folder_2026-11-09.md): open, 2026-11-09: the docs working set and one record folder: `scripts/docs_record.py` moves closed cards and uncited documents into `docs/record/` (old layout mirrored, links re-pointed, nothing rewritten); 145 of 602 files stay; rehearsed on branch `docs/record-folder`, every docs check passes; landing and the rule text wait for the author.
+- [BER](BER_bad_epoch_response_2026-11-15.md): open, 2026-11-15: the network's response to a bad epoch, on the
+  author's order (the network detects a bad epoch but does not know how to respond). Stage E1: one flagged L1 slip of
+  288 cycles on the simulator, then the same event observed at MRO100AUS on DOY 144; bars on wet delays, emitted values,
+  emission, fixing and default identity frozen by the requesting session before the runs. Built default off:
+  `network.amb_float_drop_jump_k` (the drop of a slipped arc covers the band's measured step) and
+  `network.zwd_event_inflate_m` (left off).

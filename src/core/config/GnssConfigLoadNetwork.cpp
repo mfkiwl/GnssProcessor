@@ -4527,6 +4527,15 @@ namespace GnssProcessor {
         // stiff variance is handed back.
         network_config_.amb_float_drop_var_m2 =
             jval<double>(json, "network.amb_float_drop_var_m2", "amb_float_drop_var_m2", 0.0);
+        // A slipped band's drop that covers the band's observed step: 0 (default) is the drop as before.
+        network_config_.amb_float_drop_jump_k =
+            jval<double>(json, "network.amb_float_drop_jump_k", "amb_float_drop_jump_k", 0.0);
+        if (!(network_config_.amb_float_drop_jump_k >= 0.0 && network_config_.amb_float_drop_jump_k <= 10.0))
+            throw std::runtime_error("network.amb_float_drop_jump_k must be in [0, 10].");
+        if (network_config_.amb_float_drop_jump_k > 0.0)
+            log->warn("Network: network.amb_float_drop_jump_k {:.2f}: the drop of a slip-latched arc takes at least "
+                      "({:.2f} x the band's phase-minus-code step)^2 as its variance.",
+                      network_config_.amb_float_drop_jump_k, network_config_.amb_float_drop_jump_k);
         network_amb_float_drop_decouple_always_ =
             jval<bool>(json, "network.amb_float_drop_decouple_always",
                        "amb_float_drop_decouple_always", false);
@@ -4888,6 +4897,16 @@ namespace GnssProcessor {
         // station-common direction the ambiguity rows already assert).  Validated below.
         network_carry_zwd_in_block_ =
             jval<bool>(json, "network.carry_zwd_in_block", "carry_zwd_in_block", false);
+        // The wet delay's event response: keep the carried value with an inflated sigma instead of erasing it
+        // (a re-seed from one epoch carries that epoch's error on; standing invariant 1).  0 (default): erase.
+        network_config_.zwd_event_inflate_m =
+            jval<double>(json, "network.zwd_event_inflate_m", "zwd_event_inflate_m", 0.0);
+        if (!(network_config_.zwd_event_inflate_m >= 0.0 && network_config_.zwd_event_inflate_m <= 1.0))
+            throw std::runtime_error("network.zwd_event_inflate_m must be in [0, 1] m.");
+        if (network_config_.zwd_event_inflate_m > 0.0)
+            log->warn("Network: network.zwd_event_inflate_m {:.3f} m: at a slip latch or a RAIM flag the station's "
+                      "carried wet delay is kept with this sigma added in quadrature, not erased.",
+                      network_config_.zwd_event_inflate_m);
         // The same rule applied to the per-LOS slant-iono columns (I-in-block; SPEC_amb_
         // iono_split_overcount §7 item 17).  It replaces the retired diagonal vehicle
         // network.carry_iono.  q is per epoch, m² at L1.

@@ -226,6 +226,9 @@ namespace GnssProcessor {
         /// birth stash reads @ref amb_birth_var_floor alone.  Resolved to 0 off the
         /// float_kf vehicle.  0.0 (default) adds no drop floor (RF-3a).
         double amb_drop_var_floor{};
+        /// network.amb_float_drop_jump_k: the drop of a slip-latched arc covers k times the band's
+        /// phase-minus-code step (m) in its variance (network/ar/AmbFloat.cpp); 0 off, and off the vehicle.
+        double amb_drop_jump_k{};
         bool   amb_drop_decouple_always{};   ///< network.amb_float_drop_decouple_always: a drop clears the arc's regression and block row even at birth strength
         // The per-line-of-sight phase nuisance state.  pc_on is the
         // knob as the loader validated it (float vehicle, phase_leveling, conditional
@@ -394,6 +397,9 @@ namespace GnssProcessor {
         /// no prior for one epoch (network/carry/ZwdCarry.hpp, networkZwdEventResponse and
         /// zwdEventDrop).  False on every run without network.carry_zwd_in_block.
         bool zwd_event_on{};
+        /// network.zwd_event_inflate_m: when positive, the event response keeps the carried wet delay with this
+        /// sigma (m) added in quadrature instead of erasing it (network/carry/ZwdCarry.hpp, zwdEventRespond).
+        double zwd_event_inflate_m{};
         /// The carried slant-iono columns join the F3 block: @ref iono_blk and @ref pl_blk_on.
         /// Read by networkPassB_ and networkLocalCarryHarvest.
         bool iono_blk_on{};

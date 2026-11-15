@@ -69,6 +69,7 @@ NetworkKnobs NetworkKnobs::snapshot(const GnssConfig& config_, const NetworkConf
     // Variance floor applied at the drop only; resolves to 0 off the vehicle.
     k.amb_drop_var_floor  = k.amb_float_kf
                                 ? config_.getNetworkConfig().amb_float_drop_var_m2 : 0.0;
+    k.amb_drop_jump_k     = k.amb_float_kf ? nc.amb_float_drop_jump_k : 0.0;
     // The drop floor's warm-up gate has no meaning without the floor, so it
     // resolves to 0 when the floor is off; a site reads the pair as "floor, from epoch N".
     k.amb_drop_floor_after_ep =
@@ -172,6 +173,7 @@ NetworkKnobs NetworkKnobs::snapshot(const GnssConfig& config_, const NetworkConf
     // The wet delay's event response belongs to the float vehicle's in-block route; the F3
     // lineage of the level vehicle keeps its behaviour.
     k.zwd_event_on    = k.zwd_blk_on && k.amb_float_kf;
+    k.zwd_event_inflate_m = k.zwd_event_on ? nc.zwd_event_inflate_m : 0.0;
     k.iono_blk_on     = k.iono_blk && k.pl_blk_on;
     k.rxclk_blk_on    = k.rxclk_blk && k.pl_blk_on;
     k.rxcb_blk_on     = k.rxcb_blk && k.pl_blk_on && k.rx_cb_on;
