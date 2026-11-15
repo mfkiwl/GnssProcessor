@@ -5,10 +5,10 @@
 - **id:** IRDU-part6
 - **topic:** network-vehicle
 - **status:** open
-- **summary:** Section 14 of card IRDU, continued from [part 5](IRDU_user_integers_on_the_chain_2026-11-14_part5.md) (2026-11-14): approach 1 of section 13.5, approved by the author, built on the simulator and default off as card IRD's step IRD-7 (emission and declarations). The key `network.disc_phase_visible` declares a phase step of a satellite and signal when the change of its clock less phase bias, less the median of that change over the satellites of its constellation and signal, exceeds the discontinuity threshold; the rule travels in the stream header (`discpv=`) and a replay reproduces the counters. Runs A to E are pre-registered below before any graded run. Results are appended below.
+- **summary:** Section 14 of card IRDU, continued from [part 5](IRDU_user_integers_on_the_chain_2026-11-14_part5.md) (2026-11-14): approach 1 of section 13.5, approved by the author, built on the simulator and default off as card IRD's step IRD-7 (emission and declarations). The key `network.disc_phase_visible` declares a phase step of a satellite and signal when the change of its clock less phase bias, less the median of that change over the satellites of its constellation and signal, exceeds the discontinuity threshold; the rule travels in the stream header (`discpv=`) and a replay reproduces the counters. Runs A to E are pre-registered below before any graded run. Results are appended below. 14.2: off byte-identical in every data record and for the users (A); with the key the stream's values are unchanged, the declared steps equal the reference counts (536, 987, 1 960) and a replay reproduces them; no user-visible pair jump above twice the bar goes undeclared, where the legacy test left up to half a metre (D); the true slip is declared at its epoch (E). The users gain where every link is held (Q1: from 15 and 30 min the declarations-off arm's result, from the start with the 12.11 rule), but B's bar 1 fails (72 % of bins against 80 %: users from the start with the recipe), and on the plain chain arm and r3c users from 0 and 15 min end worse than with the legacy declarations in several bins of the second hour (C, D): not traced.
 - **source:** [part 5](IRDU_user_integers_on_the_chain_2026-11-14_part5.md) sections 13.2 (the declarations-off arm), 13.3 and 13.5 (the cause, approach 1); [IRD](IRD_integer_recovering_datum_2026-10-13.md) section 11, step IRD-7 and its frozen bars
 
-**Outcome.** Built and unit-tested; the graded runs are pre-registered below. The key declares a phase step only when what a user of between-satellite differences sees moves: a satellite's clock less phase bias, against the median of the other satellites of its signal. On the simulator's control streams an independent replay of the rule gives the counts of the requesting session's offline tool to the step (536, 987 and 1 960 against 1 542, 1 798 and 2 610 for the phase bias alone).
+**Outcome.** The key declares a phase step only when what a user of between-satellite differences sees moves. On the stream side it meets every bar: off identical, the declared steps equal to the offline tool's counts, a replay reproducing them, no large user-visible jump undeclared, the true slip caught. Users that start while the network converges gain where every link is held, but where links float or re-seat they end worse than with the old declarations in parts of the second hour, cause not traced. It stays an instrument: default off, UNVALIDATED.
 
 Sections 1 to 10 are in [IRDU](IRDU_user_integers_on_the_chain_2026-11-14.md), section 11 in [part 2](IRDU_user_integers_on_the_chain_2026-11-14_part2.md), sections 12 to 12.5 in [part 3](IRDU_user_integers_on_the_chain_2026-11-14_part3.md), sections 12.6 to 12.11 in [part 4](IRDU_user_integers_on_the_chain_2026-11-14_part4.md), section 13 in [part 5](IRDU_user_integers_on_the_chain_2026-11-14_part5.md). Results are appended below.
 
@@ -117,3 +117,116 @@ The 12.11 rule (`network.closed_loop.drop_unrecorded`) removes that case at the 
 5. The pair property is audited at twice the threshold for a zero count, and reported at the threshold.
 6. The legend comment line extends with the token, as the codebase requires; run A compares the data records.
 7. Run A's user identity covers the controls' streams with the new user build, rather than re-running each key-off network's users: the key-off streams' data records are compared directly.
+
+#### 14.2 2026-11-14: results of 14.1
+
+**What ran.**
+- **Network:** seven runs, all exit 0 with 240 of 240 epochs, each after a 10-epoch smoke (exit 0, 11 epochs; the key-on smokes write `discpv=4`, the key-off smokes no token):
+  - on `gnss_processor_irdu_pv1.exe` (sha256[:16] `cee9504ce1d1424e`): `_rap_irdu_q1k0_nr3`, `_rap_irdu_zwk0_nr3`, `_rap_irdu_r3k0_r3c`, `_rap_irdu_q1pv_nr3`, `_rap_irdu_zwpv_nr3`, `_rap_irdu_r3pv_r3c`;
+  - on fp2: `_rap_irdu_zwc_r3c`.
+- **Users:** 220 float replays, all exit 0: 210 on the new user build (folders `_bpv1`) and 10 on `ur1` for run A.
+- **Tools:** `scripts/irdu_build_identity.py` gains `--user-set`; grading by `scripts/irdu_late_start.py`, `scripts/irdu_user_resets.py`, `scripts/irdu_stream_identity.py` and `scripts/irdu_pv_audit.py`.
+
+**A. Key off: PASS.**
+- **The streams:** on Q1, the plain chain arm and r3c, the new executable's `products.txt` equals the fp2 control's in every data record. The one `#` legend line differs only by the declared optional token (`[,discpv=<n>]`), and the producer's counters (`logs/network_solution.csv`) are identical.
+- **The r3c control:** the fp2 re-run reproduces the original `_rap_irdu_zw_r3c` byte for byte.
+- **The users:** identical between `ur1` and the new build on the control streams: Q1 15 of 15 with the recipe and 15 of 15 with the rule; the plain chain arm and r3c 10 of 10.
+
+**The streams with the key on (B, C, D).**
+- Every C, B and P value equals the control's; only the S record's token and the counters differ.
+- The declared value steps equal the reference counts.
+- The independent replay (`scripts/irdu_pv_audit.py replay`) matches the producer's counter increments key for key: "in both" equals both totals on every run, none only one side.
+- A replay of the file from its first epoch (the users starting at 0 min) prints the producer's run-end counts of the test: group-epochs 478, keys tested 13 862, 13 862 and 14 994, declared 536, 987 and 1 960. This is IRD-7's replay bar.
+
+| run | legacy test (control) | declared with the key | reference | last declared step | keys declared that the legacy test missed | epochs with the shared move above the bar | largest shared move |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Q1 | 1 542 | 536 | 536 | 15.5 min | 51 | 40 group-epochs (21 epochs, all but two before 13 min) | 1.269 m (0.5 min) |
+| plain chain arm | 1 798 | 987 | 987 | 35.0 min | 128 | 44 | 1.269 m |
+| r3c | 2 610 + 4 forced | 1 960 + 4 forced | 1 960 | 119.5 min (through the run) | 215 | 32 | 0.994 m |
+
+The keys the legacy test missed are user-visible moves the phase bias alone did not show; the largest pairs below come from them.
+
+**D. The audit (r3c, with Q1 and the plain chain arm for comparison).** Pair jumps of the clock less phase bias difference with neither satellite declared, over the run:
+
+| run | above the bar, control | above the bar, key | above twice the bar, control | above twice the bar, key | largest undeclared, control | largest undeclared, key |
+| --- | --- | --- | --- | --- | --- | --- |
+| r3c | 3 899 | 5 280 | 76 | **0** | 435.5 mm (1.0 min, G04-G24 L1C) | 119.5 mm |
+| Q1 | 36 | 1 773 | 5 | **0** | 510.2 mm (2.0 min, G14-G26 L2W) | 117.0 mm |
+| plain chain arm | 971 | 3 152 | 50 | **0** | 510.2 mm | 121.0 mm |
+
+The construction check holds on every run: with the key, no undeclared pair jump exceeds twice the bar. The legacy test let user-visible jumps of up to half a metre through undeclared: 74 of r3c's 76 fall in the first 15 minutes, and Q1's largest (510.2 mm) is at 2.0 min, the epoch at which the clock anchor re-engages every satellite, moving the clocks and not the phase biases. Between one and two bars the key leaves more pair jumps undeclared than the legacy test (the pair property stated in 14): on the beds without re-seats all in the first 30 minutes on Q1, and all but 3 in the first 45 minutes on the plain chain arm.
+
+**E. The negative control: PASS.** The fixture's true slip is declared on G22 at 15.0 min on both signals (and again at 15.5 min), as the replay predicted.
+
+**The users.** Float, median over the five users per 15 minutes from each user's start (mm), and the users' phase resets summed.
+
+Q1 (B):
+
+| start | users | control | key | declarations off | resets, control to key |
+| --- | --- | --- | --- | --- | --- |
+| 0 | recipe | 2168 939 582 203 165 116 110 106 | 2048 650 483 326 110 132 70 98 | 2237 1102 283 194 64 85 68 73 | 1 611 to 607 |
+| 0 | rule | 959 336 318 158 190 99 64 59 | 770 191 115 101 67 68 34 38 | 798 166 120 71 65 73 43 40 | 1 611 to 607 |
+| 15 | recipe | 1182 734 226 170 116 116 116 | 535 763 316 77 90 87 85 | the key's, bin for bin | 408 to 0 |
+| 15 | rule | 561 397 197 192 99 64 59 | 601 141 97 93 51 31 31 | the key's | 408 to 0 |
+| 30 | recipe | 759 179 179 101 119 119 | 944 188 147 94 124 123 | the key's | 27 to 0 |
+| 30 | rule | 610 158 175 80 50 54 | 796 149 183 73 42 56 | the key's | 27 to 0 |
+
+- **Bar 1 FAILS:** 13 of 18 bins against the pre-registered 80 %.
+  - Users from 15 min pass in every bin: no declared step reaches them, the last being at 15.5 min. Users from 0 min with the rule pass 4 of 5 (the exception is 45 to 60 min, 101 against 71 mm).
+  - Users from 0 min with the recipe fail 4 of 5: 326, 110, 132 and 98 mm against 194, 64, 85 and 73 mm with the declarations off. At 45 to 60 min and 75 to 90 min they are worse than the control as well (326 against 203 mm, 132 against 116 mm).
+  - These users mix in the three satellites the stream does not correct (12.9). They keep 607 resets and carry the undeclared shared move between corrected and uncorrected satellites: the case the header's assumption excludes.
+- **Bar 2 PASSES:** users from 30 min within 8 mm of the control from their 45th minute.
+- **Bar 3 PASSES:** 0 resets from 30 min.
+
+The plain chain arm (C):
+
+| start | users | control | key | declarations off | resets, control to key |
+| --- | --- | --- | --- | --- | --- |
+| 0 | recipe | 1613 1259 785 286 317 236 83 85 | 1963 1310 776 427 234 170 140 130 | 8077 3720 2233 790 533 333 274 233 | 1 892 to 894 |
+| 0 | rule | 848 532 380 172 147 125 83 75 | 1109 914 783 403 255 184 148 135 | 8663 3942 2268 1188 659 400 255 229 | 1 892 to 894 |
+| 15 | recipe | 1231 1026 274 312 223 83 88 | 1231 1018 370 203 158 117 110 | 887 760 307 203 146 122 115 | 542 to 24 |
+| 15 | rule | 786 437 167 149 124 83 75 | 889 926 351 224 154 131 124 | 1063 700 287 218 157 134 127 | 542 to 24 |
+| 30 | recipe | 1130 273 336 221 86 94 | 758 253 263 195 92 90 | the key's | 83 to 0 |
+| 30 | rule | 543 169 145 125 83 75 | 641 137 148 105 88 76 | the key's | 83 to 0 |
+
+- **On this bed the declarations-off arm is far worse than the control from the start** (8 077 mm in its first bin, 233 mm in its last). The links float, and without declarations the users diverge: the declarations protect them here, unlike on Q1.
+- **Bar 1** is met (17 of 18 bins) only because the declarations-off arm is the worse side; as written it does not discriminate on this bed.
+- **Bar 2 FAILS by its wording:** the largest difference from 30 min is 26 mm, and it is an improvement (195 against 221 mm); no bin is worse by more than 6 mm.
+- **Against the control,** users from 0 and 15 min end worse in the second hour: with the rule from 0 min, 255, 184, 148 and 135 mm against 147, 125, 83 and 75 mm; with the recipe from 0 min, worse at 45 to 60 and 90 to 120 min and better at 60 to 90 min.
+
+r3c (D; the rule changes nothing here, since the stream corrects every satellite):
+
+| start | control | key | resets, control to key |
+| --- | --- | --- | --- |
+| 0 | 989 630 375 404 264 183 118 121 | 983 404 330 248 197 183 143 146 | 4 063 to 3 387 |
+| 15 | 661 480 397 266 174 108 118 | 521 367 352 238 179 153 152 | 2 509 to 2 073 |
+| 30 | 794 238 233 186 138 150 | 503 240 354 203 143 146 | 2 211 to 1 968 |
+
+**The tolerance FAILS:** 10 bins (5 per user set) are worse than the control by more than 10 mm or 10 %:
+- from 0 min, 90 to 120 min: 143 and 146 against 118 and 121 mm;
+- from 15 min, 75 to 105 min: 153 and 152 against 108 and 118 mm;
+- from 30 min, 30 to 45 min: 354 against 233 mm.
+
+The key is better than the control in most bins of the first hour, by up to 226 mm (from 0 min, 404 against 630 mm).
+
+**The reading.** On the stream side the key does what it was built to do:
+- the declared steps are the reference counts, and a replay reproduces them;
+- no user-visible pair jump above twice the bar is left undeclared, where the legacy test left up to half a metre;
+- the true slip is declared at its epoch.
+
+Where every link is held (Q1) the users get the gain of 13.2's declarations-off arm, from 15 and 30 minutes and, with the 12.11 rule, from the start. Where the links float or re-seat (the plain chain arm, r3c), users that start while the network converges end worse than with the legacy declarations in several bins of the second hour.
+
+That cost is not traced. One candidate, not tested: a satellite's split move (its clock and phase biases moving together) leaves the clock less phase bias unchanged, so the key does not declare it. It still moves the clock the user applies to its code, and no channel declares it, since the clock counter has no value test. The legacy test declared it through the phase bias, and the user re-floated the ambiguity against the new code level.
+
+The key is a measured instrument, not a candidate setting: it stays default off, UNVALIDATED.
+
+**Decisions in the author's absence, for review.** Those of 14, and:
+- (8) Bar 1 of C is reported as met but non-discriminating, and bar 2 of C as failed by its wording though the difference is an improvement; neither is re-written.
+- (9) Run A's users on the plain chain arm and r3c were compared from 30 min with the recipe only (10 pairs), as pre-registered.
+- (10) The users of C and D ran on the new build with the controls' streams (identical data records), not on the key-off runs' streams.
+
+**Not verified.**
+- The code-side candidate.
+- Observed data (not run, as assigned).
+- The fixing users.
+- Grading on the users' pivot pairs (the audit counts every pair of corrected satellites, a superset of the pairs a user forms).
