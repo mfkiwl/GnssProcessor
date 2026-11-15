@@ -178,7 +178,7 @@ def windup_whole_cycles(ta, tb, key, tow):
 
 def check_epoch(a, b):
     """(checks, failures, kinds) for one band at one epoch: a and b map (station, sat) -> (integer, kind)."""
-    common = [k for k in a if k in b]
+    common = sorted(k for k in a if k in b)   # a fixed walk: with failures, their count depends on the spanning tree
     kinds = collections.Counter((a[k][1], b[k][1]) for k in common)
     adj = collections.defaultdict(list)
     for (sta, sat) in common:
@@ -224,7 +224,7 @@ def audit(run_a, run_b, states, windup_fixture=None, born_after=None, windup_tra
             a_links, b_links = A[tow][band], B[tow][band]
             if starts_a is not None:
                 a2, b2 = {}, {}
-                for key in set(a_links) & set(b_links):
+                for key in sorted(set(a_links) & set(b_links)):
                     sa, sb = arc_start_at(starts_a, key, tow), arc_start_at(starts_b, key, tow)
                     if sa is None or sb is None:
                         per_band[band]["dropped"] += 1
