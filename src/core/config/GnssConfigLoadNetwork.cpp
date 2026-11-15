@@ -1486,6 +1486,16 @@ namespace GnssProcessor {
             if (rf.rule != "gated" && rf.rule != "plain")
                 throw std::runtime_error("network.ring_fix.rule ('" + rf.rule
                                          + "') must be \"gated\" or \"plain\".");
+            rf.order = jval<std::string>(json, "network.ring_fix.order", "network_ring_fix_order",
+                                         std::string("ring"));
+            rf.gate = jval<std::string>(json, "network.ring_fix.gate", "network_ring_fix_gate",
+                                        std::string("sigma"));
+            if (rf.order != "ring" && rf.order != "certain")
+                throw std::runtime_error("network.ring_fix.order ('" + rf.order
+                                         + "') must be \"ring\" or \"certain\".");
+            if (rf.gate != "sigma" && rf.gate != "odds")
+                throw std::runtime_error("network.ring_fix.gate ('" + rf.gate
+                                         + "') must be \"sigma\" or \"odds\".");
         }
     }
 
@@ -10797,8 +10807,10 @@ namespace GnssProcessor {
                       "are decided ring by ring, held in the solve and released at every event "
                       "(include/network/ar/RingFix.hpp).",
                       network_config_.ring_fix.rule, af.empty() ? std::string("none") : af);
-        } else if (network_config_.ring_fix.rule != "gated" || !network_config_.ring_fix.audit_frame_file.empty()) {
-            log->warn("Network: network.ring_fix.rule / audit_frame_file are INERT without network.ring_fix.enable.");
+        } else if (network_config_.ring_fix.rule != "gated" || !network_config_.ring_fix.audit_frame_file.empty()
+                   || network_config_.ring_fix.order != "ring" || network_config_.ring_fix.gate != "sigma") {
+            log->warn("Network: network.ring_fix.rule / order / gate / audit_frame_file are INERT without "
+                      "network.ring_fix.enable.");
         }
 
         // Two-edge continuous handover: inert guards, then the arming line.  Follows the

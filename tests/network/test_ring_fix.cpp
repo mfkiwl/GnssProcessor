@@ -399,3 +399,118 @@ TEST(RingFixNames, EveryCauseHasAName) {
     for (std::size_t k = 0; k < kRingFixRefuseCount; ++k)
         EXPECT_STRNE(ringFixRefuseName(static_cast<RingFixRefuse>(k)), "?");
 }
+
+// ---- Stage N1b: the odds gate (change L) and the order (change O) ----
+
+TEST(RingFixGateOdds, TheLogOddsAreTheLikelihoodRatioOfTheNearestAndTheNextInteger) {
+    // A float on its integers with small variances: both log-odds far above the bound.
+    const RingFixGate g = ringFixGate(10.0, 7.0, 1e-6, 0.0, 1e-6, kL1, kL2);
+    ASSERT_TRUE(g.valid);
+    EXPECT_NEAR(g.log_odds_if, (1.0 - 2.0 * g.frac_if) / (2.0 * g.sigma_if * g.sigma_if), 1e-6);
+    EXPECT_NEAR(g.log_odds_wl, (1.0 - 2.0 * g.frac_wl) / (2.0 * g.sigma_wl * g.sigma_wl), 1e-6);
+    EXPECT_TRUE(g.pass_odds);
+    // sigma 0.20 cycle on N1 at fraction 0.05: (0.9) / (0.08) = 11.25 < ln 1e6: the odds refuse what a
+    // fraction alone would take.
+    const double r = kL2 / kL1, a = r / (r - 1.0), b = -1.0 / (r - 1.0);
+    const double v = 0.04 / (a * a + b * b);   // uncorrelated bands: sigma_if^2 = 0.04
+    const RingFixGate h = ringFixGate(10.0 + 0.05 / a, 7.0, v, 0.0, v, kL1, kL2);
+    ASSERT_TRUE(h.valid);
+    EXPECT_NEAR(h.sigma_if, 0.20, 1e-9);
+    EXPECT_LT(h.log_odds_if, kRingFixMinLogOdds);
+    EXPECT_FALSE(h.pass_odds);
+}
+
+TEST(RingFixGateOdds, TheWideLaneOddsAreTestedOnTheirOwn) {
+    // A covariance stretched along the ionosphere direction (band 2 moves r times band 1, 1 cycle of
+    // band 1): the ionosphere-free row cancels it, so N1 is sharp, while the wide lane keeps (1 - r) of it,
+    // 0.28 cycle.  The frozen gate passes this float; the odds gate refuses it on the wide lane.
+    const double r = kL2 / kL1, e2 = 1e-6;
+    const RingFixGate g = ringFixGate(10.0, 7.0, 1.0 + e2, r, r * r + e2, kL1, kL2);
+    ASSERT_TRUE(g.valid);
+    EXPECT_GE(g.log_odds_if, kRingFixMinLogOdds);
+    EXPECT_LT(g.log_odds_wl, kRingFixMinLogOdds);
+    EXPECT_TRUE(g.pass);
+    EXPECT_FALSE(g.pass_odds);
+}
+
+TEST(RingFixDecideOdds, TheOddsGateReplacesTheSigmaBoundAndKeepsTheFraction) {
+    double now = 100000.0;
+    {   // sigma_if above 0.10 but odds above ln 1e6: refused by the frozen gate, taken by the odds gate
+        NetworkRingFix sg = stateWithHistory(kId, now), od = stateWithHistory(kId, now);
+        od.gate_rule = RingFixGateRule::Odds;
+        RingFixDecideObs o = obsNear(kId, 10, 7, 0.0, 1e-6);
+        const double r = kL2 / kL1, a = r / (r - 1.0), b = -1.0 / (r - 1.0);
+        const double v = 0.0144 / (a * a + b * b);   // sigma_if 0.12 cycle, frac 0: log-odds 34.7
+        o.q11 = v; o.q12 = 0.0; o.q22 = v;
+        const auto e1 = ringFixDecideStep(sg, {o}, now);
+        ASSERT_EQ(e1.size(), 1u);
+        EXPECT_EQ(e1[0].refuse, RingFixRefuse::Sigma);
+        const auto e2 = ringFixDecideStep(od, {o}, now);
+        ASSERT_EQ(e2.size(), 1u);
+        EXPECT_EQ(e2[0].refuse, RingFixRefuse::Persist) << "passed the odds gate, the count begins";
+    }
+    {   // a fraction above 0.20 is refused by its own bound under the odds gate
+        NetworkRingFix od = stateWithHistory(kId, now);
+        od.gate_rule = RingFixGateRule::Odds;
+        const auto ev = ringFixDecideStep(od, {obsNear(kId, 10, 7, 0.0, 1e-6)}, now);
+        ASSERT_EQ(ev.size(), 1u);
+        RingFixDecideObs o = obsNear(kId, 10, 7, 0.0, 1e-8);
+        o.f1 = 10.06;   // a non-ionosphere error on band 1: frac_if = 0.27
+        const auto ev2 = ringFixDecideStep(od, {o}, now + 30.0);
+        ASSERT_EQ(ev2.size(), 1u);
+        EXPECT_EQ(ev2[0].refuse, RingFixRefuse::Fraction);
+    }
+}
+
+TEST(RingFixDecideOrder, UnderTheCertainOrderARingWaitIsNoRefusal) {
+    double now = 100000.0;
+    NetworkRingFix rf = stateWithHistory(kId, now);
+    rf.order = RingFixOrder::Certain;
+    for (int k = 0; k < kRingFixPersistEpochs; ++k, now += 30.0) {
+        RingFixDecideObs o = obsNear(kId, 10, 7, 0.0, 1e-5);
+        o.candidate = false;   // the ring order would refuse it
+        o.ring = 4;
+        ringFixDecideStep(rf, {o}, now);
+    }
+    EXPECT_TRUE(rf.links.at(kId).held);
+    EXPECT_EQ(rf.counters.refused[static_cast<std::size_t>(RingFixRefuse::NotCandidate)], 0);
+    EXPECT_EQ(rf.counters.decided_by_ring[4], 1);
+}
+
+TEST(RingFixDecideOrder, TheCapDecidesTheMostCertainFirstAndKeepsTheOthersCount) {
+    double now = 100000.0;
+    NetworkRingFix rf;
+    rf.order = RingFixOrder::Certain;
+    std::vector<RingFixLinkId> ids;
+    for (int i = 0; i < 5; ++i) {
+        RingFixLinkId id{i, "G0" + std::to_string(i + 1), "L1C", "L2W"};
+        ids.push_back(id);
+        RingFixLink& L = rf.links[id];
+        L.chord_since_s = now - 2.0 * kRingFixWindowS;
+        L.last_chord_s = now - 30.0;
+    }
+    // Five links passing every test, with variances 1e-5 x (i + 1): the smaller the variance, the higher
+    // the log-odds.
+    const auto epochObs = [&]() {
+        std::vector<RingFixDecideObs> v;
+        for (int i = 0; i < 5; ++i) v.push_back(obsNear(ids[static_cast<std::size_t>(i)], 10, 7, 0.0, 1e-5 * (i + 1)));
+        return v;
+    };
+    for (int k = 1; k < kRingFixPersistEpochs; ++k, now += 30.0) ringFixDecideStep(rf, epochObs(), now);
+    const auto ev = ringFixDecideStep(rf, epochObs(), now);
+    int holds = 0, caps = 0;
+    for (const RingFixEvent& e : ev) {
+        if (e.kind == RingFixEvent::Kind::Hold) ++holds;
+        if (e.kind == RingFixEvent::Kind::Refuse && e.refuse == RingFixRefuse::Cap) ++caps;
+    }
+    EXPECT_EQ(holds, kRingFixMaxDecisionsPerEpoch);
+    EXPECT_EQ(caps, 5 - kRingFixMaxDecisionsPerEpoch);
+    for (int i = 0; i < 5; ++i)
+        EXPECT_EQ(rf.links.at(ids[static_cast<std::size_t>(i)]).held, i < kRingFixMaxDecisionsPerEpoch) << i;
+    EXPECT_GE(rf.links.at(ids[3]).streak, kRingFixPersistEpochs);   // the count is kept
+    now += 30.0;
+    ringFixDecideStep(rf, epochObs(), now);
+    EXPECT_TRUE(rf.links.at(ids[3]).held);
+    EXPECT_TRUE(rf.links.at(ids[4]).held);
+    EXPECT_EQ(rf.counters.decided, 5);
+}

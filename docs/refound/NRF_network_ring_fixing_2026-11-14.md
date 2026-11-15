@@ -196,3 +196,39 @@ The users on N1-G's stream read the plain arm's within 3 mm in every bin and hol
 **What it points to, for the author's decision (the frozen rule is unchanged).** (a) Stage N3, the 6 h bed, where the floats keep converging and the count keeps rising (19 links pass the gate at 119.5 min against 7 at 90 min on the plain arm); (b) the gate at 0.15 cycle, which took 0 wrong integers at every stage in card IRDU 12.5 (b) and accepts several times more; (c) the ring order relaxed to the best connected links first (card IRDU 12.3, Q3); (d) stage N2 (r3c with its re-seats), next by this card's plan. N2's pre-registration and build wait for the requesting session's or the author's word, since N1's gain is nil and (a) to (c) change what N2 would measure.
 
 **Not verified.** One bed, 2 h. The release path on true events (a slip, a cut release or a root change on a held link) is exercised only by the negative control (monitor, RAIM refloats, three slips) and the unit tests. The narrow-lane differences of N1-G in the second hour are not traced. The HELD readings use the fixing control's resolver, not this branch's.
+
+### 10. 2026-11-15: stage N1b, two changes on the same bed: the order and the gate (pre-registered before the runs)
+
+**Assigned** by the requesting session after its re-grade of N1, which reproduced section 9 from `network_ring_fix.csv` and the frame file (777 held link-epochs, 0 wrong; the frozen gate log-only 0, 4, 7 and 19 links at 30, 60, 90 and 119.5 min, 0 wrong; plain rounding of the floats right on 173, 183 and 186 of 186 links at 60, 90 and 119.5 min). The author is asleep; the decisions below are the requesting session's and are listed for the author's review.
+
+**The two findings behind the changes, as the requesting session states them.**
+1. The ring order holds back 27 050 link-epochs. The author's idea is that the integer frame grows outward from the reference receiver; Q2 (card IRDU 12.3) showed what a held ring buys, not that a decision must wait for a whole inner ring, and one slow inner link blocks everything behind it.
+2. A gate on the odds accepts about five times more with the same safety on this bed. Log-only on N1-G's trace (the requesting session's `nrf_regrade.py`): with the likelihood ratio between the nearest and the next integer of N_1 at least 1e6, (1 - 2 d) / (2 sigma^2) >= ln(1e6) with d the fraction, and d at most 0.20, the links passing are 4, 17, 50 and 92 at 30, 60, 90 and 119.5 min, 6 827 passing row-epochs, 0 wrong; at 1e4, 9, 27, 89 and 126 links and 10 661 row-epochs, 0 wrong; at 1e9, 2, 8, 28 and 51, 0 wrong.
+
+**Change O, the order** (key `network.ring_fix.order`, default `ring`: section 4.1 unchanged; `certain`: change O).
+- A link is a candidate whenever it is a chord of its pair family with a float. Rings are computed and reported (trace, run-end, the audit's ring completion) and not enforced.
+- Within an epoch, the links that pass every test (the gate, the window, the lattice veto, the persistence count) are decided in the order of their certainty, the log-odds of N_1, (1 - 2 d) / (2 sigma^2), highest first, and at most **3** per epoch. A link passed over by this cap keeps its persistence count and is refused this epoch with the cause `cap`; it is decided at a later epoch if it still passes. The next solve, which the earlier holds already enter, decides on the later links.
+
+**Change L, the gate** (key `network.ring_fix.gate`, default `sigma`: section 4.1 unchanged; `odds`: change L). In place of the sigma bound:
+- N_1 (the ionosphere-free row with the wide lane rounded, as in 4.1): (1 - 2 d) / (2 sigma^2) >= ln(1e6) = 13.8155, with d = |n - round(n)| and sigma its formal sigma; and d at most 0.20 (the fraction bound kept).
+- The wide lane's own float and sigma, before it is rounded: (1 - 2 d_WL) / (2 sigma_WL^2) >= ln(1e6), with d_WL = |(f1 - f2) - round(f1 - f2)| and sigma_WL^2 = q11 + q22 - 2 q12.
+- A link that fails either is refused with the cause `odds`, one whose N_1 fraction exceeds 0.20 with the cause `fraction`. The window, the persistence count, the lattice veto, the hold, every release and the audit are unchanged.
+
+**Arms** (the bed and base of section 5; Release, a new build of this branch):
+- **N1b-O:** change O with the frozen gate.
+- **N1b-OL:** changes O and L.
+- The comparison is the frozen rule as built (N1-G, section 9); the controls are the plain chain arm and Q1.
+- Gates before the graded arms: the new build with the key off reproduces the previous build whole on both controls, and with the key on under the defaults (order `ring`, gate `sigma`) reproduces N1-G whole; each new arm is smoked first (10 epochs).
+
+**Reads.** Links held against time and by ring, and the minute each ring is complete; wrong holds; releases by cause; refusals by cause; the formal sigmas of the links not yet held, by ring, against the plain arm (the feedback); the stream against truth by depth in 15 min bins and card IRD's W-WL and W-NL over hour 2; the users (the five of card IRDU, the users' build) from 30 min and one row from the start, float by 15 min bins and fixing (HELD, WRONG, UNRESOLVED).
+
+**Bars.**
+- **N1b-B1:** 0 wrong held integers against truth at every epoch, per arm. An arm with any wrong hold is rejected, not adjusted: no number of the rule is tuned after the runs.
+- **N1b-B2:** every release named and decided = released + held, per arm; 240 of 240 epochs emitted.
+- **N1b-B0:** the two identity gates above IDENTICAL.
+
+**Prediction** (the requesting session's, to be tested): with O and L about half of the links (about 93 of 186) are held by 2 h, the stream's narrow lane at depths 3 and 5 moves toward Q1's, and the users hold more than on the plain arm.
+
+**Then N2**, as soon as N1b's runs are graded and reported, on the arm or arms of N1b that took 0 wrong: section 4.4 built (held integers through re-seats, root changes, returning satellites, splits and merges, re-expressed exactly where the path is held and released where it is not), r3c and the event beds with the truth-fed run on r3c as the ceiling, and a steady-state harness (the oracle holds every link until a cut-over at 30 min, after which every link born, re-seated or released is decided by the ring fix alone). N2 is pre-registered in its own section before its runs.
+
+**Decisions in the author's absence, for review.** The requesting session's: both changes and their numbers (the odds at 1e6, deliberately not 1e4; the same rule on the wide lane; the fraction bound kept; the frozen gate kept for N1b-O); the arms; no tuning after the runs; N2 without waiting for the re-grade. This card's: (1) the cap of 3 decisions per epoch; (2) the certainty that orders them is the log-odds of N_1 in both arms; (3) a link passed over by the cap keeps its count; (4) under change O the trace's candidate column reads 1 for every link with a float; (5) the run-end line prints the counts of the causes `odds` and `cap` only on a run that arms the change that owns them, so a run under the defaults prints what it printed before.

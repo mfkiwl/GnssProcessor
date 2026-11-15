@@ -124,6 +124,8 @@ void networkRingFixArm(NetworkRun& run) {
     if (!nc.ring_fix.enable) return;
     auto rf = std::make_unique<NetworkRingFix>();
     rf->rule = nc.ring_fix.rule == "plain" ? RingFixRule::Plain : RingFixRule::Gated;
+    rf->order = nc.ring_fix.order == "certain" ? RingFixOrder::Certain : RingFixOrder::Ring;
+    rf->gate_rule = nc.ring_fix.gate == "odds" ? RingFixGateRule::Odds : RingFixGateRule::Sigma;
     rf->max_gap_s = ctx.knobs.pl_max_gap_s;
     rf->audit_file = nc.ring_fix.audit_frame_file;
     if (!rf->audit_file.empty()) rf->audit = ringFixReadAuditFile(rf->audit_file);
@@ -139,6 +141,15 @@ void networkRingFixArm(NetworkRun& run) {
               kRingFixHoldSigmaM, rf->max_gap_s, kRingFixMonitorBoundM, kRingFixMonitorEpochs,
               rf->audit_file.empty() ? std::string("none")
                                      : fmt::format("'{}' ({} arcs)", rf->audit_file, rf->audit.size()));
+    // The options of stage N1b, named only when armed (a run under the defaults logs what it logged before).
+    if (rf->order == RingFixOrder::Certain)
+        log->warn("Network (ring fix): order CERTAIN: every chord with a float is a candidate (rings reported, not "
+                  "enforced); the links that pass are decided the highest log-odds of N1 first, at most {} per epoch.",
+                  kRingFixMaxDecisionsPerEpoch);
+    if (rf->gate_rule == RingFixGateRule::Odds)
+        log->warn("Network (ring fix): gate ODDS: in place of the sigma bound, the log-odds of N1 and of the wide "
+                  "lane's own float at least {:.4f} (ln 1e6), the fraction of N1 at most {:.2f}.",
+                  kRingFixMinLogOdds, kRingFixMaxFracCyc);
     ctx.carry.ring_fix = std::move(rf);
 }
 
@@ -437,7 +448,12 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                                      "frac_wl={:.3f} rule={} audit={}",
                                      ev.id.sig1, ev.id.sig2, rf.links.at(ev.id).ring, ev.gate.n1, ev.gate.n2,
                                      ev.gate.wl, ev.gate.frac_if, ev.gate.sigma_if, ev.gate.frac_wl,
-                                     rf.rule == RingFixRule::Plain ? "plain" : "gated", auditName(a)));
+                                     rf.rule == RingFixRule::Plain ? "plain" : "gated", auditName(a))
+                             + (rf.order == RingFixOrder::Certain ? " order=certain" : "")
+                             + (rf.gate_rule == RingFixGateRule::Odds
+                                    ? fmt::format(" gate=odds log_odds_if={:.2f} log_odds_wl={:.2f}",
+                                                  ev.gate.log_odds_if, ev.gate.log_odds_wl)
+                                    : std::string()));
     }
 
     // network_ring_fix.csv: one row per pair-family chord.
@@ -461,7 +477,8 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
             traces.ring_fix_trace
                 << t.week << ',' << fmt::format("{:.3f}", t.tow) << ','
                 << stations[static_cast<std::size_t>(o.id.station)].name << ',' << o.id.sat << ',' << o.id.sig1
-                << ',' << o.id.sig2 << ',' << o.ring << ',' << (o.candidate ? 1 : 0) << ',' << state << ','
+                << ',' << o.id.sig2 << ',' << o.ring << ','
+                << ((rf.order == RingFixOrder::Certain ? o.have_float : o.candidate) ? 1 : 0) << ',' << state << ','
                 << cause << ',' << (o.have_float ? cellOf(o.f1, 4) : std::string()) << ','
                 << (o.have_float ? cellOf(o.f2, 4) : std::string()) << ','
                 << (gr.valid ? cellOf(gr.n_if, 4) : std::string()) << ','
@@ -506,9 +523,12 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
     for (std::size_t k = 0; k < kRingFixReleaseCount; ++k)
         released += fmt::format("{}{} {}", k ? ", " : "", ringFixReleaseName(static_cast<RingFixRelease>(k)),
                                 C.released[k]);
-    for (std::size_t k = 0; k < kRingFixRefuseCount; ++k)
-        refused += fmt::format("{}{} {}", k ? ", " : "", ringFixRefuseName(static_cast<RingFixRefuse>(k)),
-                               C.refused[k]);
+    for (std::size_t k = 0; k < kRingFixRefuseCount; ++k) {
+        const auto c = static_cast<RingFixRefuse>(k);
+        if (c == RingFixRefuse::Odds && rf.gate_rule != RingFixGateRule::Odds) continue;
+        if (c == RingFixRefuse::Cap && rf.order != RingFixOrder::Certain) continue;
+        refused += fmt::format("{}{} {}", k ? ", " : "", ringFixRefuseName(c), C.refused[k]);
+    }
     long long rel_total = 0;
     for (std::size_t k = 0; k < kRingFixReleaseCount; ++k) rel_total += C.released[k];
     log->warn("Network (ring fix, rule {}): {} link(s) decided over {} decision epoch(s) ({}); first hold by "

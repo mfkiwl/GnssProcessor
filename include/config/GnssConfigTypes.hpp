@@ -1885,6 +1885,12 @@ namespace GnssProcessor {
         /// @c network.ring_fix.rule: "gated" (the frozen rule, default) or "plain" (the negative
         /// control: every candidate with a float is rounded and held at once).
         std::string rule{ "gated" };
+        /// @c network.ring_fix.order: "ring" (ring by ring, default) or "certain" (every chord with a float is a
+        /// candidate; the most certain decided first, a few per epoch).
+        std::string order{ "ring" };
+        /// @c network.ring_fix.gate: "sigma" (the frozen gate, default) or "odds" (the log-odds of N1 and of the
+        /// wide lane at least ln 1e6, the fraction bound kept).
+        std::string gate{ "sigma" };
         /// @c network.ring_fix.audit_frame_file: a frame-target file (station,sat,signal,frame_int,...)
         /// against which every held integer is audited each epoch (simulation only; default empty).
         std::string audit_frame_file{};

@@ -35,6 +35,8 @@ const char* ringFixRefuseName(RingFixRefuse c) {
         case RingFixRefuse::Fraction:     return "fraction";
         case RingFixRefuse::Lattice:      return "lattice";
         case RingFixRefuse::Persist:      return "persist";
+        case RingFixRefuse::Odds:         return "odds";
+        case RingFixRefuse::Cap:          return "cap";
     }
     return "?";
 }
@@ -63,6 +65,16 @@ RingFixGate ringFixGate(double f1, double f2, double q11, double q12, double q22
     g.sigma_if = std::sqrt(var_if);
     g.valid = true;
     g.pass = g.sigma_if <= kRingFixMaxSigmaCyc && g.frac_if <= kRingFixMaxFracCyc;
+    // The likelihood ratio of the nearest and the next integer of a Gaussian float at distance d from
+    // the nearest: exp(((1 - d)^2 - d^2) / (2 sigma^2)) = exp((1 - 2 d) / (2 sigma^2)).
+    const auto logOdds = [](double d, double sigma) {
+        return sigma > 0.0 ? (1.0 - 2.0 * d) / (2.0 * sigma * sigma)
+                           : (d < 0.5 ? std::numeric_limits<double>::infinity() : 0.0);
+    };
+    g.log_odds_if = logOdds(g.frac_if, g.sigma_if);
+    g.log_odds_wl = logOdds(g.frac_wl, g.sigma_wl);
+    g.pass_odds = g.frac_if <= kRingFixMaxFracCyc && g.log_odds_if >= kRingFixMinLogOdds
+               && g.log_odds_wl >= kRingFixMinLogOdds;
     return g;
 }
 
@@ -127,6 +139,29 @@ std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
     std::vector<RingFixEvent> events;
     RingFixCounters& C = rf.counters;
     ++C.epochs_decided;
+    // Change O: the links that passed every test this epoch, decided after the loop.
+    std::vector<std::pair<const RingFixDecideObs*, RingFixEvent>> eligible;
+    const auto hold = [&](RingFixLink& L, const RingFixDecideObs& o, RingFixEvent& ev) {
+        L.held = true;
+        L.n1 = ev.gate.n1;
+        L.n2 = ev.gate.n2;
+        L.ring = o.ring;
+        L.decided_s = now_s;
+        L.stamp1 = o.relevel1_s;
+        L.stamp2 = o.relevel2_s;
+        L.root = o.root;
+        L.absent_since_s = -1.0;
+        L.monitor_bad = 0;
+        L.monitor_trip = false;
+        L.streak = 0;
+        L.wrong_now = false;
+        ++C.decided;
+        const int ri = std::clamp(o.ring, 0, 7);
+        ++C.decided_by_ring[ri];
+        if (C.first_hold_s[ri] < 0.0) C.first_hold_s[ri] = now_s;
+        ev.kind = RingFixEvent::Kind::Hold;
+        events.push_back(ev);
+    };
     for (const RingFixDecideObs& o : links) {
         RingFixLink& L = rf.links[o.id];
         L.lambda1 = o.lambda1;
@@ -154,7 +189,8 @@ std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
             if (c != RingFixRefuse::Persist) L.streak = 0;
             events.push_back(ev);
         };
-        if (!o.candidate) { refuse(RingFixRefuse::NotCandidate); continue; }
+        const bool candidate = rf.order == RingFixOrder::Certain ? o.have_float : o.candidate;
+        if (!candidate) { refuse(RingFixRefuse::NotCandidate); continue; }
         if (!o.have_float) { refuse(RingFixRefuse::NoFloat); continue; }
         ev.gate = ringFixGate(o.f1, o.f2, o.q11, o.q12, o.q22, o.lambda1, o.lambda2);
         if (!ev.gate.valid) { refuse(RingFixRefuse::NoFloat); continue; }
@@ -166,8 +202,13 @@ std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
             const double last_tree =
                 lt == rf.last_tree_s.end() ? -std::numeric_limits<double>::infinity() : lt->second;
             if (!windowOk(L, o, last_tree, now_s)) { refuse(RingFixRefuse::Window); continue; }
-            if (ev.gate.sigma_if > kRingFixMaxSigmaCyc) { refuse(RingFixRefuse::Sigma); continue; }
-            if (ev.gate.frac_if > kRingFixMaxFracCyc) { refuse(RingFixRefuse::Fraction); continue; }
+            if (rf.gate_rule == RingFixGateRule::Odds) {
+                if (ev.gate.frac_if > kRingFixMaxFracCyc) { refuse(RingFixRefuse::Fraction); continue; }
+                if (!ev.gate.pass_odds) { refuse(RingFixRefuse::Odds); continue; }
+            } else {
+                if (ev.gate.sigma_if > kRingFixMaxSigmaCyc) { refuse(RingFixRefuse::Sigma); continue; }
+                if (ev.gate.frac_if > kRingFixMaxFracCyc) { refuse(RingFixRefuse::Fraction); continue; }
+            }
             if ((o.have_lat1 && o.lat1 != ev.gate.n1) || (o.have_lat2 && o.lat2 != ev.gate.n2)) {
                 refuse(RingFixRefuse::Lattice);
                 continue;
@@ -183,25 +224,31 @@ std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
             decide = true;
         }
         if (!decide) continue;
-        L.held = true;
-        L.n1 = ev.gate.n1;
-        L.n2 = ev.gate.n2;
-        L.ring = o.ring;
-        L.decided_s = now_s;
-        L.stamp1 = o.relevel1_s;
-        L.stamp2 = o.relevel2_s;
-        L.root = o.root;
-        L.absent_since_s = -1.0;
-        L.monitor_bad = 0;
-        L.monitor_trip = false;
-        L.streak = 0;
-        L.wrong_now = false;
-        ++C.decided;
-        const int ri = std::clamp(o.ring, 0, 7);
-        ++C.decided_by_ring[ri];
-        if (C.first_hold_s[ri] < 0.0) C.first_hold_s[ri] = now_s;
-        ev.kind = RingFixEvent::Kind::Hold;
-        events.push_back(ev);
+        if (rf.order == RingFixOrder::Certain && rf.rule != RingFixRule::Plain) {
+            eligible.emplace_back(&o, ev);
+            continue;
+        }
+        hold(L, o, ev);
+    }
+    if (!eligible.empty()) {
+        std::stable_sort(eligible.begin(), eligible.end(), [](const auto& a, const auto& b) {
+            if (a.second.gate.log_odds_if != b.second.gate.log_odds_if)
+                return a.second.gate.log_odds_if > b.second.gate.log_odds_if;
+            return a.first->id < b.first->id;
+        });
+        int decided_now = 0;
+        for (auto& [o, ev] : eligible) {
+            RingFixLink& L = rf.links[o->id];
+            if (decided_now < kRingFixMaxDecisionsPerEpoch) {
+                hold(L, *o, ev);
+                ++decided_now;
+            } else {
+                ev.kind = RingFixEvent::Kind::Refuse;
+                ev.refuse = RingFixRefuse::Cap;
+                ++C.refused[static_cast<std::size_t>(RingFixRefuse::Cap)];
+                events.push_back(ev);   // the persistence count is kept
+            }
+        }
     }
     return events;
 }

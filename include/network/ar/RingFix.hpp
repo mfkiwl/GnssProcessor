@@ -78,6 +78,23 @@ inline constexpr double kRingFixHoldSigmaM = 1.0e-4;
 inline constexpr double kRingFixMonitorBoundM = 0.03;
 /// Consecutive epochs above the monitor's bound that release a held link.
 inline constexpr int kRingFixMonitorEpochs = 4;
+/// Change O: at most this many links are decided per epoch, the most certain first.
+inline constexpr int kRingFixMaxDecisionsPerEpoch = 3;
+/// Change L: the bound on the log of the likelihood ratio between the nearest and the next integer,
+/// ln(1e6), for N1 and for the wide lane.
+inline constexpr double kRingFixMinLogOdds = 13.815510557964274;
+
+/// The order of the decisions (@c network.ring_fix.order).
+enum class RingFixOrder : std::uint8_t {
+    Ring,     ///< Ring by ring: a link waits until its inner vertex's links towards the root are held.
+    Certain,  ///< Change O: every chord with a float is a candidate; the most certain decided first, a few per epoch.
+};
+
+/// The gate of the decisions (@c network.ring_fix.gate).
+enum class RingFixGateRule : std::uint8_t {
+    Sigma,  ///< The frozen gate: the formal sigma and the fraction of the ionosphere-free N1.
+    Odds,   ///< Change L: the log-odds of N1 and of the wide lane's own float, and the fraction of N1.
+};
 
 /// The decision rule of a run (@c network.ring_fix.rule).
 enum class RingFixRule : std::uint8_t {
@@ -105,9 +122,11 @@ enum class RingFixRefuse : std::uint8_t {
     Fraction,      ///< The fraction of the ionosphere-free N1 above its bound.
     Lattice,       ///< The producer's lattice of fixed cycles implies another integer on a band.
     Persist,       ///< Passed this epoch, the persistence count not yet reached.
+    Odds,          ///< Change L: the log-odds of N1 or of the wide lane below the bound.
+    Cap,           ///< Change O: passed every test, passed over by the per-epoch cap (the count is kept).
 };
 /// Number of refusal causes.
-inline constexpr std::size_t kRingFixRefuseCount = 7;
+inline constexpr std::size_t kRingFixRefuseCount = 9;
 
 /**
  * @brief The name of a release cause ("slip", "refloat", "gap", "chain", "monitor").
@@ -118,7 +137,7 @@ const char* ringFixReleaseName(RingFixRelease c);
 
 /**
  * @brief The name of a refusal cause ("not_candidate", "no_float", "window", "sigma",
- *        "fraction", "lattice", "persist").
+ *        "fraction", "lattice", "persist", "odds", "cap").
  * @param c The cause.
  * @return Its name as a static string; "?" for a value outside the enum.
  */
@@ -138,6 +157,9 @@ struct RingFixGate {
     double    sigma_wl{0.0};   ///< The wide lane's formal sigma (cycles).
     double    frac_wl{0.0};    ///< |(f1 - f2) - wl| (cycles).
     bool      pass{false};     ///< sigma_if and frac_if within the frozen bounds.
+    double    log_odds_if{0.0};  ///< ln of the likelihood ratio of N1's nearest and next integer, (1 - 2 frac_if) / (2 sigma_if^2).
+    double    log_odds_wl{0.0};  ///< The same for the wide lane's own float, (1 - 2 frac_wl) / (2 sigma_wl^2).
+    bool      pass_odds{false};  ///< Change L: frac_if within its bound and both log-odds at least kRingFixMinLogOdds.
 };
 
 /**
@@ -329,6 +351,8 @@ struct NetworkRingFix {
     NetworkRingFix& operator=(NetworkRingFix&&) = default;
 
     RingFixRule rule{RingFixRule::Gated};   ///< The decision rule.
+    RingFixOrder order{RingFixOrder::Ring};          ///< The order of the decisions.
+    RingFixGateRule gate_rule{RingFixGateRule::Sigma};  ///< The gate of the decisions.
     double      max_gap_s{900.0};           ///< The gap horizon of a held link (the leveling carry's, phase_leveling_max_gap_s).
     std::string audit_file;                 ///< The audit's frame-target file ("" = no audit).
     /// (station name, satellite, signal) -> the frame integer of the audit file.
@@ -358,6 +382,12 @@ struct NetworkRingFix {
  * at least the window, was no tree link within it and was not released within it.  A link
  * passes the persistence test at the @ref kRingFixPersistEpochs th consecutive epoch that passed
  * with the same integers; any refusal restarts the count.
+ *
+ * Under @ref RingFixGateRule::Odds the sigma test is replaced by the odds test (after the fraction
+ * test): both log-odds at least @ref kRingFixMinLogOdds.  Under @ref RingFixOrder::Certain every link
+ * with a float is a candidate, and the links that pass every test are decided after the loop, the
+ * highest log-odds of N1 first (ties by link), at most @ref kRingFixMaxDecisionsPerEpoch; the others
+ * are refused with the cause cap and keep their persistence count.
  *
  * @param rf     The run state (links and counters written).
  * @param links  This epoch's chords of pair families with their readings.

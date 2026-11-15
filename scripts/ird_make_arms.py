@@ -461,6 +461,10 @@ for _name, _kv in IRDU_P5_KEYS.items():
 KNOB_GROUPS["nrf_g"] = ["network.ring_fix.enable=true",
                         "network.ring_fix.audit_frame_file=" + ROOT + "/config/sim/irdu/fpin_nr3_all.csv"]
 KNOB_GROUPS["nrf_p"] = KNOB_GROUPS["nrf_g"] + ["network.ring_fix.rule=plain"]
+# Card NRF section 10 (stage N1b): change O (the order: every chord with a float a candidate, the most certain first,
+# at most 3 per epoch) with the frozen gate, and changes O and L (the odds gate).
+KNOB_GROUPS["nrf_o"] = KNOB_GROUPS["nrf_g"] + ["network.ring_fix.order=certain"]
+KNOB_GROUPS["nrf_ol"] = KNOB_GROUPS["nrf_o"] + ["network.ring_fix.gate=odds"]
 
 
 def sha256_bytes(b):

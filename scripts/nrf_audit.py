@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Card NRF: an independent re-grade of a ring-fix run (network.ring_fix) from its own traces.
 
-    py -3.14 scripts/nrf_audit.py <run dir or tag> [--frame FILE] [--json out.json]
+    py -3.14 scripts/nrf_audit.py <run dir or tag> [--frame FILE | --fixture DIR] [--json out.json]
     py -3.14 scripts/nrf_audit.py --selftest
 
 Reads <run>/logs/network_ring_fix.csv (one row per pair-family chord and epoch: ring, candidate, state held / decided
@@ -20,6 +20,10 @@ reading the run's own audit column.  Printed:
                  log-only acceptance count on the run's own chord table
 
 Minutes count from the run's first epoch (the first row of logs/network_chain_edges.csv).
+With --fixture the truth is taken per epoch instead of from a file: each held or decided link's integers in the
+frame of its epoch, ird_frame_census.frame_integer (the one owner of the frame algebra: the tree of the epoch from
+logs/network_chain_edges.csv, the simulator's slip-accumulated integers with the producer's wind-up branch), so the
+audit follows re-seats, root changes and returning satellites (card NRF stage N2).
 A run directory is <RAPID_RUNS_ROOT>/_rap_<tag> when a bare tag is given (default D:/GnssProcessorSupport/runs_nom).
 """
 import argparse
@@ -60,6 +64,23 @@ def audit_file_of(run):
         return None
 
 
+class DynTruth:
+    """Per-epoch frame integers from truth (ird_frame_census.frame_integer), with the same interface as the file."""
+
+    def __init__(self, run, fixture):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import ird_frame_census as IFC
+        self.IFC = IFC
+        self.forest = IFC.Forest(IFC.read_edges(run, ("G",)))
+        self.truth = IFC.Truth(fixture, run)
+        self.tow = None
+
+    def get(self, key, default=None):
+        sta, sat, sig = key
+        n, _why = self.IFC.frame_integer(self.forest, self.truth, "G", sig, sta, sat, self.tow)
+        return default if n is None else n
+
+
 def wrong(ints, sta, sat, sig1, sig2, n1, n2):
     """None when the file lists neither band; else True when a listed band differs."""
     a1, a2 = ints.get((sta, sat, sig1)), ints.get((sta, sat, sig2))
@@ -68,8 +89,11 @@ def wrong(ints, sta, sat, sig1, sig2, n1, n2):
     return (a1 is not None and a1 != n1) or (a2 is not None and a2 != n2)
 
 
-def analyse(run, frame_path):
-    ints, meta = read_frame(frame_path)
+def analyse(run, frame_path, fixture=None):
+    ints, meta = read_frame(frame_path) if frame_path else ({}, {})
+    dyn = DynTruth(run, fixture) if fixture else None
+    if dyn is not None:
+        ints = dyn
     trace = os.path.join(run, "logs", "network_ring_fix.csv")
     rows_by_t = collections.defaultdict(list)
     with open(trace, newline="") as fh:
@@ -85,7 +109,7 @@ def analyse(run, frame_path):
             first = next(csv.DictReader(fh), None)
             if first is not None:
                 t0 = min(t0, float(first["tow"]))
-    res = {"run": run, "frame": frame_path, "epochs": len(tows)}
+    res = {"run": run, "frame": frame_path if not fixture else "truth per epoch: " + fixture, "epochs": len(tows)}
     decided, decided_wrong, decided_unlisted = collections.Counter(), 0, 0
     first = {}
     held_epochs = held_wrong = held_unlisted = 0
@@ -100,9 +124,13 @@ def analyse(run, frame_path):
     for t in tows:
         minute = (t - t0) / 60.0
         held_now = set()
+        if dyn is not None:
+            dyn.tow = round(t, 3)
         for r in rows_by_t[t]:
             key = (r["station"], r["sat"])
             ring = int(r["ring"]) if r["ring"] not in ("", "-1") else -1
+            if key not in meta:
+                meta[key] = (ring if ring >= 0 else None, "chord")
             if r["state"] == "held":
                 held_now.add(key)
                 held_epochs += 1
@@ -124,7 +152,13 @@ def analyse(run, frame_path):
                 if r["sigma_if"] and r["frac_if"] and float(r["sigma_if"]) <= MAX_SIGMA \
                         and float(r["frac_if"]) <= MAX_FRAC:
                     would_be[round(minute, 1)] = would_be.get(round(minute, 1), 0) + 1
-        for ring, chords in ring_chords.items():
+        # A ring is complete at an epoch when every chord of it in the trace then is held (the trace's own rings,
+        # so the reading follows the tree of each epoch).
+        ring_now = collections.defaultdict(set)
+        for r in rows_by_t[t]:
+            if r["ring"] not in ("", "-1"):
+                ring_now[int(r["ring"])].add((r["station"], r["sat"]))
+        for ring, chords in ring_now.items():
             if ring not in ring_complete and chords and chords <= held_now:
                 ring_complete[ring] = round(minute, 1)
         for m in MINUTES:
@@ -190,16 +224,17 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run", nargs="?")
     ap.add_argument("--frame")
+    ap.add_argument("--fixture", help="truth per epoch from this simulator fixture (re-seat aware)")
     ap.add_argument("--json")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         sys.exit(0 if selftest() else 1)
     run = resolve(a.run)
-    frame = a.frame or audit_file_of(run)
-    if not frame:
-        sys.exit("no frame-target file: pass --frame")
-    res = analyse(run, frame)
+    frame = None if a.fixture else (a.frame or audit_file_of(run))
+    if not frame and not a.fixture:
+        sys.exit("no frame-target file: pass --frame or --fixture")
+    res = analyse(run, frame, a.fixture)
     print_result(res)
     if a.json:
         with open(a.json, "w") as fh:
