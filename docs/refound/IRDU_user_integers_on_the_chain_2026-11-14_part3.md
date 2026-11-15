@@ -5,7 +5,7 @@
 - **id:** IRDU-part3
 - **topic:** network-vehicle
 - **status:** open
-- **summary:** Section 12 of card IRDU (2026-11-14), pre-registered before any graded run: the author's idea of fixing the chain's links ring by ring from the root, measured on the simulator with true integers first. Q1, every link at its true integer (the upper bound); Q2, the rings one at a time; Q3, how often plain rounding of the next ring would be right; Q4, re-seats onto links already at their integers. The instrument is the simulation-only oracle pin in the chain's frame (new key `network.cycle_slip.oracle_pin_frame_file`, default off, ledger UNVALIDATED). Results are appended below.
+- **summary:** Section 12 of card IRDU (2026-11-14), pre-registered before any graded run: the author's idea of fixing the chain's links ring by ring from the root, measured on the simulator with true integers first. Q1, every link at its true integer (the upper bound); Q2, the rings one at a time; Q3, how often plain rounding of the next ring would be right; Q4, re-seats onto links already at their integers. The instrument is the simulation-only oracle pin in the chain's frame (new key `network.cycle_slip.oracle_pin_frame_file`, default off, ledger UNVALIDATED). Results are appended below. 2026-11-14: Q1 PASSES (12.1): with every link at its integer the stream meets card IRD's bars at every depth and the users hold right integers. Q2 (12.3): a depth reaches ring 1's level once its own ring is held, in 15 to 45 min. Q3 (12.3): the wide lane rounds right from 10 min on; N_1 rounded per stage at 30 min would take 12 wrong integers of 186 into the frame, at 60 min 5. The float user's gap to the truth stream (129 against 26 mm) is in the stream's phase clocks during the network's first 15 min, not in its code half.
 - **source:** [IRDU](IRDU_user_integers_on_the_chain_2026-11-14.md) sections 2 and 9 (the instrument at the users and its bars) and [part 2](IRDU_user_integers_on_the_chain_2026-11-14_part2.md) sections 11 to 11.5 (the bed without re-seats, the wet delay carried, the adopted arm's reference rows); [IRD](IRD_integer_recovering_datum_2026-10-13.md) sections 3, 9 and 11 (the frame algebra, the bars, IRD-5)
 
 Sections 1 to 10 are in [IRDU](IRDU_user_integers_on_the_chain_2026-11-14.md), section 11 in [part 2](IRDU_user_integers_on_the_chain_2026-11-14_part2.md). Results of this section are appended below.
@@ -92,3 +92,57 @@ Expectation (written before the replays). Q1's phase clocks sit at the truth lev
 **Decisions in the author's absence (the requesting session's, recorded here).** Q2 with Q3 now, Q4 after; the float-user split added on existing streams with no network run; r3c stays unbuilt unless Q2 and Q3 make it the obvious next step. **This card's.** (1) The rule "reaches ring 1's level" and the windows above. (2) Best connected first ranks by integer links at the chord's receiver. (3) The hybrids keep the code donor's header (its code datum declaration) and the truth-wire folder's arm.json.
 
 **2026-11-14, addendum to 12.2, written before it runs (this card's decision in the author's absence).** The two hybrids differ in more than the phase values: their P records carry their phase donor's other fields, and the consumer reads them (`src/core/products/NetworkProductIO.cpp`: signal_integer, wide_lane_integer, a bare phase discontinuity counter, the hold generation `gen=` and the chain component `cmp=`). Q1's P records read `1,0` and nothing more (the holds-off stream); the truth stream's read `1,1,0,gen=1,cmp=1`. Two controls separate the values from those fields, each the five users, float and fixing: (c) `_rap_irdu_tok_c_nr3`, the truth stream with every P record's fields after the bias taken from Q1's record; (d) `_rap_irdu_tok_d_nr3`, Q1's stream with those fields taken from the truth stream's record (`scripts/irdu_hybrid_products.py --retoken`). Expectation: if the fields carry the gap, (c) reads near Q1 and (d) near the truth wire at the float user in hour 2; if the values carry it, (c) near the truth wire and (d) near Q1.
+
+### 12.3 2026-11-14: Q2, Q3 and the split of the float-user gap
+
+**What ran.** Q2: `_rap_irdu_q2r2_nr3`, `_rap_irdu_q2r23_nr3` and `_rap_irdu_q2r234_nr3` (smoke `_rap_irdu_smk_q2r2_nr3`), 2 h each on the build of 12.1, exit 0, 240 of 240 epochs; each pin's run end: the chords of its file held (54, 184 and 278 band rows), every tree link at its integer on every epoch, nothing released, the frame unchanged. The split: the hybrids `_rap_irdu_hyb_a_nr3` and `_rap_irdu_hyb_b_nr3` (13 920 phase records rewritten in each) and the flag-swap controls `_rap_irdu_tok_c_nr3` and `_rap_irdu_tok_d_nr3` of the addendum, 40 user runs, all exit 0. Grades `runs_nom/_irdu_grades/s12q2_*`, `s12q3_*`, `s12_*`; scripts `irdu_ring_rounding.py`, `irdu_hybrid_products.py`, `irdu_code_term.py`.
+
+**Q2, propagation.** Per-pair offset p50 against truth by depth class (D_NL; D_WL beside where it decides), with the depth-1 class of the same run in brackets:
+
+| held | class | 15 to 30 min | 30 to 45 min | 60 to 75 min | 105 to 120 min | reaches ring 1's level |
+| --- | --- | --- | --- | --- | --- | --- |
+| nothing (reference row) | depth 3 | 0.155 (0.080) | 0.134 (0.076) | 0.094 (0.048) | 0.048 (0.023) | no |
+| ring 2 | depth 3 | 0.124 (0.036) | 0.093 (0.026) | 0.061 (0.020) | 0.040 (0.015) | no |
+| rings 2 and 3 | depth 3 | 0.050 (0.027) | 0.029 (0.020); WL 0.081 (0.075) | 0.021 (0.022) | 0.016 (0.022) | from 30 to 45 min |
+| rings 2 and 3 | depth 5 | 0.162 (0.027) | 0.175 (0.020) | 0.067 (0.022) | 0.043 (0.022) | no |
+| rings 2 to 4 | depth 3 | 0.020 (0.023); WL 0.086 (0.079) | 0.014 (0.015) | 0.015 (0.020) | 0.015 (0.024) | from 15 to 30 min |
+| rings 2 to 4 | depth 5 | 0.101 (0.023) | 0.085 (0.015) | 0.056 (0.020) | 0.027 (0.024); WL 0.057 (0.027) | no (the wide lane) |
+| every ring (Q1) | depth 5 | 0.030 (0.021); WL 0.069 (0.079) | 0.027 (0.012) | 0.015 (0.020) | 0.015 (0.025) | from 15 to 30 min |
+
+A depth class reaches ring 1's level once its own ring is held, within 15 to 45 min of the start; holding the rings above it helps it (ring 2 alone moves depth 3 from 0.155 to 0.124 at 15 to 30 min, rings 2 to 4 move depth 5 from 0.184 to 0.101) but leaves it 0.02 to 0.08 cycle off, because a satellite's bias is passed down through its own ring's links, and while they float the hop's terms of section 11.4 remain. Holding ring 2 also improves depth 1 (0.080 to 0.036 at 15 to 30 min): the root's satellites are then tied to more receivers at their integers.
+
+**Q3, would-be rounding of the next ring** (counts of chords; wrong would-be integers in brackets; strict depth order):
+
+| stage (held), next ring, chords | 5 min | 10 min | 20 min | 30 min | 60 min |
+| --- | --- | --- | --- | --- | --- |
+| 0 (nothing), ring 2, 27: WL; N_1 (IF); bands | 26 (1); 3 (24); 5 (22) | 27 (0); 11 (16); 10 (17) | 27 (0); 23 (4); 16 (11) | 27 (0); 26 (1); 19 (8) | 27 (0); 24 (3); 26 (1) |
+| formal sigma WL, N_1 (cycle) | 0.33, 3.71 | 0.22, 1.47 | 0.15, 0.75 | 0.12, 0.53 | 0.09, 0.24 |
+| 1 (ring 2), ring 3, 65: WL; N_1; bands | 59 (6); 25 (40); 17 (48) | 65 (0); 36 (29); 29 (36) | 65 (0); 47 (18); 44 (21) | 65 (0); 62 (3); 38 (27) | 65 (0); 64 (1); 57 (8) |
+| formal sigma WL, N_1 | 0.30, 2.40 | 0.19, 0.93 | 0.13, 0.47 | 0.10, 0.32 | 0.07, 0.19 |
+| 2 (rings 2, 3), ring 4, 47: WL; N_1; bands | 39 (8); 15 (32); 8 (39) | 45 (2); 22 (25); 11 (36) | 46 (1); 32 (15); 24 (23) | 47 (0); 39 (8); 25 (22) | 47 (0); 46 (1); 39 (8) |
+| formal sigma WL, N_1 | 0.32, 3.85 | 0.19, 1.42 | 0.13, 0.62 | 0.10, 0.37 | 0.07, 0.14 |
+| 3 (rings 2 to 4), ring 5, 47: WL; N_1; bands | 39 (8); 35 (12); 10 (37) | 47 (0); 41 (6); 20 (27) | 47 (0); 44 (3); 30 (17) | 47 (0); 47 (0); 36 (11) | 47 (0); 47 (0); 44 (3) |
+| formal sigma WL, N_1 | 0.26, 0.26 | 0.16, 0.20 | 0.11, 0.16 | 0.09, 0.14 | 0.06, 0.10 |
+
+Best connected first picks the same chords at stage 3 (47 of 47) and nearly the same at stages 1 and 2 (53 of 65, 44 of 47), and reads the same or slightly worse; at stage 0 it shares 6 of 27 chords with ring 2 (its receivers hold 2 integer links against 1) and is worse (N_1 wrong 25, 19, 12, 4 and 2 at the five times; the wide lane wrong 4, 1, 1, 0, 0). |e| / sigma p50 lies between 0.3 and 1.0 everywhere: the floats' covariance is honest, as in section 11.2's A. Read as a cascade in strict depth order with plain rounding, the wide lane is right everywhere from 10 min on (stage 2: 2 wrong at 10 min, 1 at 20 min), and N_1 is not: rounding each stage at 30 min would take 1, 3, 8 and 0 wrong integers into the frame (12 of 186 chords), at 60 min 3, 1, 1 and 0 (5 of 186). Holding the rings above a ring shrinks its N_1 sigma most where the satellites are seen by many fixed receivers (ring 5 at stage 3: 0.26 cycle at 5 min against 2.4 to 3.9 at the other stages).
+
+**The split of the float-user gap** (float 3D median over the five users, hour 1 and hour 2, mm; the fixing users' HELD and WRONG beside):
+
+| stream given to the users | phase values | P-record fields | clocks and code biases | float h1, h2 | HELD; WRONG, UNRESOLVED (compared) |
+| --- | --- | --- | --- | --- | --- |
+| the bed's truth wire | truth | truth's | truth | 166, 26 | 67.5 %; 0, 0 (2 747) |
+| Q1 | Q1 | Q1's | Q1 | 802, 129 | 50.2 %; 0, 0 (1 357) |
+| (a) hybrid | Q1 | Q1's | truth | 318, 103 | 14.7 %; 0, 0 (80) |
+| (b) hybrid | truth | truth's | Q1 | 141, 27 | 26.1 %; 0, 0 (373) |
+| (c) flag swap | truth | Q1's | truth | 166, 26 | 67.5 %; 0, 0 (2 747) |
+| (d) flag swap | Q1 | truth's | Q1 | 576, 73 | 53.9 %; 0, 2 (1 980) |
+
+The terms behind it (`irdu_code_term.py`; each satellite against the epoch's median over satellites): Q1's code term r spreads 60, 49, 31 and 30 mm (p50; p95 86 to 142 mm) in the 15 to 30, 30 to 45, 60 to 75 and 105 to 120 min bins and drifts 9 to 47 mm per 15 min; Q1's ionosphere-free phase term drifts 2 359 mm (p50; p95 5 234 mm) across the first 15 min, while the network converges, and 1.5 to 4.9 mm per 15 min after it. The hybrids carry exactly their donors' terms (r zero on (a), the phase drift zero on (b)).
+
+Verdict by 12.2's rule: the phase half carries the gap. (b), Q1's clocks and code biases under the truth stream's phase, reads at the truth wire (27 against 26 mm); (a), Q1's phase under the truth stream's code, keeps most of Q1's gap (103 against 129 mm). This is the opposite of the expectation written before the replays (the code half), which the code term alone suggested: its decimetre spread costs the float user nothing visible here, while the phase half does. The addendum's controls separate the phase values from the records' fields: the fields change nothing on truth values ((c) reproduces the truth wire to the digit), and on Q1's values the truth stream's fields recover part of the gap ((d) 73 against 129 mm), so most of the gap is in Q1's phase values and the rest in how the user treats them without a generation token. The mechanism the terms show: in the first 15 min the network's phase clocks move metres between satellites while its own states converge, and a user that starts at the first epoch folds that motion into its float solution; after 15 min they move millimetres. A user that starts after the network has settled should read near the truth wire; that check (a late-start user, which needs a start option in `scripts/irdu_users.py`) is not run.
+
+**Read against the IRD family.** Q2 and Q3 are IRD-5's subject (certifying a link from the network's own integers) in a fixed order, which IRD-2's frozen rule left unbuilt. They repeat what IRDC section 6 found of the certifier: the floats' covariance is honest (|e| / sigma 0.3 to 1.0), and it is the floats' size, not a mis-scaled covariance, that makes rounding wrong. They extend card FCF's lesson to the integer-recovering frame: the frame now takes integers without fighting the datum (Q1), but the order alone does not make rounding safe; the N_1 floats of each next ring need tens of minutes and still leave a few wrong integers at 60 min. Q2 extends IRDG section 7.7 item 1: integers fixed in the frame settle each depth once its own ring is fixed, in 15 to 45 min.
+
+**Decisions made in the author's absence, for review.** (1) Q2's users were not replayed: Q2 is read on the stream, as registered. (2) The flag-swap controls were added before they ran (the addendum of 12.2). (3) The late-start user is named, not run.
+
+**Not verified.** One thin bed, 2 h; Q3's rounding is measured on floats that were not conditioned on the previous ring's rounding (each stage holds the previous rings at truth, the upper bound of a cascade whose earlier stages were right); the hybrids mix two code datums in the geometry-free direction, so their fixing readings are not integer readings; the late-start check is not run; r3c is not built, and Q2 and Q3 do not make it the obvious next step (a cascade there would meet the same N_1 rounding errors at each of its 36 re-seats per hour).
