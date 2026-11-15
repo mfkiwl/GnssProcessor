@@ -373,6 +373,8 @@ void RealTimeEngine::flush() {
     logAmbLevelCheckSummary_("end of run");
     // The innovation screen's counters, silent unless armed.
     logInnovationScreenSummary("end of run");
+    // The rule for satellites without a stream record, silent unless armed.
+    logUnrecordedGateSummary("end of run");
     // The broadcast-baseline jump counters, silent unless armed.
     logEphemerisJumpSummary_("end of run");
     // The declared-roster census, silent unless a declaration was seen or the
@@ -495,6 +497,7 @@ bool RealTimeEngine::processEpoch(const std::vector<RinexObservation>& epoch_obs
     // seedClockFromWls and regaugeBssd are mutually exclusive (hasClock() vs
     // not); each self-gates, so both are called unconditionally here.
     dropBroadcastGrade(ctx);
+    dropUnrecorded(ctx);   // silent and inert unless processing.ssr_drop_unrecorded
     seedClockFromWls(ctx);
     regaugeBssd(ctx);
 

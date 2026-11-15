@@ -16,8 +16,13 @@
 #include "common/GnssIdentity.hpp"
 #include "math/TimeUtils.hpp"
 #include "math/WlsEstimator.hpp"
+#include "products/SsrCorrectionStore.hpp"   // getOrbitClock (the unrecorded-satellite rule)
 #include <algorithm>
 #include <cmath>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace GnssProcessor {
 
@@ -43,6 +48,64 @@ void RealTimeEngine::dropBroadcastGrade(RtEpochContext& ctx) {
             log->debug("{}Dropped {} broadcast-grade sat(s) (no SSR clock) from the precise solution",
                        epoch_prefix, dropped);
     }
+}
+
+/**
+ * @brief Leave out of the solution every satellite the stream holds no record for (card IRDU
+ *        section 12.10; armed by processing.ssr_drop_unrecorded, derived from
+ *        network.closed_loop.drop_unrecorded).
+ *
+ * A satellite has a record when the store returns a clock for it at the model's own freshness
+ * limit (getSsrMaxAge), the test by which the model applies the stream's correction.  A satellite
+ * without one keeps the a priori clock and no bias, so a term the stream's corrections share would
+ * be a between-satellite term in every single difference that pairs it with a corrected satellite.
+ * The decisions and counters are UnrecordedSatGate's; this seam asks the store, erases the
+ * satellites the gate leaves out (before the model chooses its pivot and builds its rows) and logs
+ * each edge with its satellite.  At a drop the model prunes the satellite's ambiguity and
+ * ionosphere states as for a satellite out of view; at a readmit they are seeded afresh.
+ */
+void RealTimeEngine::dropUnrecorded(RtEpochContext& ctx) {
+    if (!config_.ssrDropUnrecorded()) return;
+    auto log = log_manager_.getLogger("rt_engine");
+    const std::string& epoch_prefix = ctx.epoch_prefix;
+    const GnssTime& current_time = ctx.current_time;
+    std::vector<PppObservation>& modeled_obs = ctx.modeled_obs;
+
+    const SsrCorrectionStore& store = ssrStore();
+    const double max_age = config_.getSsrMaxAge();
+    std::vector<std::pair<std::string, bool>> sats;
+    sats.reserve(modeled_obs.size());
+    for (const auto& obs : modeled_obs) {
+        const auto oc = store.getOrbitClock(obs.satellite, current_time, max_age);
+        sats.emplace_back(obs.satellite, oc.has_value() && oc->has_clock);
+    }
+    std::set<std::string> out;
+    for (const auto& ev : unrecorded_gate_.step(sats, out)) {
+        if (ev.kind == UnrecordedSatGate::EventKind::Drop)
+            log->info("{}Unrecorded-satellite rule: DROP {} ({}): no stream record; left out of "
+                      "the solution, its ambiguity and ionosphere pruned",
+                      epoch_prefix, ev.sat, ev.first_sighting ? "first sighting" : "record lost");
+        else
+            log->info("{}Unrecorded-satellite rule: READMIT {}: its stream record returned; back "
+                      "in the solution, its ambiguity and ionosphere seeded afresh",
+                      epoch_prefix, ev.sat);
+    }
+    if (out.empty()) return;
+    modeled_obs.erase(std::remove_if(modeled_obs.begin(), modeled_obs.end(),
+                                     [&](const PppObservation& o) { return out.count(o.satellite) > 0; }),
+                      modeled_obs.end());
+}
+
+void RealTimeEngine::logUnrecordedGateSummary(const char* tag) const {
+    if (!config_.ssrDropUnrecorded()) return;   // knob off: never printed (byte-identical)
+    const auto& c = unrecorded_gate_.counters();
+    std::string still;
+    for (const auto& s : unrecorded_gate_.dropped()) still += (still.empty() ? "" : ",") + s;
+    log_manager_.getLogger("rt_engine")->info(
+        "[RT] Unrecorded-satellite rule ({}): epochs {}; drops {} (first sightings {}), "
+        "readmits {}; satellite-epochs left out {} of {}; still out at the end: {}",
+        tag, c.epochs, c.drops, c.drops_first_sighting, c.readmits, c.sat_epochs_out,
+        c.sat_epochs_seen, still.empty() ? "none" : still);
 }
 
 /**

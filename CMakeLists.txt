@@ -257,6 +257,7 @@ add_library(gnss_core STATIC
     src/core/realtime/EphemerisJumpLedger.cpp
     src/core/realtime/AmbLevelCheck.cpp
     src/core/realtime/InnovationScreen.cpp
+    src/core/realtime/UnrecordedSatGate.cpp
     src/core/realtime/RealTimeEngineScreen.cpp
     src/core/realtime/RealTimeEngineArObserve.cpp
     src/core/realtime/ArObserve.cpp
@@ -699,6 +700,7 @@ add_executable(gnss_tests
     tests/test_amb_level_band_scope.cpp
     tests/test_innovation_screen.cpp
     tests/test_innovation_screen_engine.cpp
+    tests/test_unrecorded_sat_gate.cpp
     tests/test_disc_mark_scope.cpp
     tests/test_consumer_sat_trace.cpp
     tests/test_ar_observe_search.cpp

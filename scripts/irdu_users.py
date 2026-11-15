@@ -55,7 +55,12 @@ USER_SETS = {
     "pc": {"network.closed_loop.pb_disc_carry": True},
     # Card IRDU section 12.8's addendum: exclude the satellites the thin bed's stream does not correct.
     "xs": {"processing.excluded_satellites": ["G12", "G20", "G25"]},
+    # Card IRDU section 12.10: the consumer's rule for satellites without a stream record (default-off key).
+    "du": {"network.closed_loop.drop_unrecorded": True},
 }
+# Card IRDU section 12.10: runs of another executable than the users' build keep their own folders, suffix _b<tag>
+# (environment IRDU_USER_BUILD, read by every grader through user_dir).
+BUILD = os.environ.get("IRDU_USER_BUILD", "")
 
 
 def net_dir(tag):
@@ -68,7 +73,8 @@ def user_dir(tag, variant, user, start_min=0, uset=""):
     short = tag[5:] if tag.startswith("irdu_") else tag
     late = "_s%d" % start_min if start_min else ""
     us = "_%s" % uset if uset else ""
-    return RUNS / ("_rap_irdu_u_%s_%s_%s%s%s" % (short, variant, user[:3].lower(), late, us))
+    bd = "_b%s" % BUILD if BUILD else ""
+    return RUNS / ("_rap_irdu_u_%s_%s_%s%s%s%s" % (short, variant, user[:3].lower(), late, us, bd))
 
 
 def apply_set(cfg, uset):
@@ -140,7 +146,7 @@ def make_one(tag, variant, user, flip, start_min=0, uset=""):
     (dst / "arm.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     meta = {"net_tag": tag, "net_dir": net.as_posix(), "fixture": fixture.as_posix(), "user": user,
             "variant": variant, "emit_pb_hold": hold, "pb_hold_presence_flip": cl["pb_hold_presence_flip"],
-            "start_min": start_min, "user_set": uset, "user_set_keys": applied,
+            "start_min": start_min, "user_set": uset, "user_set_keys": applied, "build": BUILD,
             "ambiguity_resolution": cfg["estimation"]["ambiguity_resolution"]}
     (dst / "irdu_user.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
     print("made", dst.name)

@@ -177,6 +177,18 @@ namespace GnssProcessor {
          */
         bool          pb_disc_carry{ false };
         /**
+         * @brief Leave out of the consumer's solution every satellite the stream holds no record
+         *        for (card IRDU section 12.10).
+         *
+         * Key @c network.closed_loop.drop_unrecorded, default false (byte-identical).
+         * @c deriveClosedLoopConsumerConfig copies it into the consumer engine's config as
+         * @c processing.ssr_drop_unrecorded (@c GnssConfig::ssrDropUnrecorded); a standalone
+         * consumer sets that @c processing key directly.  The rule and its edges are in
+         * @c UnrecordedSatGate and @c RealTimeEngine::dropUnrecorded (RealTimeEnginePrepare.cpp).
+         * It never reaches the producer's solve or its resume fingerprint.
+         */
+        bool          drop_unrecorded{ false };
+        /**
          * @brief Answer a presence edge of a held phase bias.
          *
          * Key @c network.closed_loop.pb_hold_presence_flip, default false

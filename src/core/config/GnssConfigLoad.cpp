@@ -647,6 +647,16 @@ namespace GnssProcessor {
         // Default false keeps the reset reaction (byte-identical).  The closed-loop
         // harness derives it from network.closed_loop.pb_disc_carry
         // (deriveClosedLoopConsumerConfig); a standalone consumer sets it here.
+        // Satellites without a stream record (card IRDU section 12.10).  Default false keeps
+        // them in the solution with the a priori clock (byte-identical).  The closed-loop
+        // harness derives it from network.closed_loop.drop_unrecorded; a standalone consumer
+        // sets it here.
+        ssr_drop_unrecorded_ = jval<bool>(json,
+            "processing.ssr_drop_unrecorded", "ssr_drop_unrecorded", false);
+        if (ssr_drop_unrecorded_)
+            log->info("SSR unrecorded-satellite rule ON: a satellite the stream holds no clock "
+                      "record for is left out of the solution until its record arrives (its "
+                      "ambiguity and ionosphere then start afresh).");
         ssr_phase_bias_disc_carry_ = jval<bool>(json,
             "processing.ssr_phase_bias_disc_carry", "ssr_phase_bias_disc_carry", false);
         if (ssr_phase_bias_disc_carry_)

@@ -706,6 +706,7 @@ int Application::runConsumerReplay() {
     consumer.logRosterConsumerSummary("end of replay");
     consumer.logPbHoldPresenceSummary("end of replay");   // held-key presence edges, silent unless armed
     consumer.logInnovationScreenSummary("end of replay");   // pre-update innovation screen, silent unless armed
+    consumer.logUnrecordedGateSummary("end of replay");     // satellites without a stream record, silent unless armed
     consumer.logArObserveSummary("end of replay");   // observe-mode integer search totals, silent unless armed
     consumer.logReinflateSummary("end of replay");   // re-inflation summary
 

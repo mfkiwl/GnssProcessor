@@ -47,6 +47,7 @@
 #include "realtime/PbDiscCarryLedger.hpp"    // Declared-step ambiguity carry ledger
 #include "realtime/AmbLevelCheck.hpp"        // Consumer ambiguity level re-validation
 #include "realtime/InnovationScreen.hpp"     // Consumer pre-update innovation screen
+#include "realtime/UnrecordedSatGate.hpp"    // Consumer rule for satellites without a stream record
 #include "realtime/PbStepTranslateLedger.hpp"  // Every-step ambiguity translation ledger
 #include "realtime/PbHoldLedger.hpp"         // Held phase-bias generation ledger
 #include "realtime/EphemerisJumpLedger.hpp"  // Last-used broadcast record per satellite, range-jump test
@@ -765,6 +766,21 @@ public:
      */
     void logInnovationScreenSummary(const char* tag) const;
 
+    /**
+     * @brief One INFO line with the counters of the rule for satellites without a stream
+     *        record (card IRDU section 12.10). Silent unless armed. Called at the same tails
+     *        as @c logInnovationScreenSummary.
+     *
+     * @param tag Where the line comes from (for example "closed loop", "end of replay").
+     */
+    void logUnrecordedGateSummary(const char* tag) const;
+
+    /// @brief The counters of the rule for satellites without a stream record (tests, reports).
+    /// @return The gate's run counters.
+    const UnrecordedSatGate::Counters& unrecordedGateCounters() const {
+        return unrecorded_gate_.counters();
+    }
+
     // --- Harness-driven snapshot write and restore readout ------
     /**
      * @brief Epoch time of the last epoch that ran the full estimation tail (the
@@ -1067,6 +1083,7 @@ private:
 
     // --- Measurement-set conditioning (RealTimeEnginePrepare.cpp) ---------
     void dropBroadcastGrade(RtEpochContext& ctx); ///< Drop broadcast-grade sats from the precise solution.
+    void dropUnrecorded(RtEpochContext& ctx);     ///< Leave out sats the stream holds no record for (processing.ssr_drop_unrecorded; card IRDU 12.10).
     void seedClockFromWls(RtEpochContext& ctx);   ///< WLS clock seed; runs only with a receiver clock state (not BSSD; see regaugeBssd).
     void regaugeBssd(RtEpochContext& ctx);        ///< BSSD code/phase re-gauge; BSSD only, so mutually exclusive with the above.
 
@@ -1571,6 +1588,9 @@ private:
     /// (the streak that triggers a re-float); they are not part of the RT snapshot, so a
     /// restored consumer starts with no open episode.
     InnovationScreen innovation_screen_;
+    /// The rule for satellites without a stream record (card IRDU section 12.10): which satellites
+    /// are left out, across epochs; decided only when processing.ssr_drop_unrecorded is armed.
+    UnrecordedSatGate unrecorded_gate_;
     bool             innovation_screen_configured_{ false };   ///< The knobs have been resolved onto innovation_screen_ (@c GnssProcessor::RealTimeEngine::innovation_screen_).
     /// Generations of the two selected ambiguity signals at the last ALC sample.
     /// StateManager assigns unique IDs across births, resets and translations,
