@@ -5,10 +5,10 @@
 - **id:** NRF
 - **topic:** network-vehicle
 - **status:** open
-- **summary:** Pre-registered 2026-11-14 (night), before any graded run, on the author's instruction to build integer fixing in the network by the ring method of card IRDU section 12: a chord's integers are decided ring by ring outward from the chain's root, held in the network's own solve, released at every event that can invalidate them, and every held integer is audited against truth. Simulator only, default off. Stages: N1 the bed without re-seats, N2 r3c with re-seats and event beds, N3 the 6 h reference bed; observed data only after the three pass and are re-graded. Serves card IRD's steps IRD-5 and IRD-8 and card ARL's rungs, with their frozen bars. Results are appended below.
+- **summary:** Pre-registered 2026-11-14 (night), before any graded run, on the author's instruction to build integer fixing in the network by the ring method of card IRDU section 12: a chord's integers are decided ring by ring outward from the chain's root, held in the network's own solve, released at every event that can invalidate them, and every held integer is audited against truth. Simulator only, default off. Stages: N1 the bed without re-seats, N2 r3c with re-seats and event beds, N3 the 6 h reference bed; observed data only after the three pass and are re-graded. Serves card IRD's steps IRD-5 and IRD-8 and card ARL's rungs, with their frozen bars. Results are appended below. 2026-11-15, N1 (section 9): every bar holds (off identity, 0 wrong holds, the negative control seen by the audit, both edges, every epoch emitted); 11 of 186 links held in 2 h, all right, from 40 min; the stream and the users read the plain chain arm's level; the limit is the floats' precision against the gate and the ring order, not wrong integers.
 - **source:** the author's two messages of 2026-11-14 (section 1); [IRDU part 3](IRDU_user_integers_on_the_chain_2026-11-14_part3.md) section 12 (the rings, Q1 to Q4, the gated rounding and the log-only search); [IRD](IRD_integer_recovering_datum_2026-10-13.md) sections 9 to 11 (bars, rules, increments); card ARL section 2026-10-24 and card FCFC section 9 (both in the record); [IRDC](IRDC_integer_recovering_datum_events_2026-11-02.md) section 6; [IRDD](IRDD_integer_recovering_datum_rows_2026-11-03.md) sections 2 to 4
 
-**Outcome.** Pre-registered; no graded run yet. Question: do chord integers decided ring by ring from the chain's root, held in the network's solve and released at every event, take only right integers, and how far do they bring the stream towards the level the truth-fed chain reached (card IRDU section 12.1)? The decision rule, the damage gate, the hold, the release causes, the audit and the bars of stage N1 are frozen in sections 4 and 5 before any graded run. Standing: built default off on branch `irdu/user-integers`; N1 runs next.
+**Outcome.** Question: do chord integers decided ring by ring from the chain's root, held in the network's solve and released at every event, take only right integers, and how far do they bring the stream towards the level the truth-fed chain reached (card IRDU section 12.1)? Result, stage N1 (section 9): the frozen rule held 11 of 186 links in 2 h on the bed without re-seats, every one right (777 held link-epochs, 0 wrong), and its audit saw the plain-rounding control's 40 138 wrong link-epochs; too few links were held to move the stream or the users, which read the plain chain arm's level. Standing: built default off on branch `irdu/user-integers`; N2 waits for a decision on the gate, the order or the bed.
 
 ## 1. The author's words and the assignment
 
@@ -139,3 +139,60 @@ A re-host onto a held link keeps the frame (card IRDU Q4), so nothing is release
 Simulator only until the author says otherwise. Nothing merged or pushed. No reference configuration and no ledger verdict changed; the new keys are default off with UNVALIDATED rows. Every decision above is listed for the author's review. The runs, commits and numbers are reported so each can be re-graded.
 
 <!-- Results are appended below this line under dated headings. -->
+
+### 9. 2026-11-15: stage N1, the bed without re-seats: every bar holds; 11 links held in 2 h, all right; the stream and the users unchanged
+
+**What ran.** The ON arms on the build of commit `f2a5e00` (exe `gnss_processor_irdu_nrf1.exe`, sha256[:16] `40764cd6b753acb2`): `_rap_nrf_g_nr3` (N1-G, the frozen rule) and `_rap_nrf_p_nr3` (N1-P, plain rounding), with the controls `_rap_nrf_off_zw_nr3` and `_rap_nrf_off_q1_nr3` (the key off). The identity gate on the build of the next commit (`gnss_processor_irdu_nrf2.exe`, `aebd34edebfe7234`: one run-end text line made conditional, below) against the previous build of this branch (`gnss_processor_irdu_pv1.exe`, `cee9504ce1d1424e`, commit `a024ae3`): `_rap_nrf2off_{zw,q1}_nr3` and `_rap_pv1off_{zw,q1}_nr3`. Smokes on `gnss_processor_irdu_nrf0.exe` (`a3c395afcbf2cde4`): `_rap_nrf_smk_g_nr3` (0.09 h) and `_rap_nrf_smk_p_nr3` (0.2 h). Every run exit 0 with 240 of 240 epochs (runs under `D:/GnssProcessorSupport/runs_nom`). Users: 20 replays on N1-G's stream with the users' build of card IRDU (the fixing control's `gnss_processor_rscb3.exe`, `5ecf8e1c765fafe3`, copied as `gnss_processor_irdu_users_rscb3.exe`), read beside the controls' replays of sections 12.1 and 12.5 of card IRDU on the same build, regraded here with the same tools; and 60 float-only replays on this branch's build (suffix `_bnrf1`), which reproduce the float readings below and carry no HELD reading (this branch's resolver does not write the held lines the grader reads, so section 7 item 9 is corrected to the users' build). Grades: `runs_nom/_irdu_grades/nrf_n1_*`; the independent re-grade is `scripts/nrf_audit.py`.
+
+**N1-B0, off identity: PASSES.** The build with the key off against the previous build: IDENTICAL whole on both controls (`nom_td_gate.py --whole --mask-time`). Against the controls as run in card IRDU section 12 (build `fp2`), the first build of this card differs in two text lines and nothing else: the products' legend line (the `[,discpv=<n>]` token of card IRDU section 14, commit `a024ae3`) and one run-end log line that named the new contribution kind; that line now names it only on a run that folded it (committed with this section). Every product record, every trace and the run manifest are identical.
+
+**N1-B1, 0 wrong holds: PASSES.** N1-G decided 11 links (ring 2: 10; ring 3: 1), each right against the frame file at its decision; 777 held link-epochs, 0 wrong. The code's audit and the independent re-grade agree to the count. First hold at 40.5 min (ring 2, S38000SIM-G22) and 97.5 min (ring 3); 0, 3, 5 and 11 links held at 30, 60, 90 and 119.5 min; no ring complete; 0 releases (a quiet bed: no slip, no re-seat, no monitor trip).
+
+**N1-B2, the negative control: PASSES.** N1-P: 1 285 decisions, 1 254 wrong; 41 903 held link-epochs, 40 138 wrong. The audit sees the wrong holds. The monitor released 1 028 of them (RAIM refloats 68, slips 3), and the plain rule decided them again at once.
+
+**N1-B3, both edges: PASSES.** Every release is an event row with its cause and link (N1-P: 1 099 rows). Decided equals released plus held at the end: N1-G 11 = 0 + 11, N1-P 1 285 = 1 099 + 186. Hold rows folded: two per held link-epoch (1 554 and 83 806), none skipped on a tree edge, none without a column; carried entries re-opened, two per monitor release (2 056).
+
+**N1-B4: PASSES.** N1-G emits 240 of 240 epochs.
+
+**Refusals** (N1-G, link-epochs): not a candidate 27 050, sigma 14 216, window 1 362, persistence 108, fraction 0, lattice 0. The ring order and the gate's sigma bound hold back nearly every link; no link was refused by its fraction or by the lattice.
+
+**Feedback.** Chords whose gate passes (sigma at most 0.10, fraction at most 0.20) and that are not held, at 30, 60, 90 and 119.5 min, graded against the frame file:
+
+| arm | held + passing (not held) | wrong among them | sigma_if p50, rings 2 / 3 / 4 / 5, at 90 min | at 119.5 min |
+| --- | --- | --- | --- | --- |
+| plain chain arm | 0, 3, 7, 19 | 0 | 0.166 / 0.209 / 0.262 / 0.239 | 0.123 / 0.158 / 0.202 / 0.197 |
+| N1-G | 0 + 0, 3 + 1, 5 + 2, 11 + 8 | 0 | 0.168 / 0.195 / 0.251 / 0.235 | 0.137 / 0.157 / 0.198 / 0.191 |
+
+The totals are the same on both arms: holding 11 of 186 links does not make more links decidable within 2 h, and the formal sigmas by ring move by at most 0.016 cycle. The plain arm's count at 60 min reproduces card IRDU 12.5 (b) (3).
+
+**Stream** (per-pair offset p50 against truth by depth class, cycles; N1-G / plain chain arm / Q1):
+
+| channel, depth | 15 to 30 min | 60 to 75 min | 75 to 90 min | 90 to 105 min | 105 to 120 min |
+| --- | --- | --- | --- | --- | --- |
+| D_NL, 1 | 0.080 / 0.080 / 0.021 | 0.047 / 0.048 / 0.020 | 0.060 / 0.055 / 0.010 | 0.036 / 0.048 / 0.015 | 0.040 / 0.023 / 0.025 |
+| D_NL, 3 | 0.155 / 0.155 / 0.016 | 0.094 / 0.094 / 0.015 | 0.130 / 0.097 / 0.016 | 0.062 / 0.065 / 0.017 | 0.059 / 0.048 / 0.013 |
+| D_NL, 5 | 0.184 / 0.184 / 0.030 | 0.092 / 0.091 / 0.015 | 0.162 / 0.142 / 0.017 | 0.097 / 0.101 / 0.019 | 0.077 / 0.075 / 0.015 |
+| D_WL, 1 | 0.131 / 0.131 / 0.079 | 0.058 / 0.035 / 0.031 | 0.065 / 0.058 / 0.027 | 0.067 / 0.041 / 0.043 | 0.048 / 0.037 / 0.028 |
+| D_WL, 3 | 0.131 / 0.131 / 0.085 | 0.065 / 0.064 / 0.051 | 0.065 / 0.067 / 0.056 | 0.066 / 0.068 / 0.052 | 0.051 / 0.052 / 0.049 |
+| D_WL, 5 | 0.123 / 0.123 / 0.069 | 0.080 / 0.081 / 0.051 | 0.091 / 0.095 / 0.050 | 0.086 / 0.088 / 0.052 | 0.064 / 0.073 / 0.048 |
+
+Card IRD's stream bars over hour 2 (48 720 pair-epochs): N1-G D_WL p50 0.066 with 96.0 % within 0.20 and D_NL p50 0.084 with 91.3 % within 0.25; the plain arm 0.067 (96.2 %) and 0.081 (92.9 %); Q1 0.051 (100 %) and 0.020 (100 %) (card IRDU 12.1). N1-G and the plain arm both pass W-WL and W-NL. N1-G reads the plain arm's level within 0.04 cycle in every cell above: a little worse on the narrow lane in some cells of the second hour (depth 3 at 75 to 90 min, 0.130 against 0.097; depth 1 at 105 to 120 min, 0.040 against 0.023) and a little better in others; not traced.
+
+**Users** (the five of card IRDU; float 3D median over the users by 15 min from each user's start, mm; HELD, WRONG and UNRESOLVED of the fixing users; the users' build):
+
+| stream, start | 0-15 | 15-30 | 30-45 | 45-60 | 60-75 | 75-90 | 90-105 | 105-120 | HELD; WRONG, UNRESOLVED (compared) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| N1-G, 0 | 1 613 | 1 259 | 795 | 287 | 320 | 236 | 82 | 84 | 23.2 %; 0, 102 (102) |
+| plain chain arm, 0 | 1 613 | 1 259 | 794 | 286 | 317 | 236 | 84 | 86 | 24.5 %; 0, 106 (106) |
+| Q1, 0 | 2 188 | 939 | 587 | 209 | 165 | 115 | 109 | 106 | 50.2 %; 0, 0 (1 357) |
+| N1-G, 30 | 1 157 | 277 | 338 | 222 | 88 | 98 | | | 31.4 %; 0, 104 (104) |
+| plain chain arm, 30 | 1 157 | 274 | 335 | 221 | 86 | 96 | | | 26.4 %; 0, 104 (104) |
+| Q1, 30 | 781 | 180 | 192 | 101 | 119 | 119 | | | 53.0 %; 0, 0 (1 178) |
+
+The users on N1-G's stream read the plain arm's within 3 mm in every bin and hold about as much, with the same unresolved comparisons; no user reaches a sustained 5 cm on either stream. The controls reproduce card IRDU 12.1 and 12.5 to the digit.
+
+**Verdict.** Every bar of N1 holds: the ring fix took only right integers on this bed (11 links, 777 held link-epochs, 0 wrong), its audit sees the negative control's wrong holds, and it is byte-identical when off. It also holds far too few links in 2 h (11 of 186, from 40 min) to move the stream or the users: both read the plain arm's level, where Q1, with every link held, reads the truth level at every depth from the first half hour. On this bed the limit is the floats' precision against the gate (formal sigma p50 0.12 to 0.20 cycle by ring at 2 h, against the bound 0.10) and the ring order (27 050 link-epochs not yet candidates), not wrong integers. The prediction holds for the count (a few by 60 min, more in hour 2) and fails for any gain in hour 2.
+
+**What it points to, for the author's decision (the frozen rule is unchanged).** (a) Stage N3, the 6 h bed, where the floats keep converging and the count keeps rising (19 links pass the gate at 119.5 min against 7 at 90 min on the plain arm); (b) the gate at 0.15 cycle, which took 0 wrong integers at every stage in card IRDU 12.5 (b) and accepts several times more; (c) the ring order relaxed to the best connected links first (card IRDU 12.3, Q3); (d) stage N2 (r3c with its re-seats), next by this card's plan. N2's pre-registration and build wait for the requesting session's or the author's word, since N1's gain is nil and (a) to (c) change what N2 would measure.
+
+**Not verified.** One bed, 2 h. The release path on true events (a slip, a cut release or a root change on a held link) is exercised only by the negative control (monitor, RAIM refloats, three slips) and the unit tests. The narrow-lane differences of N1-G in the second hour are not traced. The HELD readings use the fixing control's resolver, not this branch's.

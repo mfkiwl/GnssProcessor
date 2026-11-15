@@ -19,6 +19,7 @@ reading the run's own audit column.  Printed:
   would-be       per time, the chords not held whose gate passes (sigma at most 0.10, fraction at most 0.20): the
                  log-only acceptance count on the run's own chord table
 
+Minutes count from the run's first epoch (the first row of logs/network_chain_edges.csv).
 A run directory is <RAPID_RUNS_ROOT>/_rap_<tag> when a bare tag is given (default D:/GnssProcessorSupport/runs_nom).
 """
 import argparse
@@ -31,7 +32,7 @@ import sys
 
 RUNS = os.environ.get("RAPID_RUNS_ROOT") or "D:/GnssProcessorSupport/runs_nom"
 MAX_SIGMA, MAX_FRAC = 0.10, 0.20
-MINUTES = (30, 60, 90, 120)
+MINUTES = (30, 60, 90, 119.5)
 
 
 def resolve(run):
@@ -75,7 +76,15 @@ def analyse(run, frame_path):
         for r in csv.DictReader(fh):
             rows_by_t[float(r["tow"])].append(r)
     tows = sorted(rows_by_t)
+    # Minutes count from the run's first epoch: the first row of the chain's edge trace (as
+    # scripts/irdu_ring_rounding.py counts them); the chord table starts after the leveling warm-up.
     t0 = tows[0] if tows else 0.0
+    edges = os.path.join(run, "logs", "network_chain_edges.csv")
+    if os.path.exists(edges):
+        with open(edges, newline="") as fh:
+            first = next(csv.DictReader(fh), None)
+            if first is not None:
+                t0 = min(t0, float(first["tow"]))
     res = {"run": run, "frame": frame_path, "epochs": len(tows)}
     decided, decided_wrong, decided_unlisted = collections.Counter(), 0, 0
     first = {}

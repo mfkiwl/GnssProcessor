@@ -836,9 +836,10 @@ std::vector<std::string> contributionsTable(const ContributionTally& epoch,
         "(ambiguity_pin + eq34_rpb_pin = np, phase_colour_birth = pc_birth_rows, "
         "phase_colour_backstop = pc_backstop_rows, the block_*_carry kinds = pl_blk_rows, "
         "sd_ewl = the SD-EWL builder's rows_built, prior_ambiguity_oracle_pin = opin_rows, "
-        "prior_ambiguity_ring_hold = rfix_rows, "
-        "prior_rx_cb_datum + prior_rx_cb_datum_pre_pd = pl_cb_datum_rows; per station block)",
-        epoch.counter_mismatches, epoch_scope, run.counter_mismatches));
+        "{}prior_rx_cb_datum + prior_rx_cb_datum_pre_pd = pl_cb_datum_rows; per station block)",
+        epoch.counter_mismatches, epoch_scope, run.counter_mismatches,
+        // Named only on a run that folded it, as its table row (printedOnlyWhenFolded).
+        run.kinds[idx(CK::PriorAmbiguityRingHold)].count > 0 ? "prior_ambiguity_ring_hold = rfix_rows, " : ""));
     out.push_back(fmt::format("shared folds without a kind: {} ({}); over the run {}",
                               epoch.folds_without_kind, epoch_scope, run.folds_without_kind));
     out.push_back(fmt::format(
