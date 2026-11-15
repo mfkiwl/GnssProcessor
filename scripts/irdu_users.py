@@ -44,17 +44,38 @@ AR = {"mode": 1, "ratio_threshold": 5.0, "ratio_upper_bound": 10000.0, "elevatio
       "max_position_sigma_m": 0.05, "enable_partial_ar": True, "hold_variance": 1e-07, "wl_from_float": True,
       "nl_sigma_floor_cyc": 0.04, "nl_iono_free_row": True, "hold_release_cyc": 0.25, "refloat_partner_signal": True}
 VARIANT = {"obs": {"ratio_threshold": 1e9}, "fix": {"wl_branch_check": True}}
+# User configuration sets (card IRDU section 12.6), one change each, applied to the user's config on top of the recipe;
+# a run made with a set has the folder suffix _<set>.
+USER_SETS = {
+    # A slant ionosphere free at every epoch with no prior: initial sigma 1000 m, random walk 100 m^2/s (55 m per 30 s).
+    "fi": {"filter.initial_std.ionosphere": 1000.0, "filter.process_noise.ionosphere_q": 100.0},
+}
 
 
 def net_dir(tag):
     return RUNS / ("_rap_" + tag)
 
 
-def user_dir(tag, variant, user, start_min=0):
-    """A user run's folder; a late start (card IRDU section 12.4) adds the suffix _s<minutes>."""
+def user_dir(tag, variant, user, start_min=0, uset=""):
+    """A user run's folder; a late start (card IRDU section 12.4) adds the suffix _s<minutes>, a user configuration
+    set (section 12.6) the suffix _<set>."""
     short = tag[5:] if tag.startswith("irdu_") else tag
     late = "_s%d" % start_min if start_min else ""
-    return RUNS / ("_rap_irdu_u_%s_%s_%s%s" % (short, variant, user[:3].lower(), late))
+    us = "_%s" % uset if uset else ""
+    return RUNS / ("_rap_irdu_u_%s_%s_%s%s%s" % (short, variant, user[:3].lower(), late, us))
+
+
+def apply_set(cfg, uset):
+    """Apply a user configuration set (dotted keys) to a config dict; returns the applied keys."""
+    if not uset:
+        return {}
+    for key, val in USER_SETS[uset].items():
+        node = cfg
+        parts = key.split(".")
+        for p in parts[:-1]:
+            node = node.setdefault(p, {})
+        node[parts[-1]] = val
+    return dict(USER_SETS[uset])
 
 
 def fixture_of(net):
@@ -79,9 +100,9 @@ def station_entry(fixture, user):
     raise SystemExit("%s: station %s not in network_fixture.json" % (fixture, user))
 
 
-def make_one(tag, variant, user, flip, start_min=0):
+def make_one(tag, variant, user, flip, start_min=0, uset=""):
     net = net_dir(tag)
-    dst = user_dir(tag, variant, user, start_min)
+    dst = user_dir(tag, variant, user, start_min, uset)
     if dst.exists():
         print("exists", dst.name)
         return
@@ -108,11 +129,13 @@ def make_one(tag, variant, user, flip, start_min=0):
     if start_min:
         # A late start (card IRDU section 12.4): the epoch loop skips to this elapsed span and the user starts cold.
         n["start_offset_hours"] = start_min / 60.0
+    applied = apply_set(cfg, uset)
     dst.mkdir(parents=True)
     (dst / "arm.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     meta = {"net_tag": tag, "net_dir": net.as_posix(), "fixture": fixture.as_posix(), "user": user,
             "variant": variant, "emit_pb_hold": hold, "pb_hold_presence_flip": cl["pb_hold_presence_flip"],
-            "start_min": start_min, "ambiguity_resolution": cfg["estimation"]["ambiguity_resolution"]}
+            "start_min": start_min, "user_set": uset, "user_set_keys": applied,
+            "ambiguity_resolution": cfg["estimation"]["ambiguity_resolution"]}
     (dst / "irdu_user.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
     print("made", dst.name)
 
@@ -137,20 +160,23 @@ def main():
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--start-min", type=int, default=0,
                     help="a late start: the user starts this many minutes after the network (card IRDU 12.4)")
+    ap.add_argument("--user-set", default="", choices=[""] + sorted(USER_SETS),
+                    help="a user configuration set applied on top of the recipe (card IRDU 12.6)")
     a = ap.parse_args()
     items = [(v, u) for v in a.variants.split(",") for u in a.users.split(",")]
-    s = a.start_min
+    s, us = a.start_min, a.user_set
     if a.action == "make":
         for v, u in items:
-            make_one(a.tag, v, u, a.flip, s)
+            make_one(a.tag, v, u, a.flip, s, us)
         return 0
     if a.action == "list":
         for v, u in items:
-            d = user_dir(a.tag, v, u, s)
+            d = user_dir(a.tag, v, u, s, us)
             ec = (d / "exitcode.txt").read_text().split() if (d / "exitcode.txt").exists() else None
             print(d.name, ec)
         return 0
-    todo = [user_dir(a.tag, v, u, s) for v, u in items if not (user_dir(a.tag, v, u, s) / "exitcode.txt").exists()]
+    todo = [user_dir(a.tag, v, u, s, us) for v, u in items
+            if not (user_dir(a.tag, v, u, s, us) / "exitcode.txt").exists()]
     print("exe", os.environ["IRDU_USER_EXE"], "runs", len(todo), flush=True)
     with ThreadPoolExecutor(a.jobs) as ex:
         list(ex.map(launch, todo))

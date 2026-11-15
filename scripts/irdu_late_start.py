@@ -70,14 +70,14 @@ def bins(tr):
     return {b: median(v) for b, v in out.items()}
 
 
-def analyse(tags, starts, users):
+def analyse(tags, starts, users, uset=""):
     res = {}
     for tag in tags:
         for s in starts:
             for var in ("obs", "fix"):
                 per_user = {}
                 for u in users:
-                    tr = trace(IU.user_dir(tag, var, u, s))
+                    tr = trace(IU.user_dir(tag, var, u, s, uset))
                     per_user[u] = {"n": len(tr), "bins": bins(tr), "to5cm": to_bar(tr)}
                 nb = max((max(v["bins"]) for v in per_user.values() if v["bins"]), default=-1) + 1
                 over = {}
@@ -109,9 +109,10 @@ def main():
     ap.add_argument("tags", nargs="+")
     ap.add_argument("--starts", default="0,30,45")
     ap.add_argument("--users", default=",".join(IU.USERS))
+    ap.add_argument("--user-set", default="", help="read the runs made with a user configuration set (card IRDU 12.6)")
     ap.add_argument("--json")
     a = ap.parse_args()
-    res = analyse(a.tags, [int(x) for x in a.starts.split(",")], a.users.split(","))
+    res = analyse(a.tags, [int(x) for x in a.starts.split(",")], a.users.split(","), a.user_set)
     print_result(res)
     if a.json:
         with open(a.json, "w") as fh:

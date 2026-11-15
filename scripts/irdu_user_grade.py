@@ -369,14 +369,14 @@ def hourly(run):
 
 
 # ----------------------------------------------------------------------------------------------- cell
-def user_runs(tag, users, start_min=0):
+def user_runs(tag, users, start_min=0, uset=""):
     import irdu_users as IU
-    return {u: {v: IU.user_dir(tag, v, u, start_min) for v in ("obs", "fix")} for u in users}
+    return {u: {v: IU.user_dir(tag, v, u, start_min, uset) for v in ("obs", "fix")} for u in users}
 
 
-def grade_cell(tag, users, from_min=30.0, settled_min=90.0, start_min=0):
+def grade_cell(tag, users, from_min=30.0, settled_min=90.0, start_min=0, uset=""):
     net = RUNS / ("_rap_" + tag)
-    runs = user_runs(tag, users, start_min)
+    runs = user_runs(tag, users, start_min, uset)
     meta = json.load(open(next(iter(runs.values()))["obs"] / "irdu_user.json"))
     fixture = Path(meta["fixture"])
     decl, datum = stream_declarations(net / "products.txt")
@@ -554,6 +554,8 @@ def main():
     ap.add_argument("--settled-min", type=float, default=90.0)
     ap.add_argument("--start-min", type=int, default=0,
                     help="grade the late-start user runs (folder suffix _s<minutes>, card IRDU 12.4)")
+    ap.add_argument("--user-set", default="",
+                    help="grade the user runs made with a user configuration set (folder suffix _<set>, card IRDU 12.6)")
     ap.add_argument("--json", default=None)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -561,7 +563,7 @@ def main():
         return selftest()
     import irdu_users as IU
     users = a.users.split(",") if a.users else IU.USERS
-    res = grade_cell(a.tag, users, a.from_min, a.settled_min, a.start_min)
+    res = grade_cell(a.tag, users, a.from_min, a.settled_min, a.start_min, a.user_set)
     print_cell(res)
     if a.json:
         json.dump(res, open(a.json, "w"), indent=1, default=str)
