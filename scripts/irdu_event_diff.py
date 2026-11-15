@@ -118,6 +118,31 @@ def pair_effect(ctl, evt, tow_event, settle):
     return res
 
 
+TRUTH_WINDOWS = (("event epoch", 0.0, 0.25), ("0.5-10", 0.25, 10.0), ("10-25", 10.0, 25.0), ("25-45", 25.0, 45.0),
+                 ("45-65", 45.0, 65.0), ("65-85", 65.0, 85.0))
+
+
+def truth_windows(pairs, se, sc, tow_event):
+    """The pairs read against truth (section 11.4's annotation): |wrap(D_WL)| and |wrap(D_NL)| p50 over the pairs and
+    the epochs of each window after the event, event run / control (each run at the epochs it emits the pair)."""
+    out = {}
+    for name, lo, hi in TRUTH_WINDOWS:
+        row = {}
+        for k, ch in ((0, "WL"), (1, "NL")):
+            vals = []
+            for series in (se, sc):
+                v = []
+                for p in pairs:
+                    for t, d in series[p].items():
+                        if tow_event + 60.0 * lo - 1e-3 <= t < tow_event + 60.0 * hi - 1e-3:
+                            x = channels_of(*d)[k]
+                            v.append(abs(x - round(x)))
+                vals.append(pct(v, 50))
+            row[ch] = vals
+        out[name] = row
+    return out
+
+
 def analyse(ctl_run, evt_run, fixture, tow_event, source="prehold", settle=0.05):
     sc = pair_series(ctl_run, fixture, source)
     se = pair_series(evt_run, fixture, source)
@@ -167,6 +192,7 @@ def analyse(ctl_run, evt_run, fixture, tow_event, source="prehold", settle=0.05)
                 offs_e.append(circ_offset([channels_of(*se[k][t])[0] for t in te]))
                 offs_c.append(circ_offset([channels_of(*sc[k][t])[0] for t in te if t in sc[k]]))
         o["plateau_wl_offset_p50"] = {"event": pct(offs_e, 50), "control": pct(offs_c, 50)}
+        o["truth_windows"] = truth_windows([k for k, _ in rows], se, sc, tow_event)
         o["pairs"] = [{"pair": "%s-%s" % k, "settle_min": e["settle_min"], "step_wl": e["WL"]["step"],
                        "step_nl": e["NL"]["step"], "peak_wl": e["peak"]["WL"], "peak_nl": e["peak"]["NL"]}
                       for k, e in rows]
@@ -195,6 +221,9 @@ def print_result(res):
         print("  plateau (last 15 min) offset p50 against truth: WL event %.3f control %.3f; NL event %.3f control %.3f"
               % (o["plateau_wl_offset_p50"]["event"], o["plateau_wl_offset_p50"]["control"],
                  o["plateau_nl_offset_p50"]["event"], o["plateau_nl_offset_p50"]["control"]))
+        print("  against truth, |wrap| p50 event / control by window after the event: " + "; ".join(
+            "%s WL %.3f/%.3f NL %.3f/%.3f" % (w, v["WL"][0], v["WL"][1], v["NL"][0], v["NL"][1])
+            for w, v in o["truth_windows"].items()))
 
 
 def selftest():

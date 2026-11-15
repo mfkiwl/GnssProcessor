@@ -50,9 +50,11 @@ def net_dir(tag):
     return RUNS / ("_rap_" + tag)
 
 
-def user_dir(tag, variant, user):
+def user_dir(tag, variant, user, start_min=0):
+    """A user run's folder; a late start (card IRDU section 12.4) adds the suffix _s<minutes>."""
     short = tag[5:] if tag.startswith("irdu_") else tag
-    return RUNS / ("_rap_irdu_u_%s_%s_%s" % (short, variant, user[:3].lower()))
+    late = "_s%d" % start_min if start_min else ""
+    return RUNS / ("_rap_irdu_u_%s_%s_%s%s" % (short, variant, user[:3].lower(), late))
 
 
 def fixture_of(net):
@@ -77,9 +79,9 @@ def station_entry(fixture, user):
     raise SystemExit("%s: station %s not in network_fixture.json" % (fixture, user))
 
 
-def make_one(tag, variant, user, flip):
+def make_one(tag, variant, user, flip, start_min=0):
     net = net_dir(tag)
-    dst = user_dir(tag, variant, user)
+    dst = user_dir(tag, variant, user, start_min)
     if dst.exists():
         print("exists", dst.name)
         return
@@ -103,11 +105,14 @@ def make_one(tag, variant, user, flip):
     lg["enable_ambiguity_resolver"] = True
     lg.setdefault("levels", {})["ambiguity_resolver"] = "debug"
     cfg["processing"]["eigen_threads"] = 1
+    if start_min:
+        # A late start (card IRDU section 12.4): the epoch loop skips to this elapsed span and the user starts cold.
+        n["start_offset_hours"] = start_min / 60.0
     dst.mkdir(parents=True)
     (dst / "arm.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     meta = {"net_tag": tag, "net_dir": net.as_posix(), "fixture": fixture.as_posix(), "user": user,
             "variant": variant, "emit_pb_hold": hold, "pb_hold_presence_flip": cl["pb_hold_presence_flip"],
-            "ambiguity_resolution": cfg["estimation"]["ambiguity_resolution"]}
+            "start_min": start_min, "ambiguity_resolution": cfg["estimation"]["ambiguity_resolution"]}
     (dst / "irdu_user.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
     print("made", dst.name)
 
@@ -130,19 +135,22 @@ def main():
     ap.add_argument("--variants", default="obs,fix")
     ap.add_argument("--flip", default="auto", choices=("auto", "true", "false"))
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--start-min", type=int, default=0,
+                    help="a late start: the user starts this many minutes after the network (card IRDU 12.4)")
     a = ap.parse_args()
     items = [(v, u) for v in a.variants.split(",") for u in a.users.split(",")]
+    s = a.start_min
     if a.action == "make":
         for v, u in items:
-            make_one(a.tag, v, u, a.flip)
+            make_one(a.tag, v, u, a.flip, s)
         return 0
     if a.action == "list":
         for v, u in items:
-            d = user_dir(a.tag, v, u)
+            d = user_dir(a.tag, v, u, s)
             ec = (d / "exitcode.txt").read_text().split() if (d / "exitcode.txt").exists() else None
             print(d.name, ec)
         return 0
-    todo = [user_dir(a.tag, v, u) for v, u in items if not (user_dir(a.tag, v, u) / "exitcode.txt").exists()]
+    todo = [user_dir(a.tag, v, u, s) for v, u in items if not (user_dir(a.tag, v, u, s) / "exitcode.txt").exists()]
     print("exe", os.environ["IRDU_USER_EXE"], "runs", len(todo), flush=True)
     with ThreadPoolExecutor(a.jobs) as ex:
         list(ex.map(launch, todo))

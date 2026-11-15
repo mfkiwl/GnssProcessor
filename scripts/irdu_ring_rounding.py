@@ -60,7 +60,15 @@ def grade_row(f1, f2, q11, q12, q22, z1, z2):
     e_nl = (F1 * f1 - F2 * f2 - F2 * (z1 - z2)) / (F1 - F2) - z1
     return {"wl_ok": wl_ok, "nl_ok": nl_ok, "bands_ok": bands_ok, "s_wl": s_wl, "s_nl": s_nl,
             "z_wl": abs(e_wl) / s_wl if s_wl > 0 else float("nan"),
-            "z_nl": abs(e_nl) / s_nl if s_nl > 0 else float("nan")}
+            "z_nl": abs(e_nl) / s_nl if s_nl > 0 else float("nan"),
+            "frac_nl": abs(n_card - round(n_card)), "e_nl": e_nl}
+
+
+def gated(rows, sigma_max, frac_max=0.20):
+    """Card IRDU 12.4 (b): accept a link's N_1 (the ionosphere-free row with the wide lane rounded) only when its
+    formal sigma is at most sigma_max and its fraction at most frac_max; (accepted, wrong among accepted)."""
+    acc = [r for r in rows if r["s_nl"] <= sigma_max and r["frac_nl"] <= frac_max]
+    return len(acc), sum(not r["nl_ok"] for r in acc)
 
 
 def p50(v):
@@ -117,7 +125,7 @@ def analyse(run, all_path, pinned_path, next_ring, minutes):
            "depth_rx_links_p50": p50([rx[k[0]] for k in depth_set]), "by_minute": {}}
     for t, m in sorted(want.items(), key=lambda kv: kv[1]):
         out = {}
-        for name, sel in (("depth", depth_set), ("best", best_set)):
+        for name, sel in (("depth", depth_set), ("best", best_set), ("unheld", chords)):
             graded = []
             for k in sel:
                 r = rows.get(t, {}).get(k)
@@ -127,8 +135,26 @@ def analyse(run, all_path, pinned_path, next_ring, minutes):
                 graded.append(grade_row(float(r["float_cyc_1"]), float(r["float_cyc_2"]), float(r["q11"]),
                                         float(r["q12"]), float(r["q22"]), v["z1"], v["z2"]))
             out[name] = summarize(graded)
+            out[name]["gated"] = {"%.2f" % g: gated(graded, g) for g in GATES}
         res["by_minute"][str(m)] = out
     return res
+
+
+GATES = (0.10, 0.15)
+
+
+def print_gated(res, label):
+    print("== %s, gated rounding of N_1 (sigma at most the gate, fraction at most 0.20): accepted / wrong among "
+          "accepted, of n" % label)
+    for m, out in res["by_minute"].items():
+        parts = []
+        for name in ("depth", "unheld"):
+            s = out[name]
+            if not s.get("n"):
+                continue
+            gs = "; ".join("gate %s: %d/%d" % (g, a, w) for g, (a, w) in s["gated"].items())
+            parts.append("%s n %d: %s" % ("next ring" if name == "depth" else "all not held", s["n"], gs))
+        print("   %4s min  %s" % (m, " | ".join(parts)))
 
 
 def print_result(res, label):
@@ -185,6 +211,7 @@ def main():
         sys.exit(0 if selftest() else 1)
     res = analyse(os.path.abspath(a.run), a.all, a.pinned, a.next_ring, [float(x) for x in a.minutes.split(",")])
     print_result(res, a.label or os.path.basename(a.run))
+    print_gated(res, a.label or os.path.basename(a.run))
     if a.json:
         with open(a.json, "w") as fh:
             json.dump(res, fh, indent=1)
