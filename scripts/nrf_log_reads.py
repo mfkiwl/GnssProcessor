@@ -8,7 +8,9 @@ frozen rule would decide, refused with its cause otherwise):
   by hour     links with a would-be decision and would-be link-epochs, from the run's first epoch (the first row of
               logs/network_chain_edges.csv)
   by ring     would-be link-epochs and links by the ring of the first would-be decision
-  birth       minutes from a link's first chord row to its first would-be decision (p50, p90, n; links never decided)
+  birth       minutes from a link's first chord row to its first would-be decision (p50, p90, n; links never decided);
+              and from the start of the arc that holds that decision (logs/network_slip_raw.csv, a gap of more than
+              300 s starts an arc), for all links and for arcs that start after the run's first epoch
   readings    frac_wl, frac_if and sigma_if at each link's first would-be decision (p50, p90, max)
   refusals    link-epochs refused, by cause; links refused by the wide-lane bound (cause wl_fraction: every other test
               passed, persistence included) at least once, and of them never decided
@@ -20,6 +22,9 @@ import csv
 import json
 import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from nrf_two_run_audit import arc_start_at, arc_starts  # noqa: E402  (the producer's arc rule, one copy)
 
 RUNS = os.environ.get("RAPID_RUNS_ROOT") or "D:/GnssProcessorSupport/runs_nom"
 
@@ -66,6 +71,16 @@ def main():
                 if r["refused"] == "wl_fraction":
                     wl_links.add(key)
     births = [(first_wh[k][0] - first_row[k]) / 60.0 for k in first_wh]
+    starts = arc_starts(run)
+    run_first = min((s[0] for s in starts.values()), default=t0)
+    arc_births, arc_births_in = [], []
+    for k, (tow, _) in first_wh.items():
+        a0 = arc_start_at(starts, (k[0], k[1]), tow)
+        if a0 is None:
+            continue
+        arc_births.append((tow - a0) / 60.0)
+        if a0 > run_first + 1e-6:
+            arc_births_in.append((tow - a0) / 60.0)
     ring_links = collections.Counter(first_wh[k][1]["ring"] for k in first_wh)
     readings = {}
     for col in ("frac_wl", "frac_if", "sigma_if"):
@@ -75,6 +90,9 @@ def main():
            "by_hour": {h: {"links": len(hour_links[h]), "link_epochs": hour_eps[h]} for h in sorted(hour_eps)},
            "by_ring_link_epochs": dict(ring_eps), "by_ring_links": dict(ring_links),
            "birth_to_first_min": {"p50": pct(births, 0.5), "p90": pct(births, 0.9), "n": len(births)},
+           "arc_start_to_first_min": {"p50": pct(arc_births, 0.5), "p90": pct(arc_births, 0.9), "n": len(arc_births)},
+           "arc_born_in_run_to_first_min": {"p50": pct(arc_births_in, 0.5), "p90": pct(arc_births_in, 0.9),
+                                            "n": len(arc_births_in)},
            "readings_at_first": readings, "refused": dict(refused),
            "wl_bound_links": len(wl_links), "wl_bound_links_never_decided": len(wl_links - set(first_wh))}
     print("== %s" % run)
@@ -85,6 +103,10 @@ def main():
         "ring %s: %d" % (k, v) for k, v in sorted(ring_links.items(), key=lambda x: int(x[0]) if x[0].lstrip('-').isdigit() else 99)))
     print("   minutes from the first chord row to the first would-be decision: p50 %.1f, p90 %.1f (n %d)" % (
         res["birth_to_first_min"]["p50"], res["birth_to_first_min"]["p90"], len(births)))
+    print("   minutes from the arc's start to the first would-be decision: p50 %.1f, p90 %.1f (n %d); arcs that "
+          "start after the run's first epoch: p50 %.1f, p90 %.1f (n %d)" % (
+              pct(arc_births, 0.5), pct(arc_births, 0.9), len(arc_births),
+              pct(arc_births_in, 0.5), pct(arc_births_in, 0.9), len(arc_births_in)))
     for col, d in readings.items():
         print("   %-8s at the first would-be decision: p50 %.3f, p90 %.3f, max %.3f (n %d)" % (
             col, d["p50"], d["p90"], d["max"], d["n"]))
