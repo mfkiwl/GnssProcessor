@@ -451,7 +451,8 @@ for _case, _file in IRDU_FRAME_PIN_FILES.items():
 # the same key is the arm's --knob.
 IRDU_P5_KEYS = {"iftd_off": "network.cycle_slip.if_phase_td=false",
                 "disc_off": "network.disc_threshold_frac_cycles=1000",
-                "rxclk": "network.carry_rx_clock_in_block=true"}
+                "rxclk": "network.carry_rx_clock_in_block=true",
+                "pv": "network.disc_phase_visible=true"}
 for _name, _kv in IRDU_P5_KEYS.items():
     KNOB_GROUPS["fpin_nr3_all_" + _name] = KNOB_GROUPS["fpin_nr3_all"] + [_kv]
 

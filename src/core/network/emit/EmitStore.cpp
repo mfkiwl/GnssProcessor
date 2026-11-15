@@ -1115,13 +1115,49 @@ static int networkProductContractRunEnd(const NetworkRunEndView& v) {
     return 0;
 }
 
+/**
+ * @brief Run-end section of the phase-visible step test (@c network.disc_phase_visible):
+ *        its groups, medians and declarations, the legacy test's verdicts on the same keys,
+ *        and both edges (first records, returns, forced marks, keys without a clock, the
+ *        vote set and the below-minimum state).
+ *
+ * Gate: the emitter armed with the test (a positive minimum voter count).  A replay of the
+ * product file from its first epoch prints the same counts (ApplicationConsumerReplay.cpp).
+ *
+ * @param v The run at its end (network/runend/RunEnd.hpp).
+ * @return 0 (this report does not set the exit code).
+ */
+static int networkPhaseVisibleStepRunEnd(const NetworkRunEndView& v) {
+    if (!v.setup.emitter || v.setup.emitter->discPhaseVisibleMinSats() <= 0) return 0;
+    const NetworkProductEmitter& em = *v.setup.emitter;
+    const PhaseVisibleCounters& c = em.phaseVisibleCounters();
+    const NetworkProductEmitter::PhaseVisibleEdges& e = em.phaseVisibleEdges();
+    v.log->info("Network (phase-visible step test, discpv={}): group-epochs {} ({} against the "
+                "median, {} below the minimum count); keys tested {}, declared {} ({} in groups "
+                "below the minimum).  The legacy test on the phase bias alone would have declared "
+                "{} of the tested keys; {} declared here it would not have declared.  Group-epochs "
+                "whose median moved by more than the bar (a step a user that does not difference "
+                "would need) {}, largest |median| {:.4f} m.",
+                em.discPhaseVisibleMinSats(), c.groups, c.groups_median, c.groups_below_min,
+                c.keys_tested, c.keys_stepped, c.keys_stepped_below_min, e.legacy_would_step,
+                e.stepped_not_legacy, c.shared_over_bar, c.max_abs_median_m);
+    v.log->info("Network (phase-visible step test, edges): first records {}; returns tested "
+                "against an older baseline {}; returns past the staleness horizon {}; keys under "
+                "a forced mark {}; keys without a clock (the legacy test) {}; vote-set entries {} "
+                "and exits {}; groups entering the below-minimum state {} and leaving it {}.",
+                e.first_records, e.returns_fresh, e.returns_stale, e.forced, e.no_clock,
+                e.vote_entries, e.vote_exits, e.below_min_entries, e.below_min_exits);
+    return 0;
+}
+
 // Run-end report of this subsystem: its sections in print order (
 // declared in network/emit/EmitStore.hpp).
 int networkEmitStoreRunEnd(const NetworkRunEndView& v) {
     return networkRunEndSections(v, {
         networkEmitOutcomeRunEnd,
         networkDeferredHeartbeatsRunEnd,
-        networkProductContractRunEnd
+        networkProductContractRunEnd,
+        networkPhaseVisibleStepRunEnd
     });
 }
 

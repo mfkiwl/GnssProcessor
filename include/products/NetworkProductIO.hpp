@@ -178,6 +178,18 @@ struct SbasisContract {
     /// re-marks with the full satellite scope whatever this field says;
     /// @c checkContract compares it so the divergence is reported.
     bool              disc_mark_scope_channel{false};
+    /// The phase-visible step test (@c network.disc_phase_visible): when > 0, a phase
+    /// step is declared on what a user of between-satellite differences sees, the
+    /// change of a key's clock less phase bias less the median of that change over the
+    /// satellites of its constellation and signal, and the value is the median's
+    /// minimum voter count (products/PhaseVisibleStepTest.hpp).  The declaration
+    /// assumes a user that differences between satellites the stream corrects: a move
+    /// common to every satellite of a signal is not declared, so a user that pairs a
+    /// corrected satellite with one the stream does not correct carries it undeclared.
+    /// Eighth replay-emitter construction parameter.  Serialized as an optional trailing
+    /// @c discpv=\<n\> S-line field only when > 0, so a producer without it writes the
+    /// S line byte-for-byte.  0 = the legacy test on the phase bias alone.
+    int               disc_phase_visible_min_sats{0};
     /// Whether the producer held each (satellite, signal) emitted phase bias at the
     /// first value of its generation (@c network.emit_pb_hold).  Not a
     /// replay-emitter parameter but a reading rule for the whole phase-bias channel:
@@ -598,10 +610,11 @@ public:
     /// and (if @p mismatches non-null) appends a human-readable line per differing
     /// field.  The caller decides whether a mismatch is a warning or a hard error.
     ///
-    /// All seven replay-emitter construction parameters are compared
+    /// All eight replay-emitter construction parameters are compared
     /// (@c disc_threshold_m, @c emit_clock_disc, @c staleness_horizon_s,
     /// @c code_bias_jump_test, @c clock_disc_on_set_change,
-    /// @c disc_threshold_frac_cycles, @c disc_mark_scope_channel), as are the
+    /// @c disc_threshold_frac_cycles, @c disc_mark_scope_channel,
+    /// @c disc_phase_visible_min_sats), as are the
     /// phase-bias hold flags and the wind-up mode.  The wind-up mode is compared
     /// only when both sides declare it (see @c SbasisContract::windup_mode); a
     /// file that does not is accepted, since its mode cannot be verified.
@@ -625,10 +638,11 @@ public:
     static std::string csvSanitize(const std::string& s);
 
     /// @brief Construct an emitter configured as the producer that wrote @p contract, from
-    /// the seven replay-emitter construction parameters the contract carries
+    /// the eight replay-emitter construction parameters the contract carries
     /// (@c disc_threshold_m, @c emit_clock_disc, @c staleness_horizon_s,
     /// @c code_bias_jump_test, @c clock_disc_on_set_change,
-    /// @c disc_threshold_frac_cycles, @c disc_mark_scope_channel), so a replay reproduces every discontinuity
+    /// @c disc_threshold_frac_cycles, @c disc_mark_scope_channel,
+    /// @c disc_phase_visible_min_sats), so a replay reproduces every discontinuity
     /// counter, the clock channel included, byte-for-byte with no out-of-band
     /// knowledge of the producer's config.  A v1 file (@c contract.present false)
     /// yields the default emitter, reproducing the pre-B6 replay behavior.  Feed the

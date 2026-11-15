@@ -53,6 +53,7 @@
  * reads from, and tests do not modify global state.
  */
 
+#include "products/PhaseVisibleStepTest.hpp"   // the phase-visible step test (network.disc_phase_visible)
 #include "rtcm/RtcmTypes.hpp"   // GnssTime, SSR record structs
 
 #include <cstdint>
@@ -270,13 +271,24 @@ public:
     ///        channel that a mark did not name.
     ///        Default false = the legacy satellite-wide scope (byte-identical).
     ///        Travels in the S contract (@c discscope=) for @c makeReplayEmitter.
+    /// @param disc_phase_visible_min_sats When > 0 (@c network.disc_phase_visible), the
+    ///        phase value test declares a step on what a user of between-satellite
+    ///        differences sees: the change of the phase-visible correction (clock less
+    ///        phase bias) less the median of that change over the satellites of the same
+    ///        constellation and signal, against the same threshold (see
+    ///        products/PhaseVisibleStepTest.hpp).  The value is the minimum number of
+    ///        voting satellites for the median (@ref kPhaseVisibleMinSats when armed); a key
+    ///        without a clock in this or its previous emission keeps the legacy test.
+    ///        Default 0 = the legacy test on the phase bias alone (byte-identical).
+    ///        Travels in the S contract (@c discpv=) for @c makeReplayEmitter.
     explicit NetworkProductEmitter(double disc_threshold_m = kDefaultDiscThresholdM,
                                    bool emit_clock_disc = false,
                                    double staleness_horizon_s = 0.0,
                                    bool code_bias_jump_test = false,
                                    bool clock_disc_on_set_change = false,
                                    double disc_threshold_frac_cycles = 0.0,
-                                   bool disc_mark_scope_channel = false);
+                                   bool disc_mark_scope_channel = false,
+                                   int disc_phase_visible_min_sats = 0);
 
     /// Product channels that a per-satellite discontinuity mark applies to.
     /// A bit mask, so a marking site that moves two channels names both, and two
@@ -324,6 +336,37 @@ public:
     /// @return True when constructed with @c disc_mark_scope_channel; false is the legacy
     ///         satellite-wide scope.
     bool discMarkScopeChannel() const { return disc_mark_scope_channel_; }
+
+    /// @brief The phase-visible step test's minimum voter count.
+    /// @return 0 when the legacy phase test is in force (@c network.disc_phase_visible off),
+    ///         else the minimum number of voting satellites for the median.
+    int discPhaseVisibleMinSats() const { return disc_pv_min_sats_; }
+
+    /**
+     * @brief Both edges of the phase-visible step test (standing invariant 7), counted over
+     *        the emitter's life.  All zero when the test is off.
+     */
+    struct PhaseVisibleEdges {
+        long long first_records{0};      ///< Keys emitted with a clock and no phase-visible baseline: seeded, not tested.
+        long long returns_fresh{0};      ///< Keys tested against a baseline older than the previous emission (not voting).
+        long long returns_stale{0};      ///< Keys whose baseline is past the staleness horizon: re-seeded, not tested.
+        long long forced{0};             ///< Keys under a forced mark: declared by the mark, not voting.
+        long long no_clock{0};           ///< Keys emitted without a clock, or after one: the legacy test applies.
+        long long vote_entries{0};       ///< Keys voting this emission that did not vote at the previous one.
+        long long vote_exits{0};         ///< Keys that voted at the previous emission and do not vote at this one.
+        long long below_min_entries{0};  ///< Groups below the minimum count this emission and not at the previous one.
+        long long below_min_exits{0};    ///< Groups below the minimum count at the previous emission and not at this one.
+        long long legacy_would_step{0};  ///< Tested keys the legacy test (the phase bias alone) would have declared.
+        long long stepped_not_legacy{0}; ///< Tested keys declared here that the legacy test would not have declared.
+    };
+
+    /// @brief Counters of the phase-visible step test (groups, medians, declarations).
+    /// @return A reference into the emitter; all zero when the test is off.
+    const PhaseVisibleCounters& phaseVisibleCounters() const { return pv_counters_; }
+
+    /// @brief Edge counters of the phase-visible step test.
+    /// @return A reference into the emitter; all zero when the test is off.
+    const PhaseVisibleEdges& phaseVisibleEdges() const { return pv_edges_; }
 
     /**
      * @brief Channel mask of the marks pending for one satellite.
@@ -680,6 +723,24 @@ private:
     /// clock_disc_on_set_change_ is armed, so with it off the emitter carries no
     /// extra state and the serialized emitter section is unchanged.
     std::map<char, std::set<std::string>> prev_clock_satset_;
+
+    // --- The phase-visible step test (network.disc_phase_visible; 0 = off) ---------
+    // All of this state is populated only when the test is armed, so with it off the
+    // emitter carries no extra state and its serialized section is unchanged.
+    int disc_pv_min_sats_{0};          ///< Minimum voters for the median; 0 = the legacy phase test.
+    /// One key's phase-visible baseline: its clock less phase bias at its last emission
+    /// with a clock, and that emission's product time.
+    struct PvBaseline {
+        double cmp_m{0.0};             ///< Clock less phase bias (m).
+        double epoch_s{0.0};           ///< Product time of that emission (s).
+    };
+    std::map<std::string, PvBaseline> last_pv_;   ///< "sat|signal" -> baseline.
+    bool   have_prev_emit_{false};     ///< An emission preceded this one (the test's clock of "consecutive").
+    double prev_emit_epoch_s_{0.0};    ///< Product time of the previous emission (s).
+    std::set<std::string> pv_prev_voters_;     ///< Keys that voted at the previous emission.
+    std::set<std::string> pv_prev_below_min_;  ///< "const|signal" groups below the minimum at the previous emission.
+    PhaseVisibleCounters pv_counters_{};       ///< See phaseVisibleCounters().
+    PhaseVisibleEdges    pv_edges_{};          ///< See phaseVisibleEdges().
 };
 
 } // namespace GnssProcessor

@@ -65,14 +65,19 @@ NetworkProductEmitter::NetworkProductEmitter(double disc_threshold_m, bool emit_
                                              bool code_bias_jump_test,
                                              bool clock_disc_on_set_change,
                                              double disc_threshold_frac_cycles,
-                                             bool disc_mark_scope_channel)
+                                             bool disc_mark_scope_channel,
+                                             int disc_phase_visible_min_sats)
     : disc_threshold_m_(disc_threshold_m),
       disc_threshold_frac_cycles_(disc_threshold_frac_cycles),
       disc_mark_scope_channel_(disc_mark_scope_channel),
       emit_clock_disc_(emit_clock_disc),
       staleness_horizon_s_(staleness_horizon_s),
       code_bias_jump_test_(code_bias_jump_test),
-      clock_disc_on_set_change_(clock_disc_on_set_change) {}
+      clock_disc_on_set_change_(clock_disc_on_set_change) {
+    // The phase-visible step test is armed by a positive minimum voter count; anything
+    // else is the legacy phase test (the member's default 0).
+    if (disc_phase_visible_min_sats > 0) disc_pv_min_sats_ = disc_phase_visible_min_sats;
+}
 
 const char* NetworkProductEmitter::discChannelName(DiscChannel c) {
     switch (c) {
@@ -354,6 +359,74 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
         return false;
     };
 
+    // --- Phase-visible step test pre-pass (network.disc_phase_visible) -----------
+    // The test needs every satellite of a (constellation, signal) before it can decide
+    // any of them (the median), so it runs over the whole epoch here, ahead of the
+    // per-satellite loop that stamps the counters, and the loop looks each key's
+    // verdict up.  Each key's change of its clock less phase bias is read against its
+    // baseline: its last emission with a clock (products/PhaseVisibleStepTest.hpp).
+    // Not tested, with the edge counted: a key without a clock now or at its previous
+    // emission (the legacy test applies to it below), a first record (seeded), a
+    // return past the staleness horizon (re-seeded, as the legacy test does) and a key
+    // under a forced mark (declared by the mark).  Off (0), nothing here runs and the
+    // legacy test below is unchanged.
+    std::map<std::string, PhaseVisibleVerdict> pv_verdict;   // "sat|signal" -> verdict
+    std::set<std::string> pv_voters;                          // keys voting this emission
+    std::set<std::string> pv_below_min;                       // "const|signal" groups below the minimum
+    if (disc_pv_min_sats_ > 0) {
+        std::vector<PhaseVisibleKey> pv_keys;
+        std::vector<std::string>     pv_names;
+        for (const auto& s : sol.sats) {
+            if (s.sat.empty() || s.phase_bias.empty()) continue;
+            const char cst = letterOfSat(s.sat);
+            // The read-only twin of constForced/satForced on the phase channel (no tally,
+            // no census): a key under a forced mark is declared by it and does not vote.
+            const bool forced = (pendingMarkChannels(s.sat) & kDiscChanPhaseBias) != 0u;
+            for (const auto& [signal, npb] : s.phase_bias) {
+                const std::string key = s.sat + "|" + signal;
+                if (!s.has_clock) { ++pv_edges_.no_clock; continue; }
+                PhaseVisibleKey k;
+                k.sat           = s.sat;
+                k.signal        = signal;
+                k.constellation = cst;
+                k.bar_m         = discThresholdM(s.sat, signal);
+                const auto base = last_pv_.find(key);
+                if (base == last_pv_.end()) {
+                    // No baseline: a first record, or the previous emission had no clock.
+                    if (last_phase_bias_.count(key) != 0) ++pv_edges_.no_clock;
+                    else                                  ++pv_edges_.first_records;
+                } else if (staleKey(phase_last_seen_s_, key)) {
+                    ++pv_edges_.returns_stale;
+                } else if (forced) {
+                    ++pv_edges_.forced;
+                } else {
+                    k.tested   = true;
+                    k.change_m = (s.clock_c0_m - npb.bias_m) - base->second.cmp_m;
+                    k.votes    = have_prev_emit_ && base->second.epoch_s == prev_emit_epoch_s_;
+                    if (!k.votes) ++pv_edges_.returns_fresh;
+                }
+                pv_keys.push_back(k);
+                pv_names.push_back(key);
+            }
+        }
+        const std::vector<PhaseVisibleVerdict> verdicts =
+            decidePhaseVisibleSteps(pv_keys, disc_pv_min_sats_, &pv_counters_);
+        for (std::size_t i = 0; i < pv_keys.size(); ++i) {
+            pv_verdict[pv_names[i]] = verdicts[i];
+            if (pv_keys[i].votes) pv_voters.insert(pv_names[i]);
+            if (verdicts[i].tested && !verdicts[i].median_basis)
+                pv_below_min.insert(std::string(1, pv_keys[i].constellation) + "|" + pv_keys[i].signal);
+        }
+        for (const auto& k : pv_voters)
+            if (pv_prev_voters_.count(k) == 0) ++pv_edges_.vote_entries;
+        for (const auto& k : pv_prev_voters_)
+            if (pv_voters.count(k) == 0) ++pv_edges_.vote_exits;
+        for (const auto& g : pv_below_min)
+            if (pv_prev_below_min_.count(g) == 0) ++pv_edges_.below_min_entries;
+        for (const auto& g : pv_prev_below_min_)
+            if (pv_below_min.count(g) == 0) ++pv_edges_.below_min_exits;
+    }
+
     for (const auto& s : sol.sats) {
         SsrHeader header;
         header.epoch_time  = sol.epoch_time;
@@ -539,12 +612,31 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                         && std::abs(npb.bias_m - last_it->second) > bar)
                         ++clv_jump_excluded_;
                     value_jump = raw_over;
+                    // Under the phase-visible step test a tested key is declared on what a
+                    // user of between-satellite differences sees, in place of the phase
+                    // bias alone; the legacy verdict is kept for the counters only.  A key
+                    // the test did not take (no clock) keeps the legacy verdict above.
+                    if (disc_pv_min_sats_ > 0) {
+                        const auto pv = pv_verdict.find(key);
+                        if (pv != pv_verdict.end() && pv->second.tested) {
+                            if (raw_over) ++pv_edges_.legacy_would_step;
+                            if (pv->second.step && !raw_over) ++pv_edges_.stepped_not_legacy;
+                            value_jump = pv->second.step;
+                        }
+                    }
                 }
                 if (have_baseline && (forced || value_jump)) {
                     ++ctr;
                 }
                 last_phase_bias_[key] = npb.bias_m;
                 if (staleness_horizon_s_ > 0.0) phase_last_seen_s_[key] = epoch_s;
+                // The phase-visible baseline: the key's clock less phase bias at this
+                // emission, dropped when the satellite has no clock (the next emission
+                // then takes the legacy test).
+                if (disc_pv_min_sats_ > 0) {
+                    if (s.has_clock) last_pv_[key] = PvBaseline{ s.clock_c0_m - npb.bias_m, epoch_s };
+                    else             last_pv_.erase(key);
+                }
 
                 SsrPhaseBiasEntry entry;
                 entry.bias_m                = npb.bias_m;
@@ -623,6 +715,15 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
     // re-marks the same satellites.
     forced_bump_sats_.clear();
     forced_bump_chan_.clear();   // the mask map is kept in step with the set
+
+    // The phase-visible test's notion of "consecutive": this emission is the previous
+    // one for the next, and its voters and below-minimum groups are the edges' baseline.
+    if (disc_pv_min_sats_ > 0) {
+        have_prev_emit_    = true;
+        prev_emit_epoch_s_ = epoch_s;
+        pv_prev_voters_    = std::move(pv_voters);
+        pv_prev_below_min_ = std::move(pv_below_min);
+    }
 }
 
 void NetworkProductEmitter::serializeState(std::ostream& os) const {
@@ -634,7 +735,17 @@ void NetworkProductEmitter::serializeState(std::ostream& os) const {
     // default-config snapshot is byte-identical to pre-channel builds and old
     // snapshots restore into emitters with the channels off; v2 appends the two
     // channel flags when either is armed.
-    if (disc_threshold_frac_cycles_ > 0.0) {
+    if (disc_pv_min_sats_ > 0) {
+        // v4 = the v3 fields plus the phase-visible step test's minimum voter count.
+        // Written only when the test is armed, so every other snapshot stays v1 to v3.
+        os << "EMITTER,v4," << fmt::format("{}", disc_threshold_m_) << ','
+           << (emit_clock_disc_ ? 1 : 0) << ','
+           << fmt::format("{}", staleness_horizon_s_) << ','
+           << (code_bias_jump_test_ ? 1 : 0) << ','
+           << (clock_disc_on_set_change_ ? 1 : 0) << ','
+           << fmt::format("{}", disc_threshold_frac_cycles_) << ','
+           << disc_pv_min_sats_ << '\n';
+    } else if (disc_threshold_frac_cycles_ > 0.0) {
         // v3 = the v2 fields plus the H3 per-λ fractional-cycle threshold.  Written
         // only when the fractional mode is armed, so a legacy (frac == 0) snapshot
         // stays v1 or v2 and is byte-identical to a pre-H3 build.
@@ -719,6 +830,15 @@ void NetworkProductEmitter::serializeState(std::ostream& os) const {
         }
         os << '\n';
     }
+    // The phase-visible test's baselines and its previous emission (v4 only; the
+    // edge counters' previous voter and group sets are telemetry and restart empty).
+    if (disc_pv_min_sats_ > 0) {
+        for (const auto& [k, b] : last_pv_)
+            os << "epv," << k << ',' << fmt::format("{}", b.cmp_m) << ','
+               << fmt::format("{}", b.epoch_s) << '\n';
+        os << "epe," << (have_prev_emit_ ? 1 : 0) << ',' << fmt::format("{}", prev_emit_epoch_s_)
+           << '\n';
+    }
     os << "EEND\n";
 }
 
@@ -734,14 +854,17 @@ bool NetworkProductEmitter::restoreState(std::istream& is) {
         const bool v1 = (h.size() == 5 && h[0] == "EMITTER" && h[1] == "v1");
         const bool v2 = (h.size() == 7 && h[0] == "EMITTER" && h[1] == "v2");
         const bool v3 = (h.size() == 8 && h[0] == "EMITTER" && h[1] == "v3");
-        if (!v1 && !v2 && !v3) return false;
+        const bool v4 = (h.size() == 9 && h[0] == "EMITTER" && h[1] == "v4");
+        if (!v1 && !v2 && !v3 && !v4) return false;
         double thr = 0.0, stale = 0.0, frac = 0.0;
-        int clk = 0, cbj = 0, cks = 0;
+        int clk = 0, cbj = 0, cks = 0, pvmin = 0;
         if (!parseStateD(h[2], thr) || !parseStateI(h[3], clk) || !parseStateD(h[4], stale))
             return false;
-        if ((v2 || v3) && (!parseStateI(h[5], cbj) || !parseStateI(h[6], cks)))
+        if ((v2 || v3 || v4) && (!parseStateI(h[5], cbj) || !parseStateI(h[6], cks)))
             return false;
-        if (v3 && !parseStateD(h[7], frac))
+        if ((v3 || v4) && !parseStateD(h[7], frac))
+            return false;
+        if (v4 && !parseStateI(h[8], pvmin))
             return false;
         // A parameter mismatch means the snapshotting producer ran a different
         // emitter config, and the stream state would be interpreted under the wrong
@@ -752,7 +875,8 @@ bool NetworkProductEmitter::restoreState(std::istream& is) {
             || stale != staleness_horizon_s_
             || (cbj != 0) != code_bias_jump_test_
             || (cks != 0) != clock_disc_on_set_change_
-            || frac != disc_threshold_frac_cycles_)
+            || frac != disc_threshold_frac_cycles_
+            || pvmin != disc_pv_min_sats_)
             return false;
     }
 
@@ -767,6 +891,9 @@ bool NetworkProductEmitter::restoreState(std::istream& is) {
     std::map<std::string, double> st_seen_p, st_seen_c, st_seen_k;
     bool           st_force_all = false;
     std::set<char> st_forced_consts;
+    std::map<std::string, PvBaseline> st_pv;   // phase-visible baselines (v4)
+    bool   st_have_prev = false;
+    double st_prev_epoch = 0.0;
     bool saw_end = false, saw_efa = false;
 
     while (std::getline(is, line)) {
@@ -839,6 +966,16 @@ bool NetworkProductEmitter::restoreState(std::istream& is) {
                     return false;
                 st_forced_chan[f[1]] = static_cast<unsigned>(iv);
             }
+        } else if (tag == "epv") {
+            double ep = 0.0;
+            if (f.size() != 4 || !parseStateD(f[2], dv) || !parseStateD(f[3], ep)) return false;
+            st_pv[f[1]] = PvBaseline{ dv, ep };
+        } else if (tag == "epe") {
+            if (f.size() != 3 || !parseStateI(f[1], iv) || (iv != 0 && iv != 1)
+                || !parseStateD(f[2], dv))
+                return false;
+            st_have_prev  = (iv == 1);
+            st_prev_epoch = dv;
         } else {
             return false;   // unknown tag: fail loudly, never guess
         }
@@ -861,6 +998,11 @@ bool NetworkProductEmitter::restoreState(std::istream& is) {
     forced_bump_consts_ = std::move(st_forced_consts);
     forced_bump_sats_   = std::move(st_forced_sats);
     forced_bump_chan_   = std::move(st_forced_chan);   // empty on a legacy snapshot
+    last_pv_            = std::move(st_pv);            // empty unless the test is armed (v4)
+    have_prev_emit_     = st_have_prev;
+    prev_emit_epoch_s_  = st_prev_epoch;
+    pv_prev_voters_.clear();
+    pv_prev_below_min_.clear();
     return true;
 }
 

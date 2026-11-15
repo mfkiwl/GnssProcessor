@@ -7975,6 +7975,10 @@ namespace GnssProcessor {
         network_disc_threshold_frac_cycles_ =
             jval<double>(json, "network.disc_threshold_frac_cycles",
                          "network_disc_threshold_frac_cycles", 0.0);
+        // The phase step declaration on what a user sees:
+        // false = the legacy value test on the phase bias alone (byte-identical).
+        network_disc_phase_visible_ =
+            jval<bool>(json, "network.disc_phase_visible", "network_disc_phase_visible", false);
         // Sticky clock-pivot selection and per-constellation scoping of the producer's
         // internal handover response (carry skip / oscillator clear; RTA-1/RTA-2).
         network_sticky_pivot_ =
@@ -10152,6 +10156,26 @@ namespace GnssProcessor {
                       network_disc_threshold_frac_cycles_ * Constants::GPS_L1_WAVELENGTH,
                       network_disc_threshold_frac_cycles_ * Constants::GPS_L2_WAVELENGTH,
                       network_disc_threshold_frac_cycles_ * Constants::GPS_L5_WAVELENGTH);
+        }
+        // The phase step declaration on what a user sees.  Under the emission hold the
+        // emitted phase bias is a generation constant and the generations declare the
+        // held steps (gen=), so the test has nothing to decide: disarmed, and the S
+        // contract carries no discpv= token.
+        if (network_disc_phase_visible_ && network_config_.emit_pb_hold) {
+            log->warn("Network: network.disc_phase_visible is INERT under network.emit_pb_hold "
+                      "(the hold declares its steps by generation, gen=): the phase-visible "
+                      "step test is not armed and the S contract carries no discpv= token.");
+            network_disc_phase_visible_ = false;
+        } else if (network_disc_phase_visible_) {
+            log->info("Network producer: phase-visible step test ON "
+                      "(network.disc_phase_visible) — a phase step is declared when a key's "
+                      "change of its clock less phase bias, less the median of that change over "
+                      "the satellites of its constellation and signal ({} or more voting "
+                      "satellites; below that each key is tested on its own change), exceeds the "
+                      "discontinuity threshold.  The declaration assumes a user that differences "
+                      "between satellites the stream corrects: a move common to every satellite "
+                      "of a signal is not declared.  Replay-reproducible via the S-contract "
+                      "discpv= field.", kPhaseVisibleMinSats);
         }
         if (network_scoped_handover_response_)
             log->info("Network producer (RTA-2): scoped handover response ON — the internal D2 "

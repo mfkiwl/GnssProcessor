@@ -1460,7 +1460,8 @@ int Application::networkSetup_(NetworkSetupResult& setup) {
                           config_.networkCodeBiasDiscJumpTest(),
                           config_.networkClockDiscOnSetChange(),
                           config_.networkDiscThresholdFracCycles(),
-                          nc.disc_mark_scope == "channel");  // per-channel mark scope
+                          nc.disc_mark_scope == "channel",   // per-channel mark scope
+                          config_.networkDiscPhaseVisible() ? kPhaseVisibleMinSats : 0);  // discpv=
     NetworkProductEmitter& emitter = *setup.emitter;
 
     // --- Optional on-disk product serialization -----------------------------
@@ -1607,6 +1608,8 @@ int Application::networkSetup_(NetworkSetupResult& setup) {
             pending_contract.clock_disc_on_set_change = config_.networkClockDiscOnSetChange();
             pending_contract.disc_threshold_frac_cycles = config_.networkDiscThresholdFracCycles();  // per-λ jump gate, discfrac= (H3)
             pending_contract.disc_mark_scope_channel = (nc.disc_mark_scope == "channel");  // per-channel mark scope, discscope=
+            pending_contract.disc_phase_visible_min_sats =          // phase-visible step test, discpv=
+                config_.networkDiscPhaseVisible() ? kPhaseVisibleMinSats : 0;
             pending_contract.emit_pb_hold = nc.emit_pb_hold;  // the phase-bias hold reading rule, pbhold=
             pending_contract.emit_pb_hold_phase_clock =       // pbhold=2: the phase-visible clock is held
                 nc.emit_pb_hold && nc.emit_pb_hold_phase_clock;

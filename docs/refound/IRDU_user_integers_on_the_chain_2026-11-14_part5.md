@@ -214,3 +214,5 @@ A check not passed: r3c's root sees 9 satellites against Q1's root's 7, and its 
 - (12) The arm's users were read as pre-registered, although the stream is nearly the control's.
 - (13) No second arm. The receiver phase-bias floor would bias the metre-level receiver phase biases. A carry of the slant ionosphere falls under the reasoning above and is not measured.
 - (14) Part 3 lists approaches for the cause found, not for the IF-TD.
+
+Section 14 continues in [part 6](IRDU_user_integers_on_the_chain_2026-11-14_part6.md).

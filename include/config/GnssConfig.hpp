@@ -4912,6 +4912,27 @@ namespace GnssProcessor {
         double networkDiscThresholdFracCycles() const { return network_disc_threshold_frac_cycles_; }
 
         /**
+         * @brief Whether the emitter declares phase steps on what a user sees
+         *        (@c network.disc_phase_visible).
+         *
+         * Armed, the phase value test declares a step of a (satellite, signal) when the
+         * change of its phase-visible correction (clock less phase bias) between two
+         * emissions, less the median of that change over the satellites of the same
+         * constellation and signal, exceeds the discontinuity threshold; with fewer than
+         * @ref GnssProcessor::kPhaseVisibleMinSats "kPhaseVisibleMinSats" voting satellites
+         * each key is tested on its own change.  The moves a user of between-satellite
+         * differences does not see (a satellite's clock-to-phase-bias split, the network's
+         * phase level) are then not declared.  Travels in the S contract (@c discpv=), so
+         * a replay reproduces the counters.  Inert, and disarmed by the loader, under
+         * @c network.emit_pb_hold, whose generations declare the held steps.  Measured
+         * on the simulator only; ledger UNVALIDATED.
+         *
+         * @return True when the phase-visible step test is armed; false (default) keeps the
+         *         legacy test on the phase bias alone (byte-identical).
+         */
+        bool networkDiscPhaseVisible() const { return network_disc_phase_visible_; }
+
+        /**
          * @brief Whether the emitter bumps a constellation's clock discontinuity
          *        counters when its clock-satellite set changes between emits
          *        (@c network.clock_disc_on_set_change).
@@ -10234,6 +10255,7 @@ namespace GnssProcessor {
         bool   network_pivot_vanish_return_signal_{false}; ///< Also raise a datum change (markDatumChange) when a constellation absent last epoch returns with a clock pivot != its last-ever pivot (A1); off = only the adjacent-epoch pivot change signals (byte-identical).
         bool   network_emit_clock_disc_{false};            ///< Maintain a per-satellite clock discontinuity counter (bumped on a per-constellation datum re-reference) and scope the forced phase/code bump to the affected constellation(s) (A2); off = no clock disc channel + a global bump (byte-identical).
         bool   network_code_bias_disc_jump_test_{false};   ///< Emitter code-bias magnitude jump test: also bump disc_per_signal on a fresh-baseline value jump > the phase disc threshold (0.05 m), which signals the weak-separation value wander the H1 structural triggers cannot see; travels in the S-contract (cbjump=). Off = structural triggers only (byte-identical).
+        bool network_disc_phase_visible_{false};   ///< Phase steps declared on what a user sees (clock less phase bias, less the satellites' median); travels in the S contract (discpv=). Disarmed under network.emit_pb_hold.
         double network_disc_threshold_frac_cycles_{0.0};   ///< Per-λ discontinuity threshold as a fraction of a carrier cycle (H3); when > 0 the emitter jump test uses frac·λ(sat,signal) instead of the flat 0.05 m disc_threshold_m (uniform in cycles, still a fixed contract); travels in the S-contract (discfrac=). 0 = legacy flat-metre gate (byte-identical).
         bool   network_clock_disc_on_set_change_{false};   ///< Sum-to-zero datum-move signalling: bump a constellation's clock disc counters when its clock-satellite set changes between emits (under Σδtˢ=0 a membership change re-references the datum, which otherwise goes unsignalled); requires clock_datum_sum_to_zero, arms emit_clock_disc; travels in the S-contract (clkset=). Off = forced-bump-only clock channel (byte-identical).
         bool   network_sticky_pivot_{false};               ///< Keep the incumbent clock-pivot satellite per constellation while it remains registered (RTA-1; re-select only when it sets; a config-pinned satellite still wins); off = lexical first-registered auto-pick every epoch (byte-identical).
