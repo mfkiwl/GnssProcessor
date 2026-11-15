@@ -49,6 +49,10 @@ VARIANT = {"obs": {"ratio_threshold": 1e9}, "fix": {"wl_branch_check": True}}
 USER_SETS = {
     # A slant ionosphere free at every epoch with no prior: initial sigma 1000 m, random walk 100 m^2/s (55 m per 30 s).
     "fi": {"filter.initial_std.ionosphere": 1000.0, "filter.process_noise.ionosphere_q": 100.0},
+    # Card IRDU section 12.8: the undifferenced user (no between-satellite differencing in the filter).
+    "ud": {"network.closed_loop.consumer_undifferenced": True},
+    # Card IRDU section 12.8: carry the float ambiguity across a declared phase-bias step instead of resetting it.
+    "pc": {"network.closed_loop.pb_disc_carry": True},
 }
 
 

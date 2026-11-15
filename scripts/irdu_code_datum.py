@@ -76,7 +76,54 @@ def read_code_biases(path):
 
 
 LAMBDA = {"1": 299792458.0 / F1, "2": 299792458.0 / F2}
-REMOVABLE = ("x", "r", "frac", "fracc", "cm")
+REMOVABLE = ("x", "r", "frac", "fracc", "cm", "cmtf")
+
+
+def truthfree_shared(path):
+    """{(tow, band): S} the shared drift without the truth (section 12.8): per GPS signal pair (L1C with C1C, L2W with
+    C2W), d = B - P per satellite (a clock change is in neither record); per epoch the median over the satellites
+    present at both epochs of the change of d since the previous epoch; S is its running sum from 0 at the first epoch.
+    Removing it: P'_b = P_b + S_b(t)."""
+    per = defaultdict(dict)                 # tow -> {(sat, band): d}
+    order = []
+    tow = None
+    b, p = {}, {}
+
+    def flush():
+        if tow is None:
+            return
+        for (sat, band), pv in p.items():
+            if (sat, band) in b:
+                per[tow][(sat, band)] = b[(sat, band)] - pv
+
+    with open(path, encoding="utf-8") as fh:
+        for ln in fh:
+            if ln.startswith("E,"):
+                flush()
+                tow = round(float(ln.split(",")[2]), 3)
+                order.append(tow)
+                b, p = {}, {}
+            elif tow is not None and (ln.startswith("B,G") or ln.startswith("P,G")):
+                f = ln.rstrip("\n").split(",")
+                sigs = CODE if f[0] == "B" else PHASE
+                band = next((k for k, s in sigs.items() if s == f[2]), None)
+                if band:
+                    (b if f[0] == "B" else p)[(f[1], band)] = float(f[3])
+    flush()
+    out = {}
+    run = {"1": 0.0, "2": 0.0}
+    prev = None
+    for t in order:
+        if prev is not None:
+            for band in ("1", "2"):
+                ch = sorted(per[t][k] - per[prev][k] for k in per[t] if k[1] == band and k in per[prev])
+                if ch:
+                    m = len(ch)
+                    run[band] += ch[m // 2] if m % 2 else 0.5 * (ch[m // 2 - 1] + ch[m // 2])
+        for band in ("1", "2"):
+            out[(t, band)] = run[band]
+        prev = t
+    return out
 CM_WINDOW_MIN = (30.0, 120.0)
 
 
@@ -126,6 +173,7 @@ def move(src, dst, fixture, remove=("x",)):
     vals = sat_values(src, fixture)
     cm = phase_common_mode(vals) if "cm" in remove else {}
     ints = constant_integers(vals) if "fracc" in remove else {}
+    tf = truthfree_shared(src) if "cmtf" in remove else {}
     n = defaultdict(int)
     tow = None
     os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
@@ -158,6 +206,8 @@ def move(src, dst, fixture, remove=("x",)):
                             shift += LAMBDA[band] * (v["E" + band] - ints[(f[1], band)])
                         if "cm" in remove:
                             shift += cm.get((tow, band), 0.0)
+                        if "cmtf" in remove:
+                            shift += tf.get((tow, band), 0.0)
                     f[3] = repr(float(f[3]) + shift)
                     n[f[0] + " moved"] += 1
                 elif band is not None:
@@ -226,6 +276,60 @@ def terms(path, fixture):
             "x_by_sat": {s: sum(x for _, x in vals) / len(vals) for s, vals in sorted(xs.items())}}
 
 
+def synth(src, dst, fixture, term, target, curve_from=None, ramp_m=0.084, ramp_s=5400.0):
+    """Card IRDU section 12.8: a copy of `src` (a truth stream) with one term shared by every GPS satellite added.
+
+    term: 'ramp' (ramp_m over ramp_s from the stream's first epoch, continuing at the same slope) or 'curve' (the
+    phase common mode per band of `curve_from`, phase_common_mode, so the copy carries that stream's shared drift).
+    target: 'phase' (the user's phase correction error gains the term: P'_b = P_b - term_b) or 'clock' (code and phase
+    alike: C' = C + term, the ionosphere-free value of the curve or the ramp)."""
+    cm = {}
+    if term == "curve":
+        cm = phase_common_mode(sat_values(curve_from, fixture))
+    t_first = None
+    n = defaultdict(int)
+    tow = None
+    with open(src, encoding="utf-8") as fh:
+        for ln in fh:
+            if ln.startswith("E,"):
+                t_first = round(float(ln.split(",")[2]), 3)
+                break
+    g1 = F1 * F1 / (F1 * F1 - F2 * F2)
+    g2 = F2 * F2 / (F1 * F1 - F2 * F2)
+
+    def value(t, band):
+        if term == "ramp":
+            return ramp_m * (t - t_first) / ramp_s
+        if band == "if":
+            a, b = cm.get((t, "1")), cm.get((t, "2"))
+            return None if a is None or b is None else g1 * a - g2 * b
+        return cm.get((t, band))
+
+    os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
+    with open(src, encoding="utf-8") as fh, open(dst, "w", encoding="utf-8", newline="\n") as out:
+        for ln in fh:
+            if ln.startswith("#") or not ln.strip():
+                out.write(ln)
+                continue
+            f = ln.rstrip("\n").split(",")
+            if f[0] == "E":
+                tow = round(float(f[2]), 3)
+            elif tow is not None and f[1:2] and f[1].startswith("G"):
+                if target == "phase" and f[0] == "P":
+                    band = next((b for b, s in PHASE.items() if s == f[2]), None)
+                    v = value(tow, band) if band else None
+                    if v is not None:
+                        f[3] = repr(float(f[3]) - v)
+                        n["P shifted"] += 1
+                elif target == "clock" and f[0] == "C":
+                    v = value(tow, "if")
+                    if v is not None:
+                        f[2] = repr(float(f[2]) + v)
+                        n["C shifted"] += 1
+            out.write(",".join(f) + "\n")
+    return dict(n)
+
+
 def observed_x(nav_path, bia_path):
     """x per GPS satellite on observed data: a stream whose C1C-C2W geometry-free code bias sits at the broadcast T_GD
     (B_1 = c T_GD, B_2 = mu_2 c T_GD, the stream's convention) against CODE's observable-specific biases (C1C, C2W)
@@ -286,7 +390,10 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", nargs="?", choices=("terms", "move", "check", "observed"))
+    ap.add_argument("action", nargs="?", choices=("terms", "move", "check", "observed", "synth"))
+    ap.add_argument("--term", choices=("ramp", "curve"), help="synth: the shared term")
+    ap.add_argument("--target", choices=("phase", "clock"), help="synth: where the term goes")
+    ap.add_argument("--curve-from", help="synth: the stream whose phase common mode is the curve")
     ap.add_argument("paths", nargs="*")
     ap.add_argument("--out")
     ap.add_argument("--remove", default="x", help="comma list of x, r, frac (move and check)")
@@ -309,6 +416,9 @@ def main():
             raise SystemExit("--remove takes %s" % ",".join(REMOVABLE))
         n, nv = move(a.paths[0], a.out, a.fixture, rm)
         print("moved %s -> %s, removed %s: %s (values for %d satellite-epochs)" % (a.paths[0], a.out, rm, n, nv))
+    elif a.action == "synth":
+        n = synth(a.paths[0], a.out, a.fixture, a.term, a.target, a.curve_from)
+        print("synth %s -> %s: term %s on %s: %s" % (a.paths[0], a.out, a.term, a.target, n))
     elif a.action == "observed":
         xo = observed_x(a.paths[0], a.paths[1])
         vals = sorted(xo.values())
