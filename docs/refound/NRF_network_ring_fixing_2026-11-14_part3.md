@@ -265,3 +265,5 @@ Reads:
 4. The event-text defect waits for the next build: the order was to stop after O1.
 
 **Grades and scripts.** `runs_nom/_irdu_grades/nrf_n3b_*`, `nrf_n2c_*` and `nrf_o1_*`; the reads of this section that are not in `scripts/` are in `runs_nom/_irdu_grades/scripts_s20/`.
+
+Sections 21 onwards (stage O2, integers held on observed data) are in [part 4](NRF_network_ring_fixing_2026-11-14_part4.md).

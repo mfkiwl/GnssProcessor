@@ -667,8 +667,9 @@ namespace GnssProcessor {
         // Stores the accumulated angle (radians) and the GPS seconds of the
         // last update so that stale entries can be discarded after data gaps.
         struct WindUpState {
-            double angle{ 0.0 };      ///< Accumulated wind-up angle (radians).
-            double epoch_s{ 0.0 };    ///< Continuous GPS seconds of last update.
+            double angle{ 0.0 };          ///< Accumulated wind-up angle (radians).
+            double epoch_s{ 0.0 };        ///< Continuous GPS seconds of last update.
+            double start_epoch_s{ 0.0 };  ///< Continuous GPS seconds of the seed or the last restart (the arc's start).
         };
         // Ownership contract: the key is the satellite alone, so this map is
         // correct only while the owning GnssCorrections instance serves one
@@ -841,6 +842,30 @@ namespace GnssProcessor {
         const std::map<std::string, WuRestart>& wuRestarts() const { return wu_restarts_; }
         /// @brief Clear the restart ledger (called by the consumer's drain).
         void clearWuRestarts() { wu_restarts_.clear(); }
+
+        /**
+         * @brief One satellite's wind-up accumulator after its latest epoch (accumulated mode).
+         *
+         * The accumulator starts an arc from the raw angle, in (-0.5, 0.5] cycle, and unwraps it
+         * epoch to epoch.  Two runs that start the same arc at different epochs therefore carry
+         * the same angle up to a whole number of cycles, the same on every signal: the difference
+         * of their @c cycles at any epoch common to the arc in both is that number, and it moves
+         * the arc's integer ambiguities by the same amount.
+         */
+        struct WindUpArc {
+            double cycles{0.0};         ///< Accumulated wind-up after the latest epoch (cycles).
+            double epoch_s{0.0};        ///< Continuous GPS seconds of the latest epoch.
+            double start_epoch_s{0.0};  ///< Continuous GPS seconds of the arc's start (the seed or the last restart).
+        };
+        /**
+         * @brief The wind-up accumulator of every satellite this instance has seen.
+         *
+         * Read only: it changes nothing in the correction.  An entry stays after its satellite
+         * sets; @c WindUpArc::epoch_s says when it was last updated.
+         * @return One entry per satellite, sorted by identifier; empty in fractional mode (no
+         *         accumulator).
+         */
+        std::vector<std::pair<std::string, WindUpArc>> windUpArcs() const;
 
     private:
         /// Restart ledger, §10.4 (see @ref wuRestarts).  Written from the const

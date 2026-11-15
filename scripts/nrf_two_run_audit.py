@@ -2,6 +2,7 @@
 """Card NRF stages N3b and O1: the audit of two runs' integers against each other, without truth.
 
     py -3.14 scripts/nrf_two_run_audit.py <run A> <run B> [--states held,decided,would_hold] [--json out.json]
+        [--windup FIXTURE | --windup-trace] [--born-after TOW]
     py -3.14 scripts/nrf_two_run_audit.py --selftest
 
 At every epoch common to both runs and on each band (constellation and signal), the links whose integers both runs
@@ -16,8 +17,10 @@ on.  An error both runs share passes (the audit's known limit).
 Two runs with different starts differ by more than a frame: under the accumulated wind-up convention each run gives an
 arc the wind-up branch floor(wu(t0) + 0.5) at its own start of that arc, so an arc older than the later start carries
 another integer in each run (the same on both bands of a link, as a wrong N1 with a right wide lane would).  --windup
-removes each run's branch (simulation only, from the fixture's truth); --born-after keeps only the arcs both runs start
-together, which needs no truth.
+removes each run's branch (simulation only, from the fixture's truth); --windup-trace removes the whole number of cycles
+between the two runs' accumulators of each arc, read from both runs' logs/network_windup_arcs.csv
+(network.trace_windup_arcs: round(cycles_A - cycles_B) at an anchor epoch common to the arc in both runs; a link with
+no common anchor is dropped); --born-after keeps only the arcs both runs start together, which needs neither.
 
 Printed per band: epochs, common links by kind (both ring-fix links, ring-fix in A and tree in B, tree in A and ring-fix
 in B, both tree links), checks, failing; and the first failing loops (epoch, band, the closing link and its D against
@@ -125,6 +128,54 @@ class WindupTruth:
         return None if w is None else int(math.floor(w + 0.5))
 
 
+class WindupTrace:
+    """A run's wind-up accumulators per arc (logs/network_windup_arcs.csv, network.trace_windup_arcs): each arc's start
+    and its accumulated angle (cycles) at every anchor epoch."""
+
+    def __init__(self, run):
+        starts = collections.defaultdict(set)
+        self.anchors = collections.defaultdict(dict)
+        path = os.path.join(run, "logs", "network_windup_arcs.csv")
+        if not os.path.exists(path):
+            raise SystemExit("no wind-up arc trace at %s (run with network.trace_windup_arcs)" % path)
+        with open(path, newline="") as fh:
+            for r in csv.DictReader(fh):
+                key = (r["station"], r["sat"])
+                starts[key].add(round(float(r["start_tow"]), 3))
+                if r["kind"] == "anchor":
+                    self.anchors[key][round(float(r["tow"]), 3)] = float(r["cycles"])
+        self.starts = {k: sorted(v) for k, v in starts.items()}
+
+    def arc(self, key, tow):
+        """(start, end) of the arc of `key` that covers `tow` (end: the next start, or infinity); None if untracked."""
+        s = self.starts.get(key)
+        if not s:
+            return None
+        start, end = None, math.inf
+        for t0 in s:
+            if t0 <= tow + 1e-6:
+                start = t0
+            elif start is not None:
+                end = t0
+                break
+        return None if start is None else (start, end)
+
+
+def windup_whole_cycles(ta, tb, key, tow):
+    """round(cycles_A - cycles_B) of the arc of `key` covering `tow` in both runs, at their first common anchor epoch,
+    with the number of common anchors that disagree with it; (None, 0) when the arc has no common anchor."""
+    aa, ab = ta.arc(key, tow), tb.arc(key, tow)
+    if aa is None or ab is None:
+        return None, 0
+    lo, hi = max(aa[0], ab[0]), min(aa[1], ab[1])
+    xa, xb = ta.anchors.get(key, {}), tb.anchors.get(key, {})
+    common = sorted(t for t in xa if t in xb and lo - 1e-6 <= t < hi)
+    if not common:
+        return None, 0
+    ks = [int(round(xa[t] - xb[t])) for t in common]
+    return ks[0], sum(1 for k in ks if k != ks[0])
+
+
 def check_epoch(a, b):
     """(checks, failures, kinds) for one band at one epoch: a and b map (station, sat) -> (integer, kind)."""
     common = [k for k in a if k in b]
@@ -156,14 +207,17 @@ def check_epoch(a, b):
     return checks, fails, kinds
 
 
-def audit(run_a, run_b, states, windup_fixture=None, born_after=None):
+def audit(run_a, run_b, states, windup_fixture=None, born_after=None, windup_trace=False):
     A, B = read_run(run_a, states), read_run(run_b, states)
     starts_a = starts_b = None
     wt = WindupTruth(windup_fixture) if windup_fixture else None
-    if wt is not None or born_after is not None:
+    ta = tb = None
+    if windup_trace:
+        ta, tb = WindupTrace(run_a), WindupTrace(run_b)
+    if wt is not None or born_after is not None or ta is not None:
         starts_a, starts_b = arc_starts(run_a), arc_starts(run_b)
     per_band = collections.defaultdict(lambda: {"epochs": 0, "checks": 0, "failing": 0, "kinds": collections.Counter(),
-                                                "dropped": 0})
+                                                "dropped": 0, "no_anchor": 0, "anchor_disagree": 0})
     failures = []
     for tow in sorted(set(A) & set(B)):
         for band in sorted(set(A[tow]) & set(B[tow])):
@@ -186,6 +240,16 @@ def audit(run_a, run_b, states, windup_fixture=None, born_after=None):
                             continue
                         # the producer's integer of an arc carries its branch: remove each run's own
                         na, nb = na - ka, nb - kb
+                    if ta is not None:
+                        k, bad = windup_whole_cycles(ta, tb, key, tow)
+                        if k is None:
+                            per_band[band]["dropped"] += 1
+                            per_band[band]["no_anchor"] += 1
+                            continue
+                        per_band[band]["anchor_disagree"] += bad
+                        # The applied wind-up of A exceeds B's by k whole cycles; the integers absorb it with the
+                        # opposite sign, so A's integer plus k is in B's wind-up branch.
+                        na = na + k
                     a2[key], b2[key] = (na, a_links[key][1]), (nb, b_links[key][1])
                 a_links, b_links = a2, b2
             checks, fails, kinds = check_epoch(a_links, b_links)
@@ -226,12 +290,17 @@ def main():
                     "arc (truth_windup.csv at the run's own start of the arc, from logs/network_slip_raw.csv)")
     ap.add_argument("--born-after", type=float, metavar="TOW", help="compare only arcs that start at or after "
                     "this time of week in both runs (the same wind-up branch in both; usable without truth)")
+    ap.add_argument("--windup-trace", action="store_true", help="remove the whole cycles between the two runs' wind-up "
+                    "accumulators of each arc, from both runs' logs/network_windup_arcs.csv (network.trace_windup_arcs)")
     ap.add_argument("--json")
     a = ap.parse_args()
     ra, rb = resolve(a.run_a), resolve(a.run_b)
-    per_band, failures = audit(ra, rb, set(a.states.split(",")), a.windup, a.born_after)
+    if a.windup and a.windup_trace:
+        raise SystemExit("--windup and --windup-trace remove the same branches two ways: pick one")
+    per_band, failures = audit(ra, rb, set(a.states.split(",")), a.windup, a.born_after, a.windup_trace)
     print("== two-run audit: %s  vs  %s  (states %s%s%s)" % (ra, rb, a.states,
-          ", wind-up branches removed from %s" % a.windup if a.windup else "",
+          ", wind-up branches removed from %s" % a.windup if a.windup else
+          (", wind-up whole cycles removed from the runs' traces" if a.windup_trace else ""),
           ", arcs born after TOW %.0f" % a.born_after if a.born_after is not None else ""))
     tot_c = tot_f = 0
     for band, pb in sorted(per_band.items()):
@@ -242,6 +311,13 @@ def main():
         tot_c += pb["checks"]
         tot_f += pb["failing"]
     print("   total checks %d, failing %d" % (tot_c, tot_f))
+    if a.windup_trace:
+        print("   links without a common anchor epoch (dropped): %d; common anchors disagreeing with the first: %d" % (
+            sum(v["no_anchor"] for v in per_band.values()), sum(v["anchor_disagree"] for v in per_band.values())))
+    sizes = collections.Counter((f["band"], f["d"] - f["potentials"]) for f in failures)
+    if sizes:
+        print("   failing closures by band and size: " + ", ".join(
+            "%s %+d: %d" % (b, z, n) for (b, z), n in sorted(sizes.items())))
     for f in failures[:20]:
         print("   FAIL tow %.0f %s %s %s: D %d against the potentials' %d" % (
             f["tow"], f["band"], f["station"], f["sat"], f["d"], f["potentials"]))
@@ -249,6 +325,8 @@ def main():
         with open(a.json, "w") as fh:
             json.dump({"run_a": ra, "run_b": rb, "states": a.states,
                        "bands": {b: {"epochs": v["epochs"], "checks": v["checks"], "failing": v["failing"],
+                                     "dropped": v["dropped"], "no_anchor": v["no_anchor"],
+                                     "anchor_disagree": v["anchor_disagree"],
                                      "kinds": {"%s-%s" % kk: n for kk, n in v["kinds"].items()}}
                                  for b, v in per_band.items()},
                        "failures": failures}, fh, indent=1)

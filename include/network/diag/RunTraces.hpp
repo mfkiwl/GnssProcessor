@@ -710,6 +710,10 @@ namespace GnssProcessor {
         /// Every receiver phase-bias state of an eq34 run (network.trace_rpb_states).
         std::ofstream rpb_states_trace;
         const std::filesystem::path rpb_states_trace_path;   ///< path of network_rpb_states.csv
+        /// The stations' wind-up accumulators per arc: each arc's start and its accumulated angle at
+        /// every anchor epoch (network.trace_windup_arcs; network/diag/WindupArcs.hpp).
+        std::ofstream windup_arcs_trace;
+        const std::filesystem::path windup_arcs_trace_path;  ///< path of network_windup_arcs.csv
         /// Per-station residual field (L13; network.trace_station_residuals): every
         /// post-fit RAIM cell (non-pivot station x sat) with s_raw, s_norm and σ̂0.
         /// A heavy, opt-in trace.

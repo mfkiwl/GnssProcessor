@@ -391,6 +391,7 @@ NetworkKnobs NetworkKnobs::snapshot(const GnssConfig& config_, const NetworkConf
     k.trace_chain_datum = k.phase_datum_eq34 && nc.trace_chain_datum;
     k.trace_rpb_states  = k.phase_datum_eq34 && nc.trace_rpb_states;
     k.trace_pb_prehold  = nc.trace_pb_prehold;
+    k.trace_windup_arcs = nc.trace_windup_arcs;
     k.phase_datum_prioritized = config_.networkPhaseDatumPrioritized() || k.phase_datum_eq34;
     // Resolved once for the run: the datum-station slip path exists only under
     // the legacy pivot datum.  Every no-pivot datum already runs the slip loops from

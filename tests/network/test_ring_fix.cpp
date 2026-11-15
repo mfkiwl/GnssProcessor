@@ -835,3 +835,44 @@ TEST(RingFixO1, ThePairListNamesTheFamiliesConsidered) {
     EXPECT_FALSE(rf.pairConsidered("G", "L1C", "L2W"));
     EXPECT_FALSE(rf.pairConsidered("E", "L1C", "L5Q"));
 }
+
+// ---- Stage O2: the odds gate's factor on the formal sigmas ----
+
+TEST(RingFixO2, TheSigmaScaleDividesBothLogOddsByItsSquareAndKeepsTheFormalSigmas) {
+    const double r = kL2 / kL1, a = r / (r - 1.0), b = -1.0 / (r - 1.0);
+    const double v = 0.0064 / (a * a + b * b);   // sigma_if 0.08 cycle
+    const RingFixGate g1 = ringFixGate(10.0 + 0.05 / a, 7.0, v, 0.0, v, kL1, kL2);
+    const RingFixGate g0 = ringFixGate(10.0 + 0.05 / a, 7.0, v, 0.0, v, kL1, kL2, 1.0);
+    const RingFixGate g2 = ringFixGate(10.0 + 0.05 / a, 7.0, v, 0.0, v, kL1, kL2, 2.0);
+    ASSERT_TRUE(g1.valid && g2.valid);
+    // A scale of 1 is the formal gate, bit for bit.
+    EXPECT_EQ(g0.log_odds_if, g1.log_odds_if);
+    EXPECT_EQ(g0.log_odds_wl, g1.log_odds_wl);
+    // A scale of 2 divides both log-odds by 4; the sigmas, the fractions and the frozen pass are unchanged.
+    EXPECT_NEAR(g2.log_odds_if, g1.log_odds_if / 4.0, 1e-9 * g1.log_odds_if);
+    EXPECT_NEAR(g2.log_odds_wl, g1.log_odds_wl / 4.0, 1e-9 * g1.log_odds_wl);
+    EXPECT_EQ(g2.sigma_if, g1.sigma_if);
+    EXPECT_EQ(g2.sigma_wl, g1.sigma_wl);
+    EXPECT_EQ(g2.frac_if, g1.frac_if);
+    EXPECT_EQ(g2.pass, g1.pass);
+}
+
+TEST(RingFixO2, ALinkTheFormalOddsTakeIsRefusedAtThreeTimesTheSigma) {
+    // sigma_if 0.08 cycle at fraction 0: log-odds 78 at the formal sigma, 8.7 at three times it (< ln 1e6).
+    double now = 100000.0;
+    NetworkRingFix formal = stateWithHistory(kId, now), scaled = stateWithHistory(kId, now);
+    formal.gate_rule = RingFixGateRule::Odds;
+    scaled.gate_rule = RingFixGateRule::Odds;
+    scaled.sigma_scale = 3.0;
+    RingFixDecideObs o = obsNear(kId, 10, 7, 0.0, 1e-6);
+    const double r = kL2 / kL1, a = r / (r - 1.0), b = -1.0 / (r - 1.0);
+    const double v = 0.0064 / (a * a + b * b);
+    o.q11 = v; o.q12 = 0.0; o.q22 = v;
+    const auto ef = ringFixDecideStep(formal, {o}, now);
+    ASSERT_EQ(ef.size(), 1u);
+    EXPECT_EQ(ef[0].refuse, RingFixRefuse::Persist) << "passed the odds gate, the count begins";
+    const auto es = ringFixDecideStep(scaled, {o}, now);
+    ASSERT_EQ(es.size(), 1u);
+    EXPECT_EQ(es[0].refuse, RingFixRefuse::Odds);
+    EXPECT_NEAR(es[0].gate.sigma_if, 0.08, 1e-9) << "the event keeps the formal sigma";
+}

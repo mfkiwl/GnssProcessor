@@ -633,4 +633,58 @@ TEST(WindUpBridgeConfig, UnusableLimitsFallBackToTheDefaults) {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// WindUpArcAccumulator: the accumulator's arcs as GnssCorrections::windUpArcs reads them
+// ---------------------------------------------------------------------------
+
+TEST(WindUpArcAccumulator, AnArcKeepsItsStartThroughUnwrapsAndABridgeAndARestartStartsANewOne) {
+    const Scene sc;
+    const double t0 = kWeek * 604800.0 + kTow0;
+    LogManager log;
+    GnssCorrections gc(log);
+    EXPECT_TRUE(gc.windUpArcs().empty());
+    feed(sc, gc, 0.0, 600.0, nullptr);
+    auto arcs = gc.windUpArcs();
+    ASSERT_EQ(arcs.size(), 1u);
+    EXPECT_EQ(arcs[0].first, "E11");
+    EXPECT_DOUBLE_EQ(arcs[0].second.start_epoch_s, t0);
+    EXPECT_DOUBLE_EQ(arcs[0].second.epoch_s, t0 + 600.0);
+    // The angle is the applied correction in cycles (the same epoch's second call reuses it).
+    EXPECT_NEAR(arcs[0].second.cycles, sc.call(gc, 600.0, nullptr) / kLambda, 1e-12);
+    // A gap beyond the horizon restarts the accumulator from the raw angle: a new arc.
+    sc.call(gc, 1200.0, nullptr);
+    arcs = gc.windUpArcs();
+    ASSERT_EQ(arcs.size(), 1u);
+    EXPECT_DOUBLE_EQ(arcs[0].second.start_epoch_s, t0 + 1200.0);
+    EXPECT_LE(std::abs(arcs[0].second.cycles), 0.5 + 1e-12);
+    // A bridged gap keeps the arc's start.
+    LogManager log_b;
+    GnssCorrections gb(log_b);
+    gb.setSatStateProvider(sc.provider());
+    WB::Options opt;   // bridged range [300, 900) s
+    feed(sc, gb, 0.0, 300.0, &opt);
+    sc.call(gb, 900.0, &opt);
+    ASSERT_EQ(gb.windUpBridgeCounters().bridged, 1);
+    EXPECT_DOUBLE_EQ(gb.windUpArcs()[0].second.start_epoch_s, t0);
+}
+
+TEST(WindUpArcAccumulator, TwoArcsStartedAtDifferentEpochsDifferByWholeCyclesThroughTheirCommonLife) {
+    for (const double theta0 : { 0.0, 100.0, 200.0, 300.0 }) {
+        const Scene sc(theta0);
+        LogManager log_a, log_b;
+        GnssCorrections a(log_a), b(log_b);
+        feed(sc, a, 0.0, 270.0, nullptr);   // run A starts the arc at the first epoch
+        double k_first = 0.0;
+        for (double dt = 300.0; dt <= 1500.0 + 1e-9; dt += 30.0) {   // run B joins at 300 s
+            sc.call(a, dt, nullptr);
+            sc.call(b, dt, nullptr);
+            const double d = a.windUpArcs()[0].second.cycles - b.windUpArcs()[0].second.cycles;
+            EXPECT_NEAR(d, std::round(d), 1e-9) << "theta0 " << theta0 << " dt " << dt;
+            if (dt == 300.0) k_first = std::round(d);
+            EXPECT_EQ(std::round(d), k_first) << "the whole number holds through the common life";
+        }
+    }
+}
+
 }  // namespace GnssProcessor

@@ -1525,6 +1525,13 @@ namespace GnssProcessor {
             rf.wl_frac_max = jval<double>(json, "network.ring_fix.wl_frac_max", "network_ring_fix_wl_frac_max", 0.0);
             if (!(rf.wl_frac_max >= 0.0 && rf.wl_frac_max < 0.5))
                 throw std::runtime_error("network.ring_fix.wl_frac_max must be 0 (no bound) or in (0, 0.5) cycle.");
+            rf.sigma_scale = jval<double>(json, "network.ring_fix.sigma_scale", "network_ring_fix_sigma_scale", 1.0);
+            if (!(rf.sigma_scale >= 1.0 && rf.sigma_scale <= 100.0))
+                throw std::runtime_error("network.ring_fix.sigma_scale must be in [1, 100] (a factor on the formal "
+                                         "sigmas of the odds gate).");
+            if (rf.sigma_scale != 1.0 && rf.gate != "odds")
+                throw std::runtime_error("network.ring_fix.sigma_scale scales the odds gate's sigmas: it needs "
+                                         "network.ring_fix.gate \"odds\".");
             rf.mask_slip_arc = jval<std::string>(json, "network.ring_fix.mask_slip_arc",
                                                  "network_ring_fix_mask_slip_arc", std::string{});
             rf.mask_slip_tow = jval<double>(json, "network.ring_fix.mask_slip_tow", "network_ring_fix_mask_slip_tow",
@@ -3221,6 +3228,8 @@ namespace GnssProcessor {
             jval<bool>(json, "network.trace_pb_prehold", "trace_pb_prehold", false);
         network_config_.trace_rpb_states =
             jval<bool>(json, "network.trace_rpb_states", "trace_rpb_states", false);
+        network_config_.trace_windup_arcs =
+            jval<bool>(json, "network.trace_windup_arcs", "trace_windup_arcs", false);
         if (network_config_.trace_chain_datum)
             log->info("Network: eq34 chain-frame observatory ENABLED — network_chain_edges.csv "
                       "(every tree edge with its chain-event row and legacy step), "
@@ -3236,6 +3245,9 @@ namespace GnssProcessor {
         if (network_config_.trace_rpb_states)
             log->info("Network: receiver phase-bias trace ENABLED — network_rpb_states.csv, with "
                       "the time-link NEES at the run end.");
+        if (network_config_.trace_windup_arcs)
+            log->info("Network: wind-up arc trace ENABLED: network_windup_arcs.csv, each station's wind-up "
+                      "accumulator at every arc start and every anchor epoch (network/diag/WindupArcs.hpp).");
         // Sink dependency (deferred from its arming block above,
         // because this toggle is parsed only here).  Invariant #4: an armed instrument
         // whose output has nowhere to go has to say so.
@@ -10858,9 +10870,11 @@ namespace GnssProcessor {
                    || network_config_.ring_fix.order != "ring" || network_config_.ring_fix.gate != "sigma"
                    || !network_config_.ring_fix.truth_root.empty() || network_config_.ring_fix.oracle_until_s > 0.0
                    || network_config_.ring_fix.held_first || !network_config_.ring_fix.pairs.empty()
-                   || network_config_.ring_fix.wl_frac_max > 0.0 || !network_config_.ring_fix.mask_slip_arc.empty()) {
+                   || network_config_.ring_fix.wl_frac_max > 0.0 || !network_config_.ring_fix.mask_slip_arc.empty()
+                   || network_config_.ring_fix.sigma_scale != 1.0) {
             log->warn("Network: network.ring_fix.rule / order / gate / audit_frame_file / truth_root / oracle_until_s / "
-                      "held_first / pairs / wl_frac_max / mask_slip_arc are INERT without network.ring_fix.enable.");
+                      "held_first / pairs / wl_frac_max / mask_slip_arc / sigma_scale are INERT without "
+                      "network.ring_fix.enable.");
         }
 
         // Two-edge continuous handover: inert guards, then the arming line.  Follows the

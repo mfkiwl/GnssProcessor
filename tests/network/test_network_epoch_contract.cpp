@@ -79,6 +79,7 @@
 #include "network/solve/SolveStations.hpp"
 #include "network/diag/StashStatus.hpp"
 #include "network/diag/StationBlock.hpp"
+#include "network/diag/WindupArcs.hpp"
 #include "network/driver/EpochAdmission.hpp"
 #include "network/ar/AmbFloat.hpp"
 #include "network/diag/AmbStateTrace.hpp"
@@ -318,6 +319,7 @@ static_assert(std::is_same_v<decltype(static_cast<NetworkEpochObserver>(&network
 static_assert(std::is_same_v<decltype(static_cast<NetworkEpochObserver>(&networkAmbStateTrace)), NetworkEpochObserver>);
 static_assert(std::is_same_v<decltype(static_cast<NetworkEpochObserver>(&networkChainFrameObserve)), NetworkEpochObserver>);
 static_assert(std::is_same_v<decltype(static_cast<NetworkEpochObserver>(&net::networkEntitiesReachSample)), NetworkEpochObserver>);
+static_assert(std::is_same_v<decltype(static_cast<NetworkEpochObserver>(&networkWindupArcsTrace)), NetworkEpochObserver>);
 
 // The harvest by carried kind.  The orchestrator and the 19 functions it
 // calls take the epoch form and no epoch output (the harvest writes run state only); the two

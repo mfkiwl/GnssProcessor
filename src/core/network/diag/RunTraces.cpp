@@ -66,6 +66,7 @@ NetworkRunTraces::NetworkRunTraces(std::filesystem::path log_dir)
       ring_fix_trace_path(log_dir_ / "network_ring_fix.csv"),
       pb_prehold_trace_path(log_dir_ / "network_pb_prehold.csv"),
       rpb_states_trace_path(log_dir_ / "network_rpb_states.csv"),
+      windup_arcs_trace_path(log_dir_ / "network_windup_arcs.csv"),
       station_res_trace_path(log_dir_ / "network_station_residuals.csv"),
       raim_redun_trace_path(log_dir_ / "network_raim_redundancy.csv"),
       station_factor_trace_path(log_dir_ / "network_station_factor.csv"),
@@ -1094,6 +1095,13 @@ void NetworkRunTraces::openAll(const GnssConfig& config_, const NetworkConfig& n
         else
             log->warn("Network: failed to open receiver phase-bias trace {}",
                       rpb_states_trace_path.string());
+    }
+    if (nc.trace_windup_arcs) {
+        windup_arcs_trace.open(windup_arcs_trace_path);
+        if (windup_arcs_trace)
+            windup_arcs_trace << "week,tow,station,sat,kind,cycles,start_tow\n";
+        else
+            log->warn("Network: failed to open wind-up arc trace {}", windup_arcs_trace_path.string());
     }
     if (nc.trace_station_residuals) {
         station_res_trace.open(station_res_trace_path);

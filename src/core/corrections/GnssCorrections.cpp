@@ -2015,7 +2015,7 @@ namespace GnssProcessor {
             if (pw_it == prev_windup_.end()) {
                 // First epoch this satellite is seen: seed the accumulator
                 // with the raw atan2 angle (nothing to unwrap against yet).
-                prev_windup_[satellite] = { windUp_c, epoch_s };
+                prev_windup_[satellite] = { windUp_c, epoch_s, epoch_s };
             } else if (epoch_s == pw_it->second.epoch_s) {
                 // Same epoch.  computePhaseWindUp() is called once per signal
                 // and once per measurement-rebuild / relinearization pass; the
@@ -2058,7 +2058,9 @@ namespace GnssProcessor {
                         "continuity threshold: restarting accumulation",
                         gap, satellite, kMaxGapSeconds);
                 }
-                prev_windup_[satellite] = { windUp_c, epoch_s };
+                // A restart starts a new arc; an unwrap or a bridged gap keeps the arc's start.
+                const double start_s = restarted ? epoch_s : pw_it->second.start_epoch_s;
+                prev_windup_[satellite] = { windUp_c, epoch_s, start_s };
             }
         }
 
@@ -2212,6 +2214,15 @@ namespace GnssProcessor {
         if (res.outcome != WindUpBridge::Outcome::Bridged) return false;
         angle_out = res.angle_rad;
         return true;
+    }
+
+    std::vector<std::pair<std::string, GnssCorrections::WindUpArc>> GnssCorrections::windUpArcs() const {
+        std::vector<std::pair<std::string, WindUpArc>> out;
+        out.reserve(prev_windup_.size());
+        for (const auto& [sat, s] : prev_windup_)
+            out.push_back({ sat, { s.angle / (2.0 * Constants::PI), s.epoch_s, s.start_epoch_s } });
+        std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        return out;
     }
 
     bool GnssCorrections::enableWindUpTracing(const std::filesystem::path& log_dir) {

@@ -395,6 +395,7 @@ add_library(gnss_core STATIC
     src/core/network/assembly/ParamInventory.cpp
     src/core/network/assembly/Contributions.cpp
     src/core/network/diag/AmbStateTrace.cpp
+    src/core/network/diag/WindupArcs.cpp
     src/core/network/ar/AmbFloat.cpp
     src/core/network/assembly/BiasAdmission.cpp
     src/core/filter/NeqAccumulator.cpp

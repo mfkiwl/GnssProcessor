@@ -1910,6 +1910,9 @@ namespace GnssProcessor {
         /// @c network.ring_fix.wl_frac_max: a bound on the wide lane's fraction at the decision (cycles, in (0, 0.5));
         /// 0 (default): no bound.
         double wl_frac_max{ 0.0 };
+        /// @c network.ring_fix.sigma_scale: the odds gate computes the log-odds of N1 and of the wide lane with this
+        /// factor times their formal sigmas (in [1, 100]; needs gate "odds").  1 (default): the formal sigmas.
+        double sigma_scale{ 1.0 };
         /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
         /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
         /// latch (the residual monitor's path).  Empty (default): no mask.
@@ -3702,6 +3705,12 @@ namespace GnssProcessor {
         /// Measure-only.  Inert unless @c network.phase_datum_eq34.  Off by default,
         /// byte-identical when off.
         bool trace_rpb_states{ false };
+        /// Emit @c network_windup_arcs.csv: each station's wind-up accumulator per arc, a row at the
+        /// arc's start and one at every anchor epoch with the accumulated angle, so that two runs'
+        /// integers can be compared with each arc's whole-cycle wind-up difference removed
+        /// (network/diag/WindupArcs.hpp).  Measure-only; empty unless
+        /// @c estimation.accumulate_phase_windup.  Off by default, byte-identical when off.
+        bool trace_windup_arcs{ false };
         bool trace_events{ false };       ///< Emit @c network_events.csv (L2): one structured long-format row per discrete QC action (tiers T1 IF-slip … T6 clock-monitor, plus GATE / SIGMA0 / PIVOT / RETRO), in place of scraping spdlog with regular expressions for which satellite, station or arc was acted on and when.  Pivot handover and retro-bump arming are logged nowhere else.  Rows are written even on epochs that are later withheld (they are part of the disposition record).  O(QC events); off by default, byte-identical when off (no new file).
         /// Replay a product file that has no S contract line.  Such a
         /// wire (from before the S contract line) replays with the default emitter (no

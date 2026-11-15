@@ -32,6 +32,7 @@
 #include "network/qc/RhsAttrib.hpp"
 #include "network/assembly/SecondPhaseScope.hpp"
 #include "network/diag/StationBlock.hpp"
+#include "network/diag/WindupArcs.hpp"
 
 #include <gtest/gtest.h>
 
@@ -77,6 +78,7 @@ const Pinned kPinned[] = {
     {"networkAmbStateTrace",                Slot::StashTail,     &networkAmbStateTrace},
     {"networkChainFrameObserve",            Slot::StashTail,     &networkChainFrameObserve},
     {"networkEntitiesReachSample",          Slot::StashTail,     &net::networkEntitiesReachSample},
+    {"networkWindupArcsTrace",              Slot::StashTail,     &networkWindupArcsTrace},
 };
 
 /// The row named @p name, or the table's size when no row has that name.

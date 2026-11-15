@@ -219,6 +219,9 @@ namespace GnssProcessor {
 		const std::map<std::string, GnssCorrections::WuRestart>& wuRestarts() const;
 		/// @brief Clear the restart ledger (called when the response consumes it).
 		void clearWuRestarts();
+		/// @brief The wind-up accumulator of every satellite seen (see GnssCorrections::windUpArcs).
+		/// @return One entry per satellite, sorted by identifier; empty in fractional mode.
+		std::vector<std::pair<std::string, GnssCorrections::WindUpArc>> windUpArcs() const;
 		/// @brief Install the satellite-state source of the wind-up gap bridge (see
 		///        GnssCorrections::setSatStateProvider); inert unless
 		///        @c estimation.phase_windup_gap_bridge is on.

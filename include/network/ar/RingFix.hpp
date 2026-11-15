@@ -190,11 +190,14 @@ struct RingFixGate {
  * @param q22     Band-2 variance (cycles^2).
  * @param lambda1 Band-1 wavelength (m).
  * @param lambda2 Band-2 wavelength (m), longer than band 1's.
+ * @param sigma_scale A factor on both formal sigmas in the two log-odds (network.ring_fix.sigma_scale;
+ *        1, the default, uses the formal sigmas).  @c sigma_if, @c sigma_wl and @c pass keep the
+ *        formal sigmas.
  * @return The reading; @c valid false for non-finite inputs, a negative variance of the row or
  *         wavelengths that do not order.
  */
 RingFixGate ringFixGate(double f1, double f2, double q11, double q12, double q22,
-                        double lambda1, double lambda2);
+                        double lambda1, double lambda2, double sigma_scale = 1.0);
 
 // ---- Rings and candidates ---------------------------------------------------------------------
 
@@ -435,6 +438,7 @@ struct NetworkRingFix {
     /// The pair families considered (network.ring_fix.pairs), as (constellation key, signal 1, signal 2); empty: all.
     std::set<std::tuple<std::string, std::string, std::string>> pairs;
     double      wl_frac_max{0.0};           ///< The decision's bound on the wide lane's fraction (cycles; 0: none).
+    double      sigma_scale{1.0};           ///< The odds gate's factor on the formal sigmas (network.ring_fix.sigma_scale).
     // Simulation only: the slip mask (network.ring_fix.mask_slip_*).
     int         mask_station{-1};           ///< The masked arc's station (roster index; -1: no mask).
     std::string mask_sat;                   ///< The masked arc's satellite.

@@ -227,6 +227,12 @@ void networkRingFixArm(NetworkRun& run) {
     if (rf->wl_frac_max > 0.0)
         log->warn("Network (ring fix): WIDE-LANE BOUND: a link every other test would decide is refused while its wide "
                   "lane's fraction exceeds {:.3f} cycle (refusal wl_fraction).", rf->wl_frac_max);
+    // Stage O2: the odds gate's factor on the formal sigmas, named only when set.
+    rf->sigma_scale = nc.ring_fix.sigma_scale;
+    if (rf->sigma_scale != 1.0)
+        log->warn("Network (ring fix): SIGMA SCALE {:.2f}: the log-odds of N1 and of the wide lane are computed with "
+                  "{:.2f} times their formal sigmas (the trace keeps the formal sigmas).", rf->sigma_scale,
+                  rf->sigma_scale);
     // Stage N2c, simulation only: the slip mask.
     if (!nc.ring_fix.mask_slip_arc.empty()) {
         const std::string& arc = nc.ring_fix.mask_slip_arc;
@@ -672,7 +678,8 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
             if (o.have_float) {
                 o.f1 = r.float_cyc_1; o.f2 = r.float_cyc_2;
                 o.q11 = r.q11; o.q12 = r.q12; o.q22 = r.q22;
-                gate_of[o.id] = ringFixGate(o.f1, o.f2, o.q11, o.q12, o.q22, o.lambda1, o.lambda2);
+                gate_of[o.id] = ringFixGate(o.f1, o.f2, o.q11, o.q12, o.q22, o.lambda1, o.lambda2,
+                                            rf.sigma_scale);
             }
             const std::string g = groupOf(r.sat, r.sig1);
             const auto rg = rings.find(g);

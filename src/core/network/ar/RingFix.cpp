@@ -53,7 +53,7 @@ const char* ringFixRefuseName(RingFixRefuse c) {
 }
 
 RingFixGate ringFixGate(double f1, double f2, double q11, double q12, double q22,
-                        double lambda1, double lambda2) {
+                        double lambda1, double lambda2, double sigma_scale) {
     RingFixGate g;
     if (!(std::isfinite(f1) && std::isfinite(f2) && std::isfinite(q11) && std::isfinite(q12)
           && std::isfinite(q22) && std::isfinite(lambda1) && std::isfinite(lambda2)))
@@ -82,8 +82,9 @@ RingFixGate ringFixGate(double f1, double f2, double q11, double q12, double q22
         return sigma > 0.0 ? (1.0 - 2.0 * d) / (2.0 * sigma * sigma)
                            : (d < 0.5 ? std::numeric_limits<double>::infinity() : 0.0);
     };
-    g.log_odds_if = logOdds(g.frac_if, g.sigma_if);
-    g.log_odds_wl = logOdds(g.frac_wl, g.sigma_wl);
+    // A scale of 1 multiplies exactly, so the default reproduces the formal-sigma odds bit for bit.
+    g.log_odds_if = logOdds(g.frac_if, g.sigma_if * sigma_scale);
+    g.log_odds_wl = logOdds(g.frac_wl, g.sigma_wl * sigma_scale);
     g.pass_odds = g.frac_if <= kRingFixMaxFracCyc && g.log_odds_if >= kRingFixMinLogOdds
                && g.log_odds_wl >= kRingFixMinLogOdds;
     return g;
@@ -266,7 +267,7 @@ std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
         const bool candidate = rf.order == RingFixOrder::Certain ? o.have_float : o.candidate;
         if (!candidate) { refuse(RingFixRefuse::NotCandidate); continue; }
         if (!o.have_float) { refuse(RingFixRefuse::NoFloat); continue; }
-        ev.gate = ringFixGate(o.f1, o.f2, o.q11, o.q12, o.q22, o.lambda1, o.lambda2);
+        ev.gate = ringFixGate(o.f1, o.f2, o.q11, o.q12, o.q22, o.lambda1, o.lambda2, rf.sigma_scale);
         if (!ev.gate.valid) { refuse(RingFixRefuse::NoFloat); continue; }
         bool decide = false;
         if (rf.rule == RingFixRule::Plain) {

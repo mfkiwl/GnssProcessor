@@ -914,6 +914,9 @@ namespace GnssProcessor {
         /// network.trace_pb_prehold: network_pb_prehold.csv, the emitted phase biases just before
         /// the phase-bias hold (any datum).
         bool trace_pb_prehold{};
+        /// network.trace_windup_arcs: network_windup_arcs.csv, the stations' wind-up accumulators
+        /// per arc (any datum; empty in fractional wind-up mode).
+        bool trace_windup_arcs{};
         bool phase_datum_prioritized{};   ///< network.phase_datum_prioritized, or implied by @ref GnssProcessor::NetworkKnobs::phase_datum_eq34 "phase_datum_eq34": per-(satellite, signal) anchor stations elected by descending coverage, decoupled from the clock pivot
         // --- eq34 reattach hygiene ---
         // All four are resolved against the datum mode: the loader already disarms them
