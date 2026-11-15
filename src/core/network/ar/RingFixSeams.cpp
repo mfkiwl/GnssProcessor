@@ -792,10 +792,12 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
               by_ring.empty() ? "none" : by_ring, first.empty() ? "none" : first, held_end,
               held_rings.empty() ? "none" : held_rings, C.held_link_epochs, C.rows_injected,
               C.rows_gauge_skipped, C.rows_no_column);
+    // A link that became a tree edge left the held set without a release (the chain pins it).
+    const std::string to_tree = C.to_tree > 0 ? fmt::format(" + to tree {}", C.to_tree) : std::string();
     log->warn("Network (ring fix): released {} ({}); {} carried entr(ies) re-opened by the release; "
-              "decided {} = released {} + held {}: {}.  Refused link-epochs: {}.",
-              rel_total, released, C.carry_reopened, C.decided, rel_total, held_end,
-              C.decided == rel_total + held_end ? "closed" : "NOT CLOSED", refused);
+              "decided {} = released {}{} + held {}: {}.  Refused link-epochs: {}.",
+              rel_total, released, C.carry_reopened, C.decided, rel_total, to_tree, held_end,
+              C.decided == rel_total + C.to_tree + held_end ? "closed" : "NOT CLOSED", refused);
     if (C.cuts > 0 || C.to_tree > 0 || C.inherited > 0 || C.root_kept > 0)
         log->warn("Network (ring fix, the chain's events): {} cut(s) on a band, {} with a known step ({} of 0); {} held "
                   "link(s) re-expressed, {} released across an unknown step; {} became tree edges; {} old host(s) "

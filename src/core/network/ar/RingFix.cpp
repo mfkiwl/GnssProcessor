@@ -554,11 +554,14 @@ void ringFixTruthObserve(RingFixTruth& T, int station, const std::string& sat, d
 
 bool ringFixTruthN(const RingFixTruth& T, int station, const std::string& sat, const std::string& signal,
                    double now_s, double tow, long long& n) {
+    // A slip stamped at an epoch is in that epoch's observation; the epoch's clock can sit a few
+    // microseconds before the stamp, so the bound takes half a second of slack.
+    constexpr double kSlipStampSlackS = 0.5;
     const auto a = T.arcs.find({station, sat, signal});
     if (a == T.arcs.end()) return false;
     long long v = a->second.n_int;
     for (const auto& [s, d] : a->second.slips) {
-        if (s > now_s) break;
+        if (s > now_s + kSlipStampSlackS) break;
         v += d;
     }
     const auto b = T.branches.find({station, sat});

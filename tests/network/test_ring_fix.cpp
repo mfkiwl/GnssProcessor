@@ -656,6 +656,10 @@ TEST(RingFixTruthModel, TheBranchTheSlipsAndTheCycle) {
     ringFixTruthObserve(T, 0, "G01", 800.0);   // a gap above 300 s: a new arc, branch round(-1.4) = -1
     ASSERT_TRUE(ringFixTruthN(T, 0, "G01", "L1C", 1000.0, 800.0, n));
     EXPECT_EQ(n, 100 + 2 - 1);                 // the slip at 1000 counts at 1000
+    ASSERT_TRUE(ringFixTruthN(T, 0, "G01", "L1C", 999.99999, 800.0, n));
+    EXPECT_EQ(n, 100 + 2 - 1);                 // and at an epoch clock a few microseconds before its stamp
+    ASSERT_TRUE(ringFixTruthN(T, 0, "G01", "L1C", 970.0, 800.0, n));
+    EXPECT_EQ(n, 100 - 1);                     // not at the epoch before
     EXPECT_FALSE(ringFixTruthN(T, 9, "G01", "L1C", 0.0, 0.0, n));
     // A 4-cycle: chord (1, G01) +1, path (1, G02) -1, (0, G02) +1, (0, G01) -1 with targets 3 and 4 on the path.
     const std::vector<std::tuple<int, std::string, std::string, int>> terms = {
