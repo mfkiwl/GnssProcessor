@@ -446,6 +446,13 @@ for _case, _file in IRDU_FRAME_PIN_FILES.items():
         '"sigma_m": 0.0001}]}' % IRDU_FRAME_PIN_TOW,
         "network.cycle_slip.oracle_truth_root=" + os.path.realpath(ROOT + "/runs/simarl_r3c").replace(os.sep, "/"),
         "network.cycle_slip.oracle_pin_frame_file=" + ROOT + "/config/sim/irdu/" + _file]
+# Card IRDU section 13 (part 5): one key on top of Q1 (the arm with the group fpin_nr3_all).  The generator takes one
+# change per arm and Q1 is itself a group, so each case is Q1's keys plus the key under test; on the plain chain arm
+# the same key is the arm's --knob.
+IRDU_P5_KEYS = {"iftd_off": "network.cycle_slip.if_phase_td=false",
+                "disc_off": "network.disc_threshold_frac_cycles=1000"}
+for _name, _kv in IRDU_P5_KEYS.items():
+    KNOB_GROUPS["fpin_nr3_all_" + _name] = KNOB_GROUPS["fpin_nr3_all"] + [_kv]
 
 
 def sha256_bytes(b):
