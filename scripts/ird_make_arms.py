@@ -507,6 +507,12 @@ for _bed in NRF_N2_BEDS + NRF_N2B_SLIP_BEDS:
                                           "network.ring_fix.truth_root=" + _nrf_fixture(_bed)]
     KNOB_GROUPS["nrf_hf_" + _bed] = KNOB_GROUPS["nrf_olt_" + _bed] + ["network.ring_fix.held_first=true"]
 KNOB_GROUPS["nrf_log_r3c"] = KNOB_GROUPS["nrf_olt_r3c"] + ["network.ring_fix.rule=log"]
+# Card NRF stage N3: the 6 h golden sim bed from a cold start; the bed keeps the golden's own fixture, which is also
+# the truth of the audit.
+NRF_GOLDEN_FIXTURE = "C:/GnssProcessor/runs/simnet60_quiet_col_24h"
+KNOB_GROUPS["nrf_olt_golden"] = ["network.ring_fix.enable=true", "network.ring_fix.order=certain",
+                                 "network.ring_fix.gate=odds", "network.ring_fix.truth_root=" + NRF_GOLDEN_FIXTURE]
+KNOB_GROUPS["nrf_hf_golden"] = KNOB_GROUPS["nrf_olt_golden"] + ["network.ring_fix.held_first=true"]
 
 
 def sha256_bytes(b):

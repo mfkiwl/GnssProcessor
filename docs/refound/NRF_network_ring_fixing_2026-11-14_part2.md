@@ -5,10 +5,10 @@
 - **id:** NRF-part2
 - **topic:** network-vehicle
 - **status:** open
-- **summary:** Section 13 of card NRF (2026-11-15): the results of stage N2, pre-registered in section 12 of [NRF](NRF_network_ring_fixing_2026-11-14.md). The ring fix with the order free and the odds gate (N1b-OL), the cut algebra of section 12 and a truth audit in every epoch's frame, on r3c (re-seats, returns, one true slip) and seven event beds: 0 wrong held integers on every cold-start arm (28 000 to 31 000 held link-epochs per bed). The ceiling (every link held at its true integer all run) takes 0 wrong. The steady-state harness (truth for 30 min, then the rule alone) FAILS: 68 wrong decisions after the cut-over. Bar I-b fails on every bed with and without the ring fix, at similar counts. Section 13.1 records the requesting session's re-grade; section 14 pre-registers stage N2b (held-first re-attachment, the oracle's epoch rule, the log rule, true slips on held links).
+- **summary:** Section 13 of card NRF (2026-11-15): the results of stage N2, pre-registered in section 12 of [NRF](NRF_network_ring_fixing_2026-11-14.md). The ring fix with the order free and the odds gate (N1b-OL), the cut algebra of section 12 and a truth audit in every epoch's frame, on r3c (re-seats, returns, one true slip) and seven event beds: 0 wrong held integers on every cold-start arm (28 000 to 31 000 held link-epochs per bed). The ceiling (every link held at its true integer all run) takes 0 wrong. The steady-state harness (truth for 30 min, then the rule alone) FAILS: 68 wrong decisions after the cut-over. Bar I-b fails on every bed with and without the ring fix, at similar counts. Section 13.1 records the requesting session's re-grade; section 14 pre-registers stage N2b (held-first re-attachment, the oracle's epoch rule, the log rule, true slips on held links). Section 15 (N2b): 0 wrong held integers on every arm (890 063 held link-epochs); held first keeps the held integers through re-seats wherever a held link is present (0 released at a cut on six beds against 160 to 188 as built; the 26 released on the two split beds were absent at their cut) and lifts the held share of the last 30 min to 62 to 84 % (30 to 61 % as built); the ceiling and the steady-state harness pass once a released link's carried entry is re-opened (the oracle's conflict was a stale entry with the hold's variance); true slips on held links are released at their epoch and held again at the right integer 14.5 to 15.5 min later. Section 16 pre-registers stage N3.
 - **source:** [NRF](NRF_network_ring_fixing_2026-11-14.md) sections 4, 10 to 12; [IRD](IRD_integer_recovering_datum_2026-10-13.md) section 9 (bar I-b); [IRDU part 3](IRDU_user_integers_on_the_chain_2026-11-14_part3.md) section 12.5 (Q4)
 
-**Outcome.** Question: do held integers survive the chain's events, and does a network that is integer stay integer by itself? From a cold start, on r3c and on seven event beds, the ring fix takes 0 wrong integers; every held link that crosses a cut with an unknown step is released at the cut, and re-hosts onto held links keep the frame. A network warmed by truth for 30 min and then left to the rule takes 68 wrong decisions within the next hour, for a reason not yet traced. Standing: default off; the steady-state harness needs a warm start of the network's own.
+**Outcome.** Question: do held integers survive the chain's events, and does a network that is integer stay integer by itself? From a cold start, on r3c and on seven event beds, the ring fix takes 0 wrong integers; every held link that crosses a cut with an unknown step is released at the cut, and re-hosts onto held links keep the frame. A network warmed by truth for 30 min and then left to the rule takes 68 wrong decisions within the next hour, for a reason not yet traced. Stage N2b (section 15) found the cause (a released link's carried entry kept the hold's variance), after which the warm-started network takes 0 wrong decisions, and held first keeps held integers through re-seats. Standing: default off; N3 next.
 
 Sections 1 to 12 are in [NRF](NRF_network_ring_fixing_2026-11-14.md). Results of this section are appended below.
 
@@ -110,3 +110,95 @@ The slip beds (`scripts/nrf_slip_bed.py`, `D:/GnssProcessorSupport/runs_nom/simn
 **Prediction (N2b-1).** On r3c with held-first, the held share in the last 30 min at least 85 % (61 % as built) and the depth-5 NL offset p50 at most 0.03 cycle in the last bin.
 
 **Not in this stage.** Tracing S40000SIM; old-host inheritance; I-b beyond its counts.
+
+## 15. 2026-11-15: stage N2b results
+
+**What ran.** Commit `bbeaa15` (the code and section 14, before any run), exe `gnss_processor_irdu_nrf6.exe` (sha256[:16] `f89c2de2dde740f7`), 30 runs of section 14's table under `D:/GnssProcessorSupport/runs_nom` (`_rap_nrf6*`); every run exit 0, 240 of 240 epochs emitted, `network_raim.csv` with 0 rows on every ring-fix arm. Grades in `runs_nom/_irdu_grades/nrf_n2b_*`. Reads: `scripts/nrf_reads.py` (new: held share by 15 min, releases by cause, re-attachments, the run-end lines, RAIM rows, epochs; it reproduces section 13.1's held share of N2-r3c, 0 4 12 25 43 59 71 51 %), `nrf_audit.py --fixture`, `irdu_stream_depth.py --fixture`, `simnet_chain_frame_grade.py`.
+
+**Gates: PASS.** The key off against N2's build (`nrf6off_r3c` against `nrf5off_r3c`): IDENTICAL whole. N1b-OL on the bed without re-seats (`nrf6_ol_nr3` against `nrf5_ol_nr3`): IDENTICAL whole. The log rule (`nrf6_log_r3c` against `nrf6off_r3c`): `products.txt` IDENTICAL; only the arm file, the RINGFIX rows of `network_events.csv` and the run-end lines differ. The log rule would have decided 198 links at 12 661 link-epochs, all at their true integers; 127 of those link-epochs carry integers other than the link's first (with nothing held, the frame moves at every cut with an unknown step).
+
+**The two corrections on N2's arms.** The control arms on this exe (`nrf6_olt_<bed>`) reproduce section 13's counts on every bed (decided and held link-epochs equal, for example 413 and 31 200 on r3c, 423 and 28 266 on ird_t2): the as-built walk made no nested cut on r3c and 4 on ird_ms, none of which changed a held link, and the release floor never bound there.
+
+**N2b-1, held-first re-attachment.**
+
+| bed | arm | decided | held link-epochs, wrong | releases: chain, gap, slip | cuts: held first (step 0), other known, unknown | re-attachments (held links kept) | usable held links released at a cut | held share, last 30 min |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| r3c | control | 413 | 31 200, 0 | 167, 28, 0 | 0, 36, 112 | 0 | 167 | 61.0 % |
+| r3c | held first | 423 | 38 241, 0 | 0, 33, 2 | 62 (62), 0, 72 | 31 (414) | 0 | 83.7 % |
+| ird_t2 | control | 423 | 28 266, 0 | 182, 27, 0 | 0, 32, 116 | 0 | 182 | 53.0 % |
+| ird_t2 | held first | 414 | 37 154, 0 | 0, 31, 1 | 64 (64), 0, 72 | 32 (479) | 0 | 79.7 % |
+| ird_tr | control | 409 | 30 358, 0 | 188, 29, 0 | 0, 34, 118 | 0 | 188 | 57.4 % |
+| ird_tr | held first | 410 | 36 879, 0 | 0, 33, 1 | 64 (64), 0, 72 | 32 (474) | 0 | 78.4 % |
+| ird_t3 | control | 415 | 30 735, 0 | 168, 28, 0 | 0, 38, 112 | 0 | 168 | 58.9 % |
+| ird_t3 | held first | 412 | 37 102, 0 | 0, 33, 1 | 64 (64), 0, 72 | 32 (444) | 0 | 78.9 % |
+| ird_rv16 | control | 404 | 29 814, 0 | 160, 28, 0 | 0, 34, 124 | 0 | 160 | 57.1 % |
+| ird_rv16 | held first | 418 | 36 949, 0 | 0, 30, 1 | 64 (64), 0, 76 | 32 (355) | 0 | 79.7 % |
+| ird_rg | control | 378 | 19 795, 0 | 171, 14, 1 | 0, 34, 142 | 0 | 170 | 29.9 % |
+| ird_rg | held first | 400 | 34 141, 0 | 0, 29, 1 | 72 (72), 0, 74 | 36 (686) | 0 | 71.0 % |
+| ird_ms | control | 351 | 27 611, 0 | 130, 28, 1 | 0, 32, 144 | 0 | 128 | 52.0 % |
+| ird_ms | held first | 348 | 31 297, 0 | 7, 29, 0 | 68 (68), 0, 92 | 34 (273) | 7 | 62.3 % |
+| ird_msx | control | 366 | 27 972, 0 | 132, 25, 0 | 0, 44, 128 | 0 | 130 | 50.7 % |
+| ird_msx | held first | 365 | 32 357, 0 | 25, 29, 0 | 70 (70), 0, 82 | 35 (312) | 19 | 62.3 % |
+
+- **B1 (0 wrong held integers): PASS** on r3c and the seven event beds. `nrf_audit.py --fixture` agrees with the code's audit to the count on the r3c arms (held first 38 241 and 0; control 31 200 and 0; ceiling 91 807 and 0; steady 72 018 and 0).
+- **B2 (0 held links released by a cut that a held link crossed): PASS on six beds, FAILED as read on ird_ms (7) and ird_msx (19).** Every one of those 26 links was absent at its cut: on ird_ms they are the crossing arcs the bed blanks at the thinning (TOW 264900), on ird_msx the crossing arcs blanked at the abrupt cut-off (TOW 265740), so no held link was present to carry the moved side. Counted on present links, the read is 0 on every bed; the frozen read counts absent links, and the record keeps it as FAILED. Six more links on ird_msx were released at the merge (TOW 266340) by N2's root-change rule, not by a cut: links inside the side that re-joins through an unknown step, whose integers the cut algebra keeps (both ends on the moved side).
+- **B3 (byte-identical when off): PASS** (the key-off gate).
+- Every held-first cut that the walk took first had a step of 0 (528 of 528 over the eight beds); 2 to 8 cuts per bed with a nested release on ird_rv16, ird_rg and ird_ms; the release floor bound 0 to 4 times per arm.
+- The slip releases (1 or 2 per held-first arm) are the producer's latch on S35000SIM G05 and G19 near the end of the runs (no true slip at that station in the fixtures): released, never held wrong.
+- **Prediction on r3c: half met.** The held share over the last 30 min is 83.7 % (predicted at least 85 %; 85 % in the last 15-min bin); the depth-5 NL offset p50 in the last bin is 0.013 cycle (predicted at most 0.03).
+- **The stream on r3c, NL offset p50 by 15 min (cycles):**
+
+| arm | all depths | depth 5 |
+| --- | --- | --- |
+| plain chain | 0.247 0.191 0.132 0.138 0.149 0.133 0.105 0.117 | 0.289 0.265 0.202 0.187 0.195 0.156 0.120 0.111 |
+| control (N1b-OL) | 0.247 0.166 0.106 0.060 0.047 0.023 0.017 0.022 | 0.289 0.238 0.174 0.112 0.120 0.030 0.023 0.085 |
+| held first | 0.247 0.166 0.060 0.046 0.035 0.016 0.013 0.012 | 0.289 0.238 0.085 0.068 0.056 0.019 0.017 0.013 |
+| ceiling (new build) | 0.024 0.018 0.016 0.016 0.016 0.014 0.014 0.014 | 0.017 0.015 0.017 0.017 0.018 0.016 0.015 0.015 |
+
+  The wide lane over all depths with held first: 0.179 0.109 0.078 0.073 0.041 0.035 0.035 0.033 (control 0.179 0.109 0.070 0.073 0.051 0.035 0.045 0.078).
+- **I-b (card IRD) by class:** still FAILED on every bed. Held first lowers the undeclared integer steps of every class against the plain arm (r3c, band 1: cut release 2 070 to 1 948, kept 2 247 to 1 640, non-event 6 856 to 4 914, rehost 2 019 to 1 896, returning 102 to 52); the steps are the chain's own, as section 13 found.
+
+**N2b-2 (i), the oracle's conflict: the cause found, and the bars PASS.** The cause is the one section 14 states (the stale entry with the hold's birth variance after a release). With the release floor and the epoch rule the ceiling (`nrf6_olc_r3c`) has 0 RAIM rows (N2: 8 255), 91 807 held link-epochs, 0 wrong, and its stream stays at its first bin's level (NL p50 over all depths 0.024 in the first bin, 0.014 to 0.018 after; N2: up to 0.260); 687 oracle holds were put off by one epoch and the floor re-opened 10 entries. N2-steady re-run (`nrf6_ols_r3c`): **0 wrong decisions** (N2: 68), 72 018 held link-epochs right, 0 monitor releases (N2: 125), 0 RAIM rows (N2: 8 080); after the cut-over 70.7 % of the chord link-epochs held (N2: 58.1 %), and a link born after the cut-over is held 17.0, 20.5, 24.0, 28.5 and 27.0 min later at the median on rings 2 to 6. Its depth-5 stream climbs to 0.096 in the last bin, where re-seats release held links (the steady arm has no held first).
+
+**N2b-2 (ii), the log rule: PASS** (the gate above).
+
+**N2b-3, true slips on held links from a cold start.**
+
+| bed | arm | the slipped link | other holds released, slip epoch and 4 after | RAIM rows, 10 min after (key off) | held again | stream's persistent step, satellite / receiver (cycles, L1 and L2) |
+| --- | --- | --- | --- | --- | --- | --- |
+| s1, L1 +25 on held S05000SIM-G26 | control, held first | released at the slip's epoch, cause slip (flagged) | 0 (one gap release elsewhere) | 0, 0 (1) | 15.5 min later, right | -0.03, -0.03 / -0.07, +0.06 (noise 0.03 to 0.05 per epoch) |
+| s2, L1 +1 and L2 +1 on held S05000SIM-G26 | control, held first | released at the slip's epoch, cause slip (flagged) | 0 | 0, 0 (0) | 14.5 min later, right | -0.03, -0.03 / -0.06, +0.05 |
+| s3, L1 +1 and L2 +1 on the tree edge S03000SIM-G25 | control | a tree edge, not held; de-seated at the slip's epoch | 38 (the held links across the moved side, unknown step) | 0 (0) | as a chord, 17.0 min later, right | +0.38, +0.76 / -0.37, -0.41 |
+| s3 | held first | as above; the moved side re-attached through the held link S01000SIM-G28 at step 0 | 0 (42 held links kept) | 0 (0) | as a chord, 20.5 min later, right | +0.09, +0.12 / -0.37, -0.41 |
+
+- **B1: PASS** (the held link released at the slip's epoch on s1 and s2, both slips flagged by the producer's latch; s3's slipped arc was a tree edge, and the held links across it were kept with held first and released at the slip's epoch without). **B2: PASS** (0 wrong held link-epochs after the release on every arm). **B3: PASS** (0 RAIM rows in the 10 min after the slip on every ring-fix arm; the key-off beds 1, 0 and 0). **B4: PASS** (240 of 240).
+- The release floor bound at the slip on s1 and s2 (2 entries, both bands of the link, on both arms; 0 on the control without the slip): the vehicle's drop alone would have left the link's carried entry tighter than 1 m^2. Why its birth variance was below 1 m^2 is not traced.
+- On s3 every arm, the key off included, leaves a fractional persistent step at the receiver S03000SIM (about -0.37 cycle on both bands) and at the satellite G25 (key off +0.37 and +0.77), with a one-epoch transient of about -3 cycles at the slip's epoch on the key off and the control (+0.40 and +0.51 with held first). G25 is declared at that epoch on every arm. A 1/1 slip on a tree edge therefore moves the producer's own estimates by a fraction whatever the ring fix does; the receiver's bias is not in the stream.
+
+**Verdict.** No safety bar of N2b failed: 0 wrong held integers on every arm (890 063 held link-epochs over the 25 runs that hold). Held first keeps the held integers through the chain's re-seats wherever a held link is present (0 released at a cut on six beds, against 160 to 188 as built), lifts the held share of the last 30 min from 30 to 61 % to 62 to 84 %, and brings the r3c stream's NL to 0.012 cycle over all depths and 0.013 at depth 5 in the last bin. The ceiling and the steady-state harness are valid now: the oracle's conflict was the stale entry after a release, not the truth. A true slip on a held link is released at its epoch and the link is held again at the right integer 14.5 to 15.5 min later. Stage N3 runs with all three arms.
+
+**For the author's decision.** (a) B2 as read counts absent links; whether the bar means present links (read 0 on every bed) is the author's call. (b) The root-change rule releases the links inside a side that re-joins through an unknown step (6 on ird_msx); the cut algebra already keeps them. (c) The fractional persistent step at the receiver after a 1/1 slip on a tree edge (all arms, key off included) is a producer question outside the ring fix. (d) I-b remains failed for the chain with and without the ring fix.
+
+**Not verified.** A held link on a slipped arc whose slip is not flagged (both slips of N2b-3 were flagged, so the monitor's 4-epoch path stayed unexercised); users on the N2b streams (N3 replays them); observed data.
+
+## 16. 2026-11-15: stage N3 pre-registered (the 6 h golden sim bed from a cold start)
+
+**Question.** Over 6 h on the reference bed, from a cold start, does the ring fix stay at 0 wrong integers, how much of the network does it hold by hour, and what do users get from the stream?
+
+**Bed.** The golden sim bed of card IRD-8: 60 stations of `runs/simnet60_quiet_col_24h`, GPS and Galileo with the chain on GPS (Galileo unclaimed, card IRD section 13.4), the held-out consumer SZZ000SIM, from 00:30:15 (`start_offset_hours` 0.504167) for 6 h (720 epochs). The fixture is also the truth of the audit (`network.ring_fix.truth_root`).
+
+**Arms (exe nrf6, arm A1krhRsmh, 6 h; `scripts/ird_make_arms.py` groups `nrf_olt_golden` and `nrf_hf_golden`).** `nrf6off_g6`, the plain chain; `nrf6_olt_g6`, N1b-OL with the truth audit; `nrf6_hf_g6`, the same with held first; and `nrf6_G_g6`, arm G (the golden unchanged, card IRD's same-build reference for its P bars), which has no ring fix.
+
+**Users.** The users' build (`gnss_processor_irdu_users_rscb3.exe`), five users (SZZ000SIM, S48000SIM, S40000SIM, S27000SIM, S32000SIM), started 30 min, 2 h, 3 h and 4 h after the network's first epoch (`start_offset_hours` 1.004167, 2.504167, 3.504167, 4.504167; `scripts/irdu_users.py` now adds the network's own start offset and takes the fixture from the consumer's RINEX when the arm names none), float (obs) and fixing (fix), on the three ring-fix and plain streams; graded with `scripts/irdu_user_grade.py`.
+
+**Bars (frozen; an arm with a wrong hold is rejected, not adjusted).**
+
+- N3-B1: 0 wrong held integers over 6 h (the code's truth audit and `nrf_audit.py --fixture` agree).
+- N3-B2: every release named (a cause on every RINGFIX release row; the run-end closure, decided = released + tree edges + held at the end, closed).
+- N3-B3: every epoch emitted (720 of 720).
+- U1: no wrong pair integer on a fixing stream for the users started at 2 h or later (WRONG = 0; the plain stream's count beside).
+- U2: HELD above the plain stream's for those starts.
+
+**Reads by hour.** Held share, decisions, releases by cause, minutes from birth to hold, cuts by kind, the stream by depth in 15-min bins beside the plain chain, declared and undeclared steps (I-b counts by class). Users: 3D by 15 min, HELD, WRONG, UNRESOLVED; card IRD-8's K-a (wrong among the settled determined integers, with the 95 % Wilson bound) and K-c where the user runs give them; P-a (the held-out consumer's float 3D against arm G).
+
+**Prediction (the requesting session's).** With held first, a held share of at least 90 % in hours 3 to 6, the NL offset p50 at most 0.03 cycle at every depth, and the users started at 3 h HELD at least half the time.

@@ -99,7 +99,14 @@ def fixture_of(net):
     prov = json.load(open(net / "rapid.json"))
     fx = prov.get("ird", {}).get("fixture")
     if not fx:
-        raise SystemExit("%s: no ird.fixture in rapid.json" % net)
+        # A bed that keeps the golden's own fixture (card NRF stage N3: the golden sim bed) names none: the fixture
+        # is the folder of the network's held-out consumer's RINEX, which holds network_fixture.json.
+        cfg = json.loads((net / "arm.json").read_text(encoding="utf-8"))
+        rnx = cfg.get("network", {}).get("closed_loop", {}).get("station", {}).get("rinex_path", "")
+        p = Path(rnx).parent.parent if rnx else None
+        if p is None or not (p / "network_fixture.json").exists():
+            raise SystemExit("%s: no ird.fixture in rapid.json and no fixture at the consumer's RINEX" % net)
+        return p
     p = Path(fx)
     return p if p.is_absolute() else Path("C:/GnssProcessor") / p
 
@@ -146,8 +153,9 @@ def make_one(tag, variant, user, flip, start_min=0, uset="", rinex_dir=""):
     lg.setdefault("levels", {})["ambiguity_resolver"] = "debug"
     cfg["processing"]["eigen_threads"] = 1
     if start_min:
-        # A late start (card IRDU section 12.4): the epoch loop skips to this elapsed span and the user starts cold.
-        n["start_offset_hours"] = start_min / 60.0
+        # A late start (card IRDU section 12.4): the epoch loop skips to this elapsed span and the user starts cold,
+        # this many minutes after the network's own start (its start_offset_hours, 0 on the ARL beds).
+        n["start_offset_hours"] = float(n.get("start_offset_hours") or 0.0) + start_min / 60.0
     applied = apply_set(cfg, uset)
     dst.mkdir(parents=True)
     (dst / "arm.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
