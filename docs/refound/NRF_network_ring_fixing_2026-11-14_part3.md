@@ -146,3 +146,40 @@ Assigned by the requesting session after section 16.1 (its words condensed; deci
 - `nrf8_logg_n144` and `nrf8_logg_n144b`: the same two starts and roots with pairs `["G:L1C/L2W"]` and no wide-lane bound (a read for the multi-system step; nothing held, no bar).
 
 **Reads.** Would-be links and link-epochs by hour and by ring; minutes from an arc's birth to its first would-be decision; the distributions of frac_wl, frac_if and sigma_if at the first would-be decision; refusals by reason; links refused by the wide-lane bound alone. The two-run audit on the would-be integers and tree pins, per epoch: **bar 0 failing checks**, with the number of checks; a failure is traced, not explained away. Known limit: an error both runs share passes it; the wide-lane bound is the guard there. No users in O1 (the log rule leaves the stream unchanged).
+
+### 18.1 2026-11-15: the S27000SIM user failure, traced (asked by the requesting session)
+
+**The failure.** S27000SIM started at 30 min is thrown about 150 m off at its third epoch (TOW 262920: 1.16 m, then 147.8 m, up -111 m, ZWD 15.50 m against 0.13 m, formal 3D sigma 1.8 m) on both ring-fix streams, float and fixing alike, and is fine on the plain stream. It recovers (below 1 m for 5 min) 32 min after its start on the plain-order stream and 142.5 min after it on the held-first stream.
+
+**What differs at that epoch.** The two streams' corrections differ by millimetres to centimetres; neither changes a code bias or marks a phase-bias discontinuity there. The user declares a phase-bias discontinuity itself when a bias moves by more than 0.25 cycle between epochs. At 262920 E24's phase bias moves by -0.26 (L1C) and -0.31 (L5Q) cycle on the plain stream and by -0.24 and -0.28 on the ring-fix streams, so the user resets E24 on both bands on the first and on L5Q alone on the second. E24 is the user's Galileo reference satellite at its second epoch (G05 the GPS one), and the reset hands the reference over (to E11). On the ring-fix streams the filter then diverges into the slant ionosphere (50 to 87 m on most satellites) and its ambiguities (hundreds of metres).
+
+**Replays on edited copies of the stream** (one phase-bias record moved by 3 to 14 mm at 262920, enough to cross the user's threshold one way or the other; `_rap_s27x_*`, 30 min each, the users' build):
+
+| stream | edit | resets of the two reference satellites at 262920 | 3D at epochs 3 and 4 |
+| --- | --- | --- | --- |
+| ring fix | none | G05 both bands, E24 L5Q | 147.8 m, 148.8 m |
+| ring fix | E24 L1C over the threshold | G05 both, E24 both | 147.8 m, 148.8 m |
+| ring fix | G05 L1C under it | G05 L2W, E24 L5Q | 147.8 m, 149.4 m |
+| ring fix | E24 L5Q under it | G05 both, E24 none | 1.77 m, 0.52 m |
+| plain | E24 L1C under it | G05 L2W, E24 L5Q | 1.89 m, 0.59 m |
+| plain | G05 L1C over it | G05 both, E24 both | 1.89 m, 0.52 m |
+
+**Reading.** Not a one-band declaration: declaring E24 on both bands leaves the failure, and the plain stream takes an L5Q-only declaration without harm. Not the GPS reference's declaration either. The trigger is the reset of the user's Galileo reference satellite at its third epoch on the ring-fix streams' values: avoided by 1 cm on one record, the same user on the same stream does not diverge, and on the plain stream the same reset is harmless. A cold user re-referencing its Galileo single differences at its third epoch lands, for some inputs, in a state far off with a formal sigma of 1.8 m, and its rows then pull it back slowly (32 to 142 min). That is a user-side defect of the reference handover early in a user's life, which the ring fix's stream happens to trigger here; not traced to a line of code. A user could be made to recover by a consistency check between its code residuals and its formal sigma that re-initializes it (or by not handing the reference over in its first epochs); a user-side change, not made here.
+
+**The 30-min starts with and without S27000SIM** (the other four users):
+
+| stream | HELD with / without | WRONG with / without | 3D p50 by 15 min, float, first 3 h, without S27000SIM (mm) |
+| --- | --- | --- | --- |
+| plain chain | 15.9 % / 15.1 % | 0 / 0 | 338 176 119 58 41 49 56 28 29 24 22 20 |
+| plain order | 21.3 % / 24.2 % | 12 / 0 | 387 152 145 64 32 27 31 25 23 19 17 16 |
+| held first | 50.2 % / 49.2 % | 0 / 0 | 389 158 176 86 51 25 22 19 17 21 23 21 |
+
+The plain order's 12 wrong pair-epochs at that start were S27000SIM's. Without it, held first's fixing users read 389 158 176 87 51 25 20 13 13 9 10 7 mm over the first 3 h (float 389 158 176 86 51 25 22 19 17 21 23 21), the plain chain's fixing users 338 176 119 58 44 48 50 37 37 26 21 21.
+
+### 19.4 2026-11-15: O1 amended (the requesting session's word)
+
+The separate GPS L1C/L2W log runs of section 19.3 (`nrf8_logg_n144`, `nrf8_logg_n144b`) are dropped: the requesting session runs a log-only pilot on the same bed with exe nrf7 (all pairs, no wide-lane bound, two starts) that gives those traces. Item D stands as pre-registered (the build with `network.ring_fix.pairs` and `wl_frac_max`, and the Galileo L1X/L5X log runs on it); if the pilot's two-start audit fails on Galileo L1X/L5X, item D changes on its word.
+
+### 19.5 2026-11-15: the two-start audit, amended before O1's runs (from N3b)
+
+N3b's two runs are both right by truth, yet the raw two-run audit fails 125 386 of 512 298 checks: under the accumulated wind-up convention each run gives an arc the wind-up branch floor(wu(t0) + 0.5) at its own start of that arc, so an arc older than the later start carries a different integer in each run, the same on both bands of a link (as a wrong N1 with a right wide lane would). Removing each run's true branch leaves 0 failing of 512 298; comparing only the arcs both runs start together leaves 0 failing of 206 324 (full results in the next results section). O1's audit therefore compares only arcs born after run B's first epoch (`scripts/nrf_two_run_audit.py --born-after`), its bar unchanged (0 failing checks), with the raw audit reported beside it. On observed data the branch can be removed only if the producer traces its accumulated wind-up per arc; that trace does not exist yet.

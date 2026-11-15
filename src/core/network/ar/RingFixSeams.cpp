@@ -8,6 +8,7 @@
 #include "network/ar/RingFix.hpp"
 
 #include "config/GnssConfig.hpp"
+#include "common/GnssIdentity.hpp"            // constellationKey, systemOfSat
 #include "filter/StateKeySchema.hpp"            // StateKeys::makeAmbiguityKey
 #include "network/ar/AmbFloat.hpp"              // ambFloatDropFloored, ambFloatBirthFloor, ambFloatDropFloorNow
 #include "network/assembly/Contributions.hpp"   // makeRowTag
@@ -213,6 +214,35 @@ void networkRingFixArm(NetworkRun& run) {
         log->warn("Network (ring fix): gate ODDS: in place of the sigma bound, the log-odds of N1 and of the wide "
                   "lane's own float at least {:.4f} (ln 1e6), the fraction of N1 at most {:.2f}.",
                   kRingFixMinLogOdds, kRingFixMaxFracCyc);
+    // Stage O1: the pair families considered and the wide lane's bound, named only when set.
+    for (const std::string& e : nc.ring_fix.pairs)
+        rf->pairs.insert({e.substr(0, 1), e.substr(2, 3), e.substr(6, 3)});
+    rf->wl_frac_max = nc.ring_fix.wl_frac_max;
+    if (!rf->pairs.empty()) {
+        std::string list;
+        for (const std::string& e : nc.ring_fix.pairs) list += (list.empty() ? "" : ", ") + e;
+        log->warn("Network (ring fix): PAIRS {} only: a chord of another pair family is never decided, held or "
+                  "traced (counted at run end).", list);
+    }
+    if (rf->wl_frac_max > 0.0)
+        log->warn("Network (ring fix): WIDE-LANE BOUND: a link every other test would decide is refused while its wide "
+                  "lane's fraction exceeds {:.3f} cycle (refusal wl_fraction).", rf->wl_frac_max);
+    // Stage N2c, simulation only: the slip mask.
+    if (!nc.ring_fix.mask_slip_arc.empty()) {
+        const std::string& arc = nc.ring_fix.mask_slip_arc;
+        const std::string sta = arc.substr(0, arc.find(':'));
+        rf->mask_sat = arc.substr(arc.find(':') + 1);
+        for (std::size_t i = 0; i < run.setup.stations.size(); ++i)
+            if (run.setup.stations[i].name == sta) rf->mask_station = static_cast<int>(i);
+        if (rf->mask_station < 0)
+            throw std::runtime_error("network.ring_fix.mask_slip_arc: no roster station '" + sta + "'.");
+        rf->mask_tow = nc.ring_fix.mask_slip_tow;
+        rf->mask_n_epochs = nc.ring_fix.mask_slip_epochs;
+        log->warn("Network (ring fix): SLIP MASK (simulation only): the producer's slip flags of {} are masked for {} "
+                  "epoch(s) from TOW {:.0f}: its carried entries are restored after the epoch's slip drains and it is "
+                  "taken out of the free-epoch latch, the slip funnel and the bridge pends.",
+                  arc, rf->mask_n_epochs, rf->mask_tow);
+    }
     ctx.carry.ring_fix = std::move(rf);
 }
 
@@ -630,6 +660,10 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
         bool resid_formed = false;
         for (std::size_t r_i = 0; r_i < rows.size(); ++r_i) {
             const ChainChordRow& r = rows[r_i];
+            if (!rf.pairConsidered(constellationKey(systemOfSat(r.sat)), r.sig1, r.sig2)) {
+                ++rf.counters.excluded_link_epochs;   // never decided, held or traced
+                continue;
+            }
             RingFixDecideObs o;
             o.id = {ii, r.sat, r.sig1, r.sig2};
             o.lambda1 = chainWavelengthM(r.sat, r.sig1);
@@ -862,6 +896,7 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
         const auto c = static_cast<RingFixRefuse>(k);
         if (c == RingFixRefuse::Odds && rf.gate_rule != RingFixGateRule::Odds) continue;
         if (c == RingFixRefuse::Cap && rf.order != RingFixOrder::Certain) continue;
+        if (c == RingFixRefuse::WlFraction && !(rf.wl_frac_max > 0.0)) continue;
         refused += fmt::format("{}{} {}", k ? ", " : "", ringFixRefuseName(c), C.refused[k]);
     }
     long long rel_total = 0;
@@ -894,6 +929,13 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
                   C.cuts - C.cuts_known, C.reattached, C.held_first_kept, C.cut_released_usable, C.cuts_nested,
                   C.release_floored, kRingFixReleaseFloorM2,
                   rf.held_first ? " Held first ARMED (network.ring_fix.held_first)." : "");
+    if (!rf.pairs.empty())
+        log->warn("Network (ring fix, pairs): {} chord link-epoch(s) of other pair families were not considered.",
+                  C.excluded_link_epochs);
+    if (rf.mask_station >= 0)
+        log->warn("Network (ring fix, slip mask, simulation only): {} masked epoch(s); {} latch, funnel or pend entr(ies) "
+                  "removed; {} carried entr(ies) the drains had changed restored.",
+                  C.mask_epochs, C.mask_keys_removed, C.mask_carries_restored);
     if (rf.rule == RingFixRule::Log)
         log->warn("Network (ring fix, log rule): the frozen rule would have decided {} link(s) at {} link-epoch(s), "
                   "{} of them with integers other than the link's first{}; nothing was held.",

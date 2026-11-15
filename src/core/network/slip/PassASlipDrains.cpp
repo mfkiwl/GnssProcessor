@@ -14,6 +14,12 @@
 #include "network/ar/ArSuspect.hpp"           // arSuspectNote
 #include "network/carry/Inject.hpp"           // the injected free_epoch directive
 #include "config/GnssConfig.hpp"
+#include "filter/StateKeySchema.hpp"           // StateKeys::makeAmbiguityKey (the slip mask)
+#include "math/TimeUtils.hpp"                  // TimeUtils::continuousGpsSeconds (the slip mask)
+#include "network/ar/RingFix.hpp"              // NetworkRingFix: the slip mask's arc and counters
+#include "network/diag/RunTraces.hpp"          // the mask's event row
+#include <cmath>
+#include <fmt/format.h>
 
 #include <map>
 #include <set>
@@ -346,6 +352,68 @@ void passAInjectedFreeStage(const PassAView& v, RelevelEpochState* relevel_ptr,
                                      carry_slipped_ambs, ctx.inject, se, traces, log,
                                      relevel_ptr,
                                      relevel_ptr ? &relevel_pend : nullptr);
+}
+
+SlipMaskSnapshot passASlipMaskSnapStage(const PassAView& v) {
+    const SyncedEpoch& se = v.se;
+    const NetworkRunContext& ctx = v.ctx;
+    const net::ArcTable& arc_rows = v.arc_rows;
+    // ---- End of the bindings ----
+    SlipMaskSnapshot snap;
+    const NetworkRingFix* rf = ctx.carry.ring_fix.get();
+    if (rf == nullptr || rf->mask_station < 0) return snap;
+    const double tow = std::fmod(TimeUtils::continuousGpsSeconds(se.time), 604800.0);
+    if (tow < rf->mask_tow - 0.5 || rf->counters.mask_epochs >= rf->mask_n_epochs) return snap;
+    snap.active = true;
+    for (const auto& [id, row] : arc_rows)
+        if (id.station.index == rf->mask_station && net::satKey(id.sat) == rf->mask_sat)
+            snap.amb.emplace_back(net::arcTuple(id), row.amb);
+    return snap;
+}
+
+void passASlipMaskApplyStage(const PassAView& v, RelevelEpochState* relevel_ptr,
+                             std::map<net::ArcTuple, RelevelPend>& relevel_pend, const SlipMaskSnapshot& snap) {
+    const SyncedEpoch& se = v.se;
+    NetworkRunContext& ctx = v.ctx;
+    NetworkRunTraces& traces = v.traces;
+    auto& stations = v.stations;
+    std::set<std::pair<int, std::string>>& carry_slipped_ambs = v.carry_slipped_ambs;   // written
+    net::ArcTable& arc_rows = v.arc_rows;   // written: the masked arc's carried entries restored
+    // ---- End of the bindings ----
+    if (!snap.active || !ctx.carry.ring_fix) return;
+    NetworkRingFix& rf = *ctx.carry.ring_fix;
+    long long removed = 0, restored = 0;
+    std::string sigs;
+    for (const auto& [key, amb] : snap.amb) {
+        const std::string& sig = std::get<2>(key);
+        sigs += (sigs.empty() ? "" : " ") + sig;
+        const std::pair<int, std::string> amb_key{std::get<0>(key), StateKeys::makeAmbiguityKey(std::get<1>(key), sig)};
+        if (relevel_ptr != nullptr) {
+            removed += static_cast<long long>(relevel_ptr->free_ambs.erase(amb_key));
+            relevel_ptr->free_cause.erase(amb_key);
+        }
+        removed += static_cast<long long>(carry_slipped_ambs.erase(amb_key));
+        removed += static_cast<long long>(relevel_pend.erase(key));
+        const std::optional<ArcId> arc_id = net::arcKey(key);
+        if (!arc_id) continue;
+        const auto it = arc_rows.find(*arc_id);
+        if (it == arc_rows.end()) continue;
+        const bool same = it->second.amb.has_value() == amb.has_value()
+                       && (!amb.has_value() || (it->second.amb->value_abs == amb->value_abs
+                                                && it->second.amb->var == amb->var
+                                                && it->second.amb->relevel_s == amb->relevel_s));
+        if (!same) {
+            it->second.amb = amb;
+            ++restored;
+        }
+    }
+    ++rf.counters.mask_epochs;
+    rf.counters.mask_keys_removed += removed;
+    rf.counters.mask_carries_restored += restored;
+    const std::string name = (rf.mask_station >= 0 && static_cast<std::size_t>(rf.mask_station) < stations.size())
+                                 ? stations[static_cast<std::size_t>(rf.mask_station)].name : std::string{};
+    traces.emitEvent(se.time, "RINGFIX", "mask_slip", rf.mask_sat, name, std::nullopt, std::nullopt, "sim",
+                     fmt::format("signals={} removed={} restored={}", sigs, removed, restored));
 }
 
 } // namespace GnssProcessor

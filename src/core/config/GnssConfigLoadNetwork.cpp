@@ -1506,6 +1506,40 @@ namespace GnssProcessor {
             if (rf.oracle_until_s > 0.0 && rf.truth_root.empty())
                 throw std::runtime_error("network.ring_fix.oracle_until_s needs network.ring_fix.truth_root (the oracle "
                                          "reads the fixture's truth; simulation only).");
+            // The pair families considered: "<constellation>:<signal>/<signal>", each signal a three-character
+            // phase code; empty is every family.
+            rf.pairs.clear();
+            if (jhas(json, "network.ring_fix.pairs", "network_ring_fix_pairs")) {
+                const nlohmann::json& arr = jsection(json, "network.ring_fix.pairs", "network_ring_fix_pairs");
+                if (!arr.is_array())
+                    throw std::runtime_error("network.ring_fix.pairs must be an array of \"<constellation>:<signal>/"
+                                             "<signal>\" entries (\"E:L1X/L5X\").");
+                for (const auto& v : arr) {
+                    const std::string e = v.is_string() ? v.get<std::string>() : std::string{};
+                    if (e.size() != 9 || e[1] != ':' || e[5] != '/' || e[2] != 'L' || e[6] != 'L')
+                        throw std::runtime_error("network.ring_fix.pairs: '" + e + "' is not of the form "
+                                                 "\"<constellation>:<signal>/<signal>\" (\"E:L1X/L5X\").");
+                    rf.pairs.push_back(e);
+                }
+            }
+            rf.wl_frac_max = jval<double>(json, "network.ring_fix.wl_frac_max", "network_ring_fix_wl_frac_max", 0.0);
+            if (!(rf.wl_frac_max >= 0.0 && rf.wl_frac_max < 0.5))
+                throw std::runtime_error("network.ring_fix.wl_frac_max must be 0 (no bound) or in (0, 0.5) cycle.");
+            rf.mask_slip_arc = jval<std::string>(json, "network.ring_fix.mask_slip_arc",
+                                                 "network_ring_fix_mask_slip_arc", std::string{});
+            rf.mask_slip_tow = jval<double>(json, "network.ring_fix.mask_slip_tow", "network_ring_fix_mask_slip_tow",
+                                            -1.0);
+            rf.mask_slip_epochs = jval<int>(json, "network.ring_fix.mask_slip_epochs",
+                                            "network_ring_fix_mask_slip_epochs", 1);
+            if (!rf.mask_slip_arc.empty()) {
+                if (rf.truth_root.empty())
+                    throw std::runtime_error("network.ring_fix.mask_slip_arc needs network.ring_fix.truth_root (a "
+                                             "simulation-only test).");
+                if (rf.mask_slip_arc.find(':') == std::string::npos || rf.mask_slip_tow < 0.0
+                    || rf.mask_slip_epochs < 1)
+                    throw std::runtime_error("network.ring_fix.mask_slip_arc is \"<station>:<satellite>\" and needs "
+                                             "network.ring_fix.mask_slip_tow (>= 0) and mask_slip_epochs (>= 1).");
+            }
         }
     }
 
@@ -10823,9 +10857,10 @@ namespace GnssProcessor {
         } else if (network_config_.ring_fix.rule != "gated" || !network_config_.ring_fix.audit_frame_file.empty()
                    || network_config_.ring_fix.order != "ring" || network_config_.ring_fix.gate != "sigma"
                    || !network_config_.ring_fix.truth_root.empty() || network_config_.ring_fix.oracle_until_s > 0.0
-                   || network_config_.ring_fix.held_first) {
+                   || network_config_.ring_fix.held_first || !network_config_.ring_fix.pairs.empty()
+                   || network_config_.ring_fix.wl_frac_max > 0.0 || !network_config_.ring_fix.mask_slip_arc.empty()) {
             log->warn("Network: network.ring_fix.rule / order / gate / audit_frame_file / truth_root / oracle_until_s / "
-                      "held_first are INERT without network.ring_fix.enable.");
+                      "held_first / pairs / wl_frac_max / mask_slip_arc are INERT without network.ring_fix.enable.");
         }
 
         // Two-edge continuous handover: inert guards, then the arming line.  Follows the

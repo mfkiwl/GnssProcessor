@@ -128,9 +128,10 @@ enum class RingFixRefuse : std::uint8_t {
     Persist,       ///< Passed this epoch, the persistence count not yet reached.
     Odds,          ///< Change L: the log-odds of N1 or of the wide lane below the bound.
     Cap,           ///< Change O: passed every test, passed over by the per-epoch cap (the count is kept).
+    WlFraction,    ///< Passed every other test (persistence included); the wide lane's fraction above network.ring_fix.wl_frac_max.
 };
 /// Number of refusal causes.
-inline constexpr std::size_t kRingFixRefuseCount = 9;
+inline constexpr std::size_t kRingFixRefuseCount = 10;
 
 /**
  * @brief The name of a decision rule ("gated", "plain", "log").
@@ -148,7 +149,7 @@ const char* ringFixReleaseName(RingFixRelease c);
 
 /**
  * @brief The name of a refusal cause ("not_candidate", "no_float", "window", "sigma",
- *        "fraction", "lattice", "persist", "odds", "cap").
+ *        "fraction", "lattice", "persist", "odds", "cap", "wl_fraction").
  * @param c The cause.
  * @return Its name as a static string; "?" for a value outside the enum.
  */
@@ -384,6 +385,11 @@ struct RingFixCounters {
     long long log_links{0};               ///< Log rule: links the rule would have decided.
     long long log_link_epochs{0};         ///< Log rule: link-epochs at which it would have decided.
     long long log_changed{0};             ///< Log rule: would-be decisions with integers other than the link's first.
+    // Stages N2c and O1.
+    long long excluded_link_epochs{0};    ///< Chord link-epochs of pair families outside network.ring_fix.pairs (never decided).
+    long long mask_epochs{0};             ///< Simulation only: epochs at which the slip mask removed the masked arc's flags.
+    long long mask_keys_removed{0};       ///< Of them, the latch, funnel and bridge-pend entries removed.
+    long long mask_carries_restored{0};   ///< Of them, carried entries the epoch's drains had changed, restored.
 };
 
 struct RingFixTruth;   // below: the fixture's truth (simulation only)
@@ -426,6 +432,20 @@ struct NetworkRingFix {
     std::unique_ptr<RingFixTruth> truth;    ///< The fixture's truth (network.ring_fix.truth_root); null without it.
     double      oracle_until_s{0.0};        ///< The oracle phase's length from the first epoch (s; 0 = none).
     bool        held_first{false};          ///< The chain's walk re-attaches through held links first (network.ring_fix.held_first).
+    /// The pair families considered (network.ring_fix.pairs), as (constellation key, signal 1, signal 2); empty: all.
+    std::set<std::tuple<std::string, std::string, std::string>> pairs;
+    double      wl_frac_max{0.0};           ///< The decision's bound on the wide lane's fraction (cycles; 0: none).
+    // Simulation only: the slip mask (network.ring_fix.mask_slip_*).
+    int         mask_station{-1};           ///< The masked arc's station (roster index; -1: no mask).
+    std::string mask_sat;                   ///< The masked arc's satellite.
+    double      mask_tow{-1.0};             ///< The first masked epoch (GPS time of week, s).
+    int         mask_n_epochs{1};           ///< The number of masked epochs.
+    /// @brief Whether a link's pair family is considered (network.ring_fix.pairs; all when the list is empty).
+    /// @param sys The constellation key ("G", "E"). @param sig1 Band-1 signal. @param sig2 Band-2 signal.
+    /// @return True when the family is in the list or the list is empty.
+    bool pairConsidered(const std::string& sys, const std::string& sig1, const std::string& sig2) const {
+        return pairs.empty() || pairs.count({sys, sig1, sig2}) != 0;
+    }
     double      t0_s{-1.0};                 ///< The first epoch the ring fix saw (continuous GPS seconds).
     /// The previous epoch's tree edges with their targets: (station, satellite, signal) -> target (cycles).
     std::map<std::tuple<int, std::string, std::string>, double> prev_targets;

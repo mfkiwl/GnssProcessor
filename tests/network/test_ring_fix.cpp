@@ -799,3 +799,39 @@ TEST(RingFixCutsN2b, ACutOnOneConstellationLeavesTheOtherConstellationsLinks) {
     any.sys.clear();
     EXPECT_EQ(ringFixCutBand(any, gal), 1);   // an empty constellation matches any (the signal alone)
 }
+
+// ---- Stages N2c and O1 ----
+
+TEST(RingFixO1, TheWideLaneBoundRefusesLastAndOnlyWhenSet) {
+    // An ionosphere-like error of -1.059 cycles on band 1 leaves the ionosphere-free row at N1 = 10 with the wide
+    // lane 0.30 cycle off its integer (3.30): the gate and the persistence pass, the wide lane's bound alone refuses.
+    double now = 100000.0;
+    NetworkRingFix bounded = stateWithHistory(kId, now);
+    bounded.wl_frac_max = 0.25;
+    NetworkRingFix free = stateWithHistory(kId, now);
+    std::vector<RingFixEvent> eb, ef;
+    for (int k = 0; k < kRingFixPersistEpochs; ++k, now += 30.0) {
+        eb = ringFixDecideStep(bounded, {obsNear(kId, 10, 7, -1.0590, 1e-5)}, now);
+        ef = ringFixDecideStep(free, {obsNear(kId, 10, 7, -1.0590, 1e-5)}, now);
+    }
+    ASSERT_EQ(ef.size(), 1u);
+    EXPECT_EQ(ef[0].kind, RingFixEvent::Kind::Hold);
+    EXPECT_NEAR(ef[0].gate.frac_wl, 0.30, 0.01);
+    EXPECT_TRUE(free.links.at(kId).held);
+    ASSERT_EQ(eb.size(), 1u);
+    EXPECT_EQ(eb[0].kind, RingFixEvent::Kind::Refuse);
+    EXPECT_EQ(eb[0].refuse, RingFixRefuse::WlFraction);
+    EXPECT_EQ(bounded.counters.refused[static_cast<std::size_t>(RingFixRefuse::WlFraction)], 1);
+    EXPECT_FALSE(bounded.links.at(kId).held);
+    EXPECT_EQ(free.counters.refused[static_cast<std::size_t>(RingFixRefuse::WlFraction)], 0);
+    EXPECT_STREQ(ringFixRefuseName(RingFixRefuse::WlFraction), "wl_fraction");
+}
+
+TEST(RingFixO1, ThePairListNamesTheFamiliesConsidered) {
+    NetworkRingFix rf;
+    EXPECT_TRUE(rf.pairConsidered("G", "L1C", "L2W"));   // an empty list considers every family
+    rf.pairs.insert({"E", "L1X", "L5X"});
+    EXPECT_TRUE(rf.pairConsidered("E", "L1X", "L5X"));
+    EXPECT_FALSE(rf.pairConsidered("G", "L1C", "L2W"));
+    EXPECT_FALSE(rf.pairConsidered("E", "L1C", "L5Q"));
+}

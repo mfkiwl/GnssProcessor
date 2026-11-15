@@ -47,6 +47,7 @@ const char* ringFixRefuseName(RingFixRefuse c) {
         case RingFixRefuse::Persist:      return "persist";
         case RingFixRefuse::Odds:         return "odds";
         case RingFixRefuse::Cap:          return "cap";
+        case RingFixRefuse::WlFraction:   return "wl_fraction";
     }
     return "?";
 }
@@ -294,6 +295,8 @@ std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
                 L.streak_n2 = ev.gate.n2;
             }
             if (L.streak < kRingFixPersistEpochs) { refuse(RingFixRefuse::Persist); continue; }
+            // The wide lane's own bound, last: a refusal here names a link every other test would decide.
+            if (rf.wl_frac_max > 0.0 && ev.gate.frac_wl > rf.wl_frac_max) { refuse(RingFixRefuse::WlFraction); continue; }
             decide = true;
         }
         if (!decide) continue;

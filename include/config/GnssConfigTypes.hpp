@@ -1904,6 +1904,20 @@ namespace GnssProcessor {
         /// @c network.ring_fix.audit_frame_file: a frame-target file (station,sat,signal,frame_int,...)
         /// against which every held integer is audited each epoch (simulation only; default empty).
         std::string audit_frame_file{};
+        /// @c network.ring_fix.pairs: the pair families the ring fix considers, as "<constellation>:<signal>/<signal>"
+        /// ("E:L1X/L5X"); a link of another family is never decided or held.  Empty (default): every family.
+        std::vector<std::string> pairs{};
+        /// @c network.ring_fix.wl_frac_max: a bound on the wide lane's fraction at the decision (cycles, in (0, 0.5));
+        /// 0 (default): no bound.
+        double wl_frac_max{ 0.0 };
+        /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
+        /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
+        /// latch (the residual monitor's path).  Empty (default): no mask.
+        std::string mask_slip_arc{};
+        /// @c network.ring_fix.mask_slip_tow: the GPS time of week (s) of the masked epoch (needs mask_slip_arc).
+        double mask_slip_tow{ -1.0 };
+        /// @c network.ring_fix.mask_slip_epochs: the number of epochs masked from @c mask_slip_tow (default 1).
+        int mask_slip_epochs{ 1 };
     };
 
     struct NetworkConfig {
