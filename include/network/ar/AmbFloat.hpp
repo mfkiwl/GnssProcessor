@@ -163,6 +163,34 @@ struct EpochEvents;   // network/driver/Epoch.hpp
                                        double drop_floor_m2, double now_s,
                                        long long now_ep, bool decouple_always = false);
 
+    /// The variance (m^2) of a band freed outright at a return the gap instrument declares shifted: it dwarfs any
+    /// level shift, so the epoch's data re-determine the band.
+    constexpr double kAmbGapFreeVarM2 = 1.0e4;
+
+    /**
+     * @brief The variance a latched band's drop must reach to cover its measured break; 0 for none.
+     *
+     * A break between adjacent epochs is covered by (@p jump_k times its step) squared when @p jump_k is
+     * positive (network.amb_float_drop_jump_k).  A return after a gap is covered as @p gap_cover says
+     * (network.amb_float_drop_gap_cover): by (@p jump_k times its step) squared, or by @ref kAmbGapFreeVarM2
+     * when the gap instrument declared the return shifted.  The drop takes the larger of this and its floors,
+     * so a break smaller than the arc's first sigma leaves the drop as before.
+     * @param b         The band's measured break this epoch.
+     * @param jump_k    network.amb_float_drop_jump_k (0: no step cover).
+     * @param gap_cover network.amb_float_drop_gap_cover.
+     * @return the variance to cover (m^2).
+     */
+    double ambDropCoverVar(const BandBreak& b, double jump_k, NetworkAmbGapCover gap_cover);
+
+    /**
+     * @brief Whether a latch was declared by a break: a slip detector (MW, loss of lock, the IF time difference,
+     *        the GF jump) or the gap re-entry response, as opposed to a RAIM refloat (T4 attribution, T3
+     *        consensus) or the wind-up restart alone.
+     * @param cause_bits The latch's RelevelEpochState::free_cause bits.
+     * @return true when any declaring bit is set.
+     */
+    bool ambDropLatchDeclared(unsigned cause_bits);
+
     /**
      * @brief Drop floor in force at this epoch, i.e. the warm-up gate.
      *
@@ -382,8 +410,13 @@ struct EpochEvents;   // network/driver/Epoch.hpp
 struct AmbFloatCounters {
     long long n_amb_drop_epochs       = 0;  ///< epochs on which at least one drop happened.
     long long n_amb_drop_relevel_free = 0;  ///< …of which from the detectors' latched free-epoch set (the level vehicle skips one inject instead).
-    long long n_amb_drop_jump_cover   = 0;  ///< …of those, drops whose variance was set by the band's phase-minus-code step (network.amb_float_drop_jump_k).
+    long long n_amb_drop_jump_cover   = 0;  ///< …of those, drops whose variance was set by the band's phase-minus-code step between adjacent epochs (network.amb_float_drop_jump_k).
     double    max_amb_drop_jump_cover_m = 0.0;  ///< The largest such covering sigma (m).
+    long long n_amb_drop_gap_cover    = 0;  ///< …drops at a return after a gap whose variance was set by the gap cover (network.amb_float_drop_gap_cover).
+    double    max_amb_drop_gap_cover_m  = 0.0;  ///< The largest such covering sigma (m).
+    long long n_amb_drop_gap_breaks   = 0;  ///< Latched drops at a return after a gap with a measured break (covered or not), the gap cover's population.
+    long long n_amb_drop_declared     = 0;  ///< Latched drops declared by a break (network.amb_float_drop_declared_var_m2's population).
+    long long n_amb_drop_declared_floor = 0;  ///< …of those, drops whose variance came from that floor.
     long long n_amb_drop_stale_gap    = 0;  ///< …of which from the inject-site gap cliff (the level vehicle skips one inject instead).
     long long n_amb_drop_idempotent   = 0;  ///< drop calls that found the arc already at or below birth strength: two detectors on one arc in one epoch, or an arc that never converged.  The age clock still restarts; the variance does not move.
     long long n_amb_stransform        = 0;  ///< declared anchor S-transformations applied to the carry, one per (sat,signal) family per handover.

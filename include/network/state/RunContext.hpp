@@ -229,6 +229,12 @@ namespace GnssProcessor {
         /// network.amb_float_drop_jump_k: the drop of a slip-latched arc covers k times the band's
         /// phase-minus-code step (m) in its variance (network/ar/AmbFloat.cpp); 0 off, and off the vehicle.
         double amb_drop_jump_k{};
+        /// network.amb_float_drop_gap_cover: how the drop answers a band latched at its return after a gap
+        /// (network/ar/AmbFloat.cpp); Off off the vehicle.
+        NetworkAmbGapCover amb_drop_gap_cover{NetworkAmbGapCover::Off};
+        /// network.amb_float_drop_declared_var_m2: the floor of a drop latched by a declared break (m^2 at zenith);
+        /// 0 off, and off the vehicle.
+        double amb_drop_declared_var{};
         bool   amb_drop_decouple_always{};   ///< network.amb_float_drop_decouple_always: a drop clears the arc's regression and block row even at birth strength
         // The per-line-of-sight phase nuisance state.  pc_on is the
         // knob as the loader validated it (float vehicle, phase_leveling, conditional

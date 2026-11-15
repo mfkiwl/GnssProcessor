@@ -70,6 +70,8 @@ NetworkKnobs NetworkKnobs::snapshot(const GnssConfig& config_, const NetworkConf
     k.amb_drop_var_floor  = k.amb_float_kf
                                 ? config_.getNetworkConfig().amb_float_drop_var_m2 : 0.0;
     k.amb_drop_jump_k     = k.amb_float_kf ? nc.amb_float_drop_jump_k : 0.0;
+    k.amb_drop_gap_cover  = k.amb_float_kf ? nc.amb_float_drop_gap_cover : NetworkAmbGapCover::Off;
+    k.amb_drop_declared_var = k.amb_float_kf ? nc.amb_float_drop_declared_var_m2 : 0.0;
     // The drop floor's warm-up gate has no meaning without the floor, so it
     // resolves to 0 when the floor is off; a site reads the pair as "floor, from epoch N".
     k.amb_drop_floor_after_ep =

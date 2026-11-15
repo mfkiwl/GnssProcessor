@@ -4536,6 +4536,42 @@ namespace GnssProcessor {
             log->warn("Network: network.amb_float_drop_jump_k {:.2f}: the drop of a slip-latched arc takes at least "
                       "({:.2f} x the band's phase-minus-code step)^2 as its variance.",
                       network_config_.amb_float_drop_jump_k, network_config_.amb_float_drop_jump_k);
+        // A band latched at its return after a gap: its drop covers the band's step across the gap, or frees a
+        // return the gap instrument declares shifted.  "off" (default) is the drop as before.
+        {
+            const std::string s = jval<std::string>(json, "network.amb_float_drop_gap_cover",
+                                                    "amb_float_drop_gap_cover", std::string{"off"});
+            if (s.empty() || s == "off")
+                network_config_.amb_float_drop_gap_cover = NetworkAmbGapCover::Off;
+            else if (s == "step")
+                network_config_.amb_float_drop_gap_cover = NetworkAmbGapCover::Step;
+            else if (s == "free")
+                network_config_.amb_float_drop_gap_cover = NetworkAmbGapCover::Free;
+            else
+                throw std::runtime_error("network.amb_float_drop_gap_cover must be one of off|step|free.");
+            if (network_config_.amb_float_drop_gap_cover == NetworkAmbGapCover::Step
+                && !(network_config_.amb_float_drop_jump_k > 0.0))
+                throw std::runtime_error("network.amb_float_drop_gap_cover \"step\" scales the step by "
+                                         "network.amb_float_drop_jump_k, which must then be positive.");
+            if (network_config_.amb_float_drop_gap_cover != NetworkAmbGapCover::Off)
+                log->warn("Network: network.amb_float_drop_gap_cover {}: the drop of a band latched at its return "
+                          "after a gap {}.", s,
+                          network_config_.amb_float_drop_gap_cover == NetworkAmbGapCover::Step
+                              ? "covers network.amb_float_drop_jump_k times the band's phase-minus-code step "
+                                "across the gap"
+                              : "frees the band when the gap instrument declares the return shifted");
+        }
+        // A floor on the drop of a band latched by a declared break (a slip detector or the gap re-entry response),
+        // never on a RAIM refloat: 0 (default) is no floor.
+        network_config_.amb_float_drop_declared_var_m2 =
+            jval<double>(json, "network.amb_float_drop_declared_var_m2", "amb_float_drop_declared_var_m2", 0.0);
+        if (!(network_config_.amb_float_drop_declared_var_m2 >= 0.0
+              && network_config_.amb_float_drop_declared_var_m2 <= 1.0e4))
+            throw std::runtime_error("network.amb_float_drop_declared_var_m2 must be in [0, 1e4].");
+        if (network_config_.amb_float_drop_declared_var_m2 > 0.0)
+            log->warn("Network: network.amb_float_drop_declared_var_m2 {:.1f}: the drop of a band latched by a declared "
+                      "break (a slip detector or a gap return) restores at least this variance (elevation-mapped); "
+                      "a RAIM refloat does not.", network_config_.amb_float_drop_declared_var_m2);
         network_amb_float_drop_decouple_always_ =
             jval<bool>(json, "network.amb_float_drop_decouple_always",
                        "amb_float_drop_decouple_always", false);

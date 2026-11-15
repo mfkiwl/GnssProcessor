@@ -1448,6 +1448,20 @@ namespace GnssProcessor {
     };
 
     /**
+     * @brief How the float vehicle's drop answers a band that returns after a tracking gap
+     *        (@c network.amb_float_drop_gap_cover).
+     *
+     * The drop of a latched arc keeps the pre-break value with the arc's first variance.  A band that returns
+     * after a gap with a shifted level then carries a prior at the old level, which the epoch's solve spreads
+     * into the line of sight's ionosphere, the other band and the receiver's states.
+     */
+    enum class NetworkAmbGapCover {
+        Off,   ///< (default) the drop as before: byte-identical.
+        Step,  ///< The drop covers (network.amb_float_drop_jump_k times the band's phase-minus-code step across the gap) squared.
+        Free   ///< A band whose return the gap instrument declares shifted is freed outright (a variance of 1e4 m^2).
+    };
+
+    /**
      * @brief How the gross-LOS screen reads @c network.gross_los_min_rows (RF-3b B1)
      *        (docs/record/refound/RF-3_code_row_qc_2026-09-22.md §4, requirement F1).
      *
@@ -2371,6 +2385,19 @@ namespace GnssProcessor {
         /// birth variance, which the epoch's solve would spread into the line of sight's ionosphere, the other
         /// band and the receiver's states.  0 (default): the drop as before.  Read only on the float vehicle.
         double amb_float_drop_jump_k{ 0.0 };
+        /// @c network.amb_float_drop_gap_cover ("off" | "step" | "free"): the drop of a band latched at its return
+        /// after a tracking gap covers the band's measured step across the gap ("step", scaled by
+        /// @ref amb_float_drop_jump_k, which must then be positive) or frees a band whose return the gap
+        /// instrument declares shifted ("free").  The step is the band's own phase-minus-code change, never a GF
+        /// change (a shift common to both bands cancels in GF).  Off (default): the drop as before.  Read only on
+        /// the float vehicle.
+        NetworkAmbGapCover amb_float_drop_gap_cover{ NetworkAmbGapCover::Off };
+        /// @c network.amb_float_drop_declared_var_m2: a floor (m^2 at zenith, elevation-mapped like the birth floor)
+        /// on the drop of a band latched by a declared break only: a slip detector (MW, loss of lock, the IF time
+        /// difference, the GF jump) or the gap re-entry response.  A drop latched only by a RAIM refloat (T4 or
+        /// T3), whose kept value is roughly right, and the other drop sites do not take it; the blanket floor on
+        /// every drop is @ref amb_float_drop_var_m2.  0 (default): no floor.  Read only on the float vehicle.
+        double amb_float_drop_declared_var_m2{ 0.0 };
         /// Warm-up gate on @ref amb_float_drop_var_m2 (RF-3c): the floor applies only to
         /// a drop taken at processed epoch >= this value; before it, a drop restores
         /// @c max(var_birth, var_first, amb_float_birth_var_m2).  0 (default) = no gate,
