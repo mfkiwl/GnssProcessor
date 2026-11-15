@@ -76,7 +76,47 @@ def read_code_biases(path):
 
 
 LAMBDA = {"1": 299792458.0 / F1, "2": 299792458.0 / F2}
-REMOVABLE = ("x", "r", "frac")
+REMOVABLE = ("x", "r", "frac", "fracc", "cm")
+CM_WINDOW_MIN = (30.0, 120.0)
+
+
+def constant_integers(vals):
+    """{(sat, band): n} one integer per satellite and band: the rounded median of E_b over CM_WINDOW_MIN (over every
+    epoch for a satellite with none in the window).  fracc removes everything but these (section 12.6's addendum:
+    rounding each epoch on its own flips the integer wherever the fraction crosses half a cycle)."""
+    t0 = min(t for t, _ in vals)
+    lo, hi = t0 + 60.0 * CM_WINDOW_MIN[0], t0 + 60.0 * CM_WINDOW_MIN[1]
+    win, every = defaultdict(list), defaultdict(list)
+    for (t, s), v in vals.items():
+        for b in ("1", "2"):
+            every[(s, b)].append(v["E" + b])
+            if lo <= t < hi:
+                win[(s, b)].append(v["E" + b])
+    out = {}
+    for k, xs in every.items():
+        ys = sorted(win.get(k) or xs)
+        out[k] = int(round(ys[len(ys) // 2]))
+    return out
+
+
+def phase_common_mode(vals):
+    """{(tow, band): cm} the common mode of each band's phase error across satellites (section 12.6's addendum): each
+    satellite's lambda_b E_b less its own mean over CM_WINDOW_MIN (minutes from the stream's first epoch), averaged
+    over the satellites of the epoch that have a window mean."""
+    t0 = min(t for t, _ in vals)
+    lo, hi = t0 + 60.0 * CM_WINDOW_MIN[0], t0 + 60.0 * CM_WINDOW_MIN[1]
+    means = defaultdict(list)
+    for (t, s), v in vals.items():
+        if lo <= t < hi:
+            for b in ("1", "2"):
+                means[(s, b)].append(LAMBDA[b] * v["E" + b])
+    mean = {k: sum(x) / len(x) for k, x in means.items()}
+    acc = defaultdict(list)
+    for (t, s), v in vals.items():
+        for b in ("1", "2"):
+            if (s, b) in mean:
+                acc[(t, b)].append(LAMBDA[b] * v["E" + b] - mean[(s, b)])
+    return {k: sum(x) / len(x) for k, x in acc.items()}
 
 
 def move(src, dst, fixture, remove=("x",)):
@@ -84,6 +124,8 @@ def move(src, dst, fixture, remove=("x",)):
     P'_b = P_b - mu_b x), r (B'_b = B_b + r on both bands, which leaves x), frac (P'_b = P_b + lambda_b (E_b -
     round(E_b)), which leaves each E_b at its integer).  Every other field and record is copied unchanged."""
     vals = sat_values(src, fixture)
+    cm = phase_common_mode(vals) if "cm" in remove else {}
+    ints = constant_integers(vals) if "fracc" in remove else {}
     n = defaultdict(int)
     tow = None
     os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
@@ -112,6 +154,10 @@ def move(src, dst, fixture, remove=("x",)):
                         if "frac" in remove:
                             e = v["E" + band]
                             shift += LAMBDA[band] * (e - round(e))
+                        if "fracc" in remove:
+                            shift += LAMBDA[band] * (v["E" + band] - ints[(f[1], band)])
+                        if "cm" in remove:
+                            shift += cm.get((tow, band), 0.0)
                     f[3] = repr(float(f[3]) + shift)
                     n[f[0] + " moved"] += 1
                 elif band is not None:
@@ -135,14 +181,23 @@ def check(orig, moved, fixture, remove=("x",)):
     """Largest deviation of the moved stream from what the move promises: x' = 0 or x, r' = 0 or r, E'_b = round(E_b)
     or E_b, per the removed set."""
     a, b = sat_values(orig, fixture), sat_values(moved, fixture)
+    cm = phase_common_mode(a) if "cm" in remove else {}
+    ints = constant_integers(a) if "fracc" in remove else {}
     common = set(a) & set(b)
     dev = {"x": 0.0, "r": 0.0, "E1": 0.0, "E2": 0.0}
     for k in common:
         dev["x"] = max(dev["x"], abs(b[k]["x"] - (0.0 if "x" in remove else a[k]["x"])))
         dev["r"] = max(dev["r"], abs(b[k]["r"] - (0.0 if "r" in remove else a[k]["r"])))
         for e in ("E1", "E2"):
-            want = round(a[k][e]) if "frac" in remove else a[k][e]
+            if "fracc" in remove:
+                want = float(ints[(k[1], e[1])])
+            else:
+                want = round(a[k][e]) if "frac" in remove else a[k][e]
+            want -= cm.get((k[0], e[1]), 0.0) / LAMBDA[e[1]]
             dev[e] = max(dev[e], abs(b[k][e] - want))
+    if cm:
+        left = phase_common_mode(b)
+        dev["cm left (m)"] = max(abs(v) for v in left.values())
     return len(common), len(set(a) ^ set(b)), dev
 
 
@@ -266,7 +321,9 @@ def main():
         rm = tuple(s for s in a.remove.split(",") if s)
         nc, nx, dev = check(a.paths[0], a.paths[1], a.fixture, rm)
         print("check (removed %s): %d satellite-epochs in both, %d in one only; largest deviation from the promise: "
-              "x %.2e m, r %.2e m, E1 %.2e cyc, E2 %.2e cyc" % (rm, nc, nx, dev["x"], dev["r"], dev["E1"], dev["E2"]))
+              "x %.2e m, r %.2e m, E1 %.2e cyc, E2 %.2e cyc%s" % (
+                  rm, nc, nx, dev["x"], dev["r"], dev["E1"], dev["E2"],
+                  "; common mode left %.2e m" % dev["cm left (m)"] if "cm left (m)" in dev else ""))
 
 
 if __name__ == "__main__":
