@@ -175,3 +175,65 @@ Held share by hour (Galileo L1X/L5X chord link-epochs, %):
 2. With the formal sigma, a run can be right (the start-0 default run agrees with all 2-sigma runs) or wrong (the late run and the GOPE00CZE run hold early, low-odds or wrong-wide-lane decisions that propagate to a station's other links); the rule as pre-registered is not safe on observed data.
 3. GPS L1C/L2W under holds: 132 to 133 links held, a quarter to two fifths of ring 2, a sixth to a quarter of ring 3, a tenth of ring 4, almost nothing deeper.
 4. The E03 case of the requesting session's pilot is no wind-up branch (21.1): a frame move in one run or a real step, still not traced; Galileo L1C/L5Q stays out of holding.
+
+## 24. 2026-11-15: stage G0, why GPS stops at ring 4 (reads of existing runs)
+
+Assigned by the requesting session (its words condensed; decided in the author's absence and listed for review). Its read of `o2g_n144` from hour 2, the share of chord rows per ring by refusal: GPS ring 2 held 52 % (fraction 21, odds 13, window 11), ring 4 held 15 % (window 39, odds 27, fraction 18), ring 6 and deeper held 3 % (window 61, fraction 20, odds 16); Galileo L1X/L5X ring 5 held 42 % (window 27, odds 25, fraction 3). Run read here: `o2g_n144` (Galileo L1X/L5X and GPS L1C/L2W held, sigma_scale 2). New scripts: `scripts/nrf_window_causes.py`, `scripts/nrf_frac_terms.py`. Grades `runs_nom/_irdu_grades/nrf_g0_*`.
+
+### 24.1 What opens the window of a deep link
+
+**In the code.** The decision's window test reads only the link's own state: both carried entries present and not latched, their re-level stamps at least 600 s old, the link a chord for at least 600 s, no tree tenure and no release within 600 s. Upstream events reach it through the carried entries: every chain cut (a re-host, a slip de-seat, a return, a merge) issues a cut release that re-opens the carried entries of the arcs on its moved side and the moved receiver's phase bias (`CHAIN cut_release ... arcs= rpb= pb=`), so every unheld chord with an end on the moved side starts its window again. This happens also when the moved side re-attaches through a held link at a known step of 0 under held first: the held links keep their integers, and the unheld chords below them lose their carry and their window.
+
+**Measured.** An episode is a run of epochs on which a link is refused for the window; its cause is read at its first epoch (the first that applies: left the tree, chord start, own release, own arc event, station event, a cut release whose moved side holds the link's receiver or satellite, with or without a held-first re-attachment at step 0, else unattributed).
+
+| ring | GPS L1C/L2W window share | GPS episodes per link-hour | Galileo L1X/L5X window share | Galileo episodes per link-hour |
+|---|---|---|---|---|
+| 2 | 17.5 % | 0.99 | 8.5 % | 0.52 |
+| 3 | 34.1 % | 1.72 | 16.0 % | 0.93 |
+| 4 | 46.2 % | 2.14 | 19.3 % | 1.06 |
+| 5 | 46.7 % | 2.13 | 28.6 % | 1.48 |
+| 6 | 63.6 % | 2.45 | 26.9 % | 1.13 |
+| 7 | 60.4 % | 2.56 | 30.0 % | 1.41 |
+| 8 | 61.0 % | 2.72 | 18.9 % | 1.03 |
+
+- Causes, all rings (GPS 2 449 episodes / Galileo 938): a chord's start, new or after a gap, 790 / 403; a cut release of unknown step upstream 800 / 108; a cut release through a held link at step 0, 353 / 283; unattributed 653 / 102; own arc events 20 / 16; leaving the tree 17 / 20; own release 6 / 6. Upstream cuts make up a growing share with depth (GPS ring 5: 364 of 728 episodes, 102 of them at step 0).
+- A GPS link opens its window about twice as often as a Galileo link at the same ring. The unattributed GPS episodes (653, a quarter) are not traced: a re-level of the carry from another source, a cut outside the two epochs read, or a moved side reconstructed incompletely.
+
+**Does a step-0 re-attachment need to reset the windows below it? No.** When the moved side re-attaches through a held link whose integer is kept, its frame is unchanged (a step of 0, or any known step), so the carried entries of its arcs stay valid after a rebase by that step; re-opening them throws their convergence away and restarts every unheld chord's window for no event of their own. In this run that is 353 GPS and 283 Galileo episodes, 14 % and 30 % of all.
+
+### 24.2 The fraction refusals: one term per receiver plus one per satellite
+
+Per epoch and family, the chords not held with a float: the signed N1 residual d = n_if - round(n_if) and the signed wide-lane residual w = (f1 - f2) - wl, fitted as one term per receiver plus one per satellite by alternating wrapped medians (receivers and satellites with at least 4 chords at the epoch); a shuffled null fits the same graph with the values permuted.
+
+| family | chord-epochs | N1 p50 before | after the terms | null | wide lane p50 before | after | null | fraction refusals within 0.20 after the terms |
+|---|---|---|---|---|---|---|---|---|
+| GPS L1C/L2W | 121 620 | 0.214 | 0.046 | 0.099 | 0.186 | 0.034 | 0.093 | 25 849 of 32 423 (80 %) |
+| Galileo L1X/L5X | 23 760 | 0.128 | 0.025 | 0.056 | 0.101 | 0.024 | 0.044 | 4 712 of 5 399 (87 %) |
+
+**Reading.** Yes: most of a GPS chord's fraction is shared with the other chords of its receiver and of its satellite at the epoch, well beyond what a fit of that many terms takes from shuffled values, and with the terms removed the GPS residuals fall below Galileo's raw ones. That is the frame: each tree arc is pinned at its own rounded float, so its own error becomes a potential of every vertex below it, and a chord carries the difference of its two vertices' potentials. On GPS the tree arcs' own errors are large (a receiver-by-satellite code bias leaks into the floats), on Galileo small. This agrees with the requesting session's look-ahead on the key-off run (per-arc wide-lane offsets p50 0.119 to 0.038, N1 0.195 to 0.029, nulls 0.092 and 0.098).
+
+### 24.3 The remedy, proposed (not built)
+
+1. **(a) A cut of known step keeps the moved side's carry.** When a held-first re-attachment gives the moved side a known step, its carried entries and receiver phase bias are rebased by that step instead of released. Narrow, no change of frame or decision; removes the step-0 window episodes (14 % on GPS, 30 % on Galileo here) and keeps the moved floats converged. The same episodes occur on the simulator, so the existing beds test it (held share, 0 wrong, the truth audit); standing invariant 1 holds (a known step is no jump to respond to). Do first: cheap and safe, though it does not touch the fraction.
+2. **(b) Decide against the consensus, done as a datum.** The fraction is the binding refusal at depth once the window opens, and 80 % of GPS fraction refusals fall within the bound against the consensus of the link's receiver and satellite. But a decision taken against the consensus while holds stay in the tree-pinned frame would hold integers whose fractional misfit is the frame error, as tension in the solve. The consistent form is a phase datum set by the consensus of all arcs (receiver and satellite phase biases from a robust fit over every arc, with the tree pins becoming integers measured against it), and the ring fix deciding in it. That is a change of the datum, not of the decision: it needs a design and the simulator first. Recommended second, as the remedy for GPS depth.
+3. **(c) Fewer GPS tree-link changes.** Default-off keys exist (`network.eq34_anchor_min_arc_ep`, a minimum arc age for a re-host candidate; `network.eq34_fresh_pin_sigma_scale`), so this is an arm, not a build. It reduces window openings and frame steps, but the fraction structure stays: whichever arc carries the tree, its own bias becomes the potential. The longevity and slip-aware elections are KEEP_OFF as measured harmful.
+4. **What the simulator needs.** Its GPS has receiver code biases per station and observable (`biases.rx_code_bias`, the same for every satellite, absorbed by the receiver code-bias states) and satellite biases (the same at every receiver); neither makes the frame signature. Needed: a constant code bias per (receiver, satellite) and code observable, from a per-station table or a seeded draw, about 0.10 to 0.15 m (an observed per-arc wide-lane offset of about 0.12 cycle p50 corresponds to about 0.10 m on both codes), applied to code only and written to a truth file, with Galileo unbiased as the control. With it the fixture's GPS would read like observed GPS, and (a), (b) and (c) can be graded against truth.
+
+## 25. 2026-11-15: stages O3 and O4 pre-registered
+
+Assigned by the requesting session with G0 (its words condensed; decided in the author's absence and listed for review). Its decision, recorded as its own: sigma_scale 2 is the setting on observed data from here on; the rule on the formal sigma is not used again there. Exe nrf9 (`a18324f2ed30a1c5`); every arm with `network.trace_windup_arcs`; a 10-epoch smoke of each stage first; Release; product files left in place for the requesting session's user replays.
+
+**O3: a second day at the setting that passed.** DOY 145 (its inputs are complete: the 56 receivers and the five products, as for DOY 143; 145 is the requesting session's first choice). Base: `_rap_nwa1nh_n144/arm.json` with every DOY-144 path moved to DOY 145 and `data_download.doy` 145 (holds off posture, 6 h from start 0).
+- `o3off_n145` and `o3off_n145r`: the key off with the default receiver and with `network.phase_datum_eq34_receiver` GOPE00CZE.
+- `o3g_n145` and `o3g_n145r`: holding, rule gated, order certain, gate odds, sigma_scale 2, `wl_frac_max` 0.25, held first, pairs `["E:L1X/L5X", "G:L1C/L2W"]`, with the two receivers.
+
+**O4: DOY 144, every pair family held.** Pairs `["E:L1X/L5X", "E:L1C/L5Q", "G:L1C/L2W", "G:L1W/L2W"]`, sigma_scale 2, `wl_frac_max` 0.25, held first. No receiver is in all four families' trees (Galileo X 28 receivers, Galileo C/Q 28, GPS L1C 39, GPS L1W 17), so two receivers move the roots:
+- `o4_n144`: the default roots (Galileo X BOGT00COL, Galileo C/Q COCO00AUS, GPS L1C and L2W BOR100POL, GPS L1W LEIJ00DEU).
+- `o4_n144r`: GOPE00CZE (moves the Galileo X and GPS L1C roots).
+- `o4_n144r2`: CHUR00CAN (tracks Galileo L1C/L5Q and GPS L1W/L2W; moves those roots).
+- `o4_n144b`: the default roots from +1 h (`start_offset_hours` 1.004167, the same end).
+- `o4off_n144r2`: the key off with CHUR00CAN (the other key-off references exist: `o2off_n144`, `o2off_n144r`, `o2off_n144b`).
+- Audit pairs: `o4_n144` with `o4_n144r` and with `o4_n144r2` (every common arc), and with `o4_n144b` (`--windup-trace`).
+- This is the test of the E03 case under holding: in log mode nothing keeps the frame through a tree change, with held first something does. If L1C/L5Q fails, it is traced first (which run steps, and which chain event at 2.12 h on the links of E03).
+
+**Bars (as O2, frozen; per family).** The audit over every common arc, 0 failing checks, with the sizes of any failing closure; every epoch emitted; every release named; RAIM rows not above the key off of the same receiver and start by more than a tenth; every release by the residual monitor listed. **Reads** as O2, per family.
