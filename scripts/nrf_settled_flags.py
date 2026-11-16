@@ -5,7 +5,8 @@ such a flag flip?  Read from a run's traces, nothing built.
     py -3.14 scripts/nrf_settled_flags.py <run> [<run> ...] [--from-h 1]
 
 Per pair family (the ring fix's, e.g. E:L1X/L5X) and epoch, two candidate rules for a satellite:
-  A  held      the satellite has a held link of the family at the epoch (logs/network_ring_fix.csv, state held), or its
+  A  held      the satellite has a held link of the family after the epoch's decisions (logs/network_ring_fix.csv,
+               state held or decided), or its
                tree edge on the family's first band entered the tree as a held link (a RINGFIX to_tree row) and has
                stayed a tree edge since
   B  reached   the satellite is reached from the family's datum receiver through held links and such certified tree
@@ -35,6 +36,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("runs", nargs="+")
     ap.add_argument("--from-h", type=float, default=1.0)
+    ap.add_argument("--check", action="store_true", help="compare rule B with the stream's own flags "
+                    "(network.ring_fix.settled_flags): the P records' signal_integer and wide_lane_integer")
     a = ap.parse_args()
     for run in a.runs:
         d = os.path.join(resolve(run), "logs")
@@ -44,7 +47,7 @@ def main():
             for r in csv.DictReader(fh):
                 fam = r["sat"][0] + ":" + r["sig1"] + "/" + r["sig2"]
                 fams.add(fam)
-                if r["state"] == "held":
+                if r["state"] in ("held", "decided"):   # held after the epoch's decisions
                     held[(round(float(r["tow"])), fam)].add((r["station"], r["sat"]))
         to_tree = collections.defaultdict(set)     # tow -> {(station, sat, sig1)}
         with open(os.path.join(d, "network_events.csv"), newline="") as fh:
@@ -61,6 +64,19 @@ def main():
                     tows.append(t)
                 edges[(t, r["band"])].append(r)
         t0 = tows[0]
+        emitted = collections.defaultdict(dict)   # tow -> {(sat, signal): (signal_integer, wide_lane_integer)}
+        if a.check:
+            with open(os.path.join(resolve(run), "products.txt"), encoding="utf-8", errors="replace") as fh:
+                now = None
+                for line in fh:
+                    q = line.rstrip().split(",")
+                    if q[0] == "E":
+                        now = round(float(q[2]))
+                    elif q[0] == "P" and now is not None and len(q) > 5:
+                        emitted[now][(q[1], q[2])] = (int(q[4]), int(q[5]))
+        mism = collections.Counter()
+        checked = 0
+        fam_sigs = {(f.split(":")[0], s) for f in fams for s in f.split(":")[1].split("/")}
         for fam in sorted(fams):
             c, sigs = fam.split(":")
             b1 = sigs.split("/")[0]
@@ -98,6 +114,17 @@ def main():
                             seen.add(w)
                             stack.append(w)
                 flag_b = {s: ("S:" + s) in seen for s in sats}
+                if a.check and t in emitted:
+                    for s in sats:
+                        for sig in sigs.split("/"):
+                            e = emitted[t].get((s, sig))
+                            if e is None:
+                                continue
+                            checked += 1
+                            if e[0] != int(flag_b[s]):
+                                mism["signal_integer differs from rule B (%s)" % fam] += 1
+                            if e[1] != 1:
+                                mism["wide_lane_integer not 1 on a held family (%s)" % fam] += 1
                 if t < t0 + 3600.0 * a.from_h:
                     prev_flag = {"A": flag_a, "B": flag_b}
                     continue
@@ -123,6 +150,16 @@ def main():
                       % (h, 100.0 * fa / n, 100.0 * fb / n, pct(nflag["A"][h], 0.1), pct(nflag["A"][h], 0.5),
                          pct(nflag["B"][h], 0.1), pct(nflag["B"][h], 0.5)))
             print("   flips per satellite-hour: A %.2f, B %.2f" % (flips["A"] / hours, flips["B"] / hours))
+        if a.check:
+            other = 0
+            for t, recs in emitted.items():
+                for (sat, sig), (si, wl) in recs.items():
+                    if (sat[0], sig) not in fam_sigs:
+                        other += 1
+                        if si != 0 or wl != 0:
+                            mism["a record of no held family not 0/0"] += 1
+            print("   CHECK against the stream's flags: %d held-family records compared, %d records of no held family; "
+                  "mismatches: %s" % (checked, other, dict(mism) if mism else "none"))
     return 0
 
 

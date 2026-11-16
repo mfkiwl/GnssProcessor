@@ -5,6 +5,7 @@
  */
 
 #include "network/ar/RingFix.hpp"
+#include "network/ar/ArcGraph.hpp"   // arcgraph::Dsu, the components of the settled flags
 #include "common/GnssIdentity.hpp"   // systemOfSat, constellationKey
 
 #include <algorithm>
@@ -34,6 +35,23 @@ const char* ringFixReleaseName(RingFixRelease c) {
         case RingFixRelease::Monitor: return "monitor";
     }
     return "?";
+}
+
+std::set<std::string> ringFixSettledSats(const std::vector<std::pair<int, std::string>>& links,
+                                         const std::map<std::string, int>& root_of_sat) {
+    // Receivers keep their roster index as id; satellites take ids above every receiver's.
+    std::map<std::string, int> sat_id;
+    int next = 1 << 20;
+    const auto idOf = [&](const std::string& s) {
+        const auto it = sat_id.find(s);
+        return it != sat_id.end() ? it->second : (sat_id[s] = next++);
+    };
+    arcgraph::Dsu dsu;
+    for (const auto& [sta, sat] : links) arcgraph::dsuUnite(dsu, sta, idOf(sat));
+    std::set<std::string> out;
+    for (const auto& [sat, root] : root_of_sat)
+        if (sat_id.count(sat) != 0 && arcgraph::dsuFind(dsu, idOf(sat)) == arcgraph::dsuFind(dsu, root)) out.insert(sat);
+    return out;
 }
 
 bool ringFixCodeEventOpen(double code_event_s, double window_s, double now_s) {

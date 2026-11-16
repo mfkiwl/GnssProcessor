@@ -148,6 +148,11 @@ void networkRingFixArm(NetworkRun& run) {
                                            : RingFixRule::Gated;
     rf->held_first = nc.ring_fix.held_first;
     rf->max_decisions_per_epoch = nc.ring_fix.max_decisions_per_epoch;
+    rf->settled_flags_on = nc.ring_fix.settled_flags;
+    if (rf->settled_flags_on)
+        log->warn("Network (ring fix): SETTLED FLAGS: on every phase-bias record of a held family, signal_integer 1 "
+                  "only while the satellite is reached from its datum receiver through held links and tree edges "
+                  "that entered as held links, wide_lane_integer 1; both 0 on the other records.");
     rf->order = nc.ring_fix.order == "certain" ? RingFixOrder::Certain : RingFixOrder::Ring;
     rf->gate_rule = nc.ring_fix.gate == "odds" ? RingFixGateRule::Odds : RingFixGateRule::Sigma;
     rf->max_gap_s = ctx.knobs.pl_max_gap_s;
@@ -450,6 +455,7 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
         L.monitor_trip = false;
         L.rebase_stamps = false;
         ++rf.counters.to_tree;
+        if (rf.settled_flags_on) rf.certified_edges.insert({id.station, id.sat, id.sig1});
         traces.emitEvent(t, "RINGFIX", "to_tree", id.sat, nameOf(id.station), std::nullopt, std::nullopt, "chain",
                          fmt::format("sig1={} sig2={} n1={} n2={}", id.sig1, id.sig2, L.n1, L.n2));
     }
@@ -885,6 +891,43 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                 << audit << '\n';
         }
     }
+
+    // The settled flags (network.ring_fix.settled_flags), after this epoch's decisions: per held family, the
+    // satellites reached from their datum receiver through held links and tree edges that entered as held links.
+    if (rf.settled_flags_on) {
+        for (auto it = rf.certified_edges.begin(); it != rf.certified_edges.end();)
+            it = tree_arcs.count({std::get<0>(*it), std::get<1>(*it), std::get<2>(*it)}) ? std::next(it)
+                                                                                    : rf.certified_edges.erase(it);
+        std::map<std::string, int> index_of;
+        for (std::size_t i = 0; i < stations.size(); ++i) index_of[stations[i].name] = static_cast<int>(i);
+        std::map<std::pair<std::string, std::string>, bool> now;
+        for (const auto& [ck, s1, s2] : rf.pairs) {
+            std::vector<std::pair<int, std::string>> certified;
+            for (const auto& [id, L] : rf.links)
+                if (L.held && id.sig1 == s1 && id.sig2 == s2 && constellationKey(systemOfSat(id.sat)) == ck)
+                    certified.emplace_back(id.station, id.sat);
+            for (const auto& [sta, sat, sig] : rf.certified_edges)
+                if (sig == s1 && constellationKey(systemOfSat(sat)) == ck) certified.emplace_back(sta, sat);
+            std::map<std::string, int> root_of_sat;
+            for (const ChainEdgeObs& e : obs.edges) {
+                if (e.signal != s1 || constellationKey(systemOfSat(e.sat)) != ck) continue;
+                const auto r = index_of.find(e.r1);
+                if (r != index_of.end()) root_of_sat[e.sat] = r->second;
+            }
+            const std::set<std::string> settled = ringFixSettledSats(certified, root_of_sat);
+            for (const auto& [sat, root] : root_of_sat) {
+                (void)root;
+                const bool f = settled.count(sat) != 0;
+                for (const std::string& sig : {s1, s2}) {
+                    now[{sat, sig}] = f;
+                    ++(f ? rf.counters.settled_signal_epochs : rf.counters.unsettled_signal_epochs);
+                    const auto p0 = rf.settled.find({sat, sig});
+                    if (p0 != rf.settled.end() && p0->second != f) ++rf.counters.settled_flips;
+                }
+            }
+        }
+        rf.settled = std::move(now);
+    }
 }
 
 // ---- Run-end report ----
@@ -952,6 +995,10 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
                   C.cuts - C.cuts_known, C.reattached, C.held_first_kept, C.cut_released_usable, C.cuts_nested,
                   C.release_floored, kRingFixReleaseFloorM2,
                   rf.held_first ? " Held first ARMED (network.ring_fix.held_first)." : "");
+    if (rf.settled_flags_on)
+        log->warn("Network (ring fix, settled flags): {} satellite-signal-epochs of held families flagged settled, "
+                  "{} not; {} flips between consecutive epochs.",
+                  C.settled_signal_epochs, C.unsettled_signal_epochs, C.settled_flips);
     if (rf.rehost_keep_carry)
         log->warn("Network (ring fix, re-hosts onto held links): {} kept with their carries (the new host's carry on "
                   "the held integer); {} released because that carry was 1e-4 cycle or more off the held integer (a "

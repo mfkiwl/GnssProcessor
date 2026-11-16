@@ -945,3 +945,14 @@ TEST(RingFixCodeEvent, ACodeEventClosesTheSatellitesLinksForTheWindowOnly) {
     EXPECT_EQ(el[0].kind, RingFixEvent::Kind::Hold);
     EXPECT_TRUE(late.links.at(kId).held);
 }
+
+TEST(RingFixSettledFlags, ASatelliteIsSettledOnlyInItsRootsComponentOfHeldAndCertifiedLinks) {
+    // E01 and E02 are tied to receiver 0 through receiver 1; E03 hangs on receiver 2, which nothing ties to 0;
+    // E04 has no certified link at all.
+    const std::vector<std::pair<int, std::string>> links = {{0, "E01"}, {1, "E01"}, {1, "E02"}, {2, "E03"}};
+    const std::map<std::string, int> roots = {{"E01", 0}, {"E02", 0}, {"E03", 0}, {"E04", 0}};
+    EXPECT_EQ(ringFixSettledSats(links, roots), (std::set<std::string>{"E01", "E02"}));
+    EXPECT_TRUE(ringFixSettledSats({}, roots).empty());
+    // A satellite whose tree has another datum receiver is settled against that one.
+    EXPECT_EQ(ringFixSettledSats({{2, "E03"}}, {{"E03", 2}}), (std::set<std::string>{"E03"}));
+}

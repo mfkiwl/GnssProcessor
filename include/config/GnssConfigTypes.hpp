@@ -1944,6 +1944,12 @@ namespace GnssProcessor {
         /// per epoch, the highest log-odds of N1 first; the others are refused with the cause cap and keep their
         /// persistence count.  0: no cap.  Default 3, the value set when a wrong decision was still expected.
         int max_decisions_per_epoch{ 3 };
+        /// @c network.ring_fix.settled_flags: the stream says which satellite signals are settled.  On every emitted
+        /// phase-bias record of a held family (a pair of network.ring_fix.pairs) signal_integer is 1 only while the
+        /// satellite is reached from its tree's datum receiver through held links and tree edges that entered the
+        /// tree as held links, and wide_lane_integer is 1; on a record of no held family both are 0.  False
+        /// (default): the records carry the flags as before.
+        bool settled_flags{ false };
         /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
         /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
         /// latch (the residual monitor's path).  Empty (default): no mask.

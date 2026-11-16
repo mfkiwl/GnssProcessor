@@ -1536,6 +1536,11 @@ namespace GnssProcessor {
                                                   "network_ring_fix_code_event_window_s", 0.0);
             if (!(rf.code_event_window_s >= 0.0 && rf.code_event_window_s <= 86400.0))
                 throw std::runtime_error("network.ring_fix.code_event_window_s must be in [0, 86400] s.");
+            rf.settled_flags = jval<bool>(json, "network.ring_fix.settled_flags", "network_ring_fix_settled_flags",
+                                          false);
+            if (rf.settled_flags && rf.pairs.empty())
+                throw std::runtime_error("network.ring_fix.settled_flags needs network.ring_fix.pairs (the held "
+                                         "families whose records it flags).");
             rf.max_decisions_per_epoch = jval<int>(json, "network.ring_fix.max_decisions_per_epoch",
                                                    "network_ring_fix_max_decisions_per_epoch", 3);
             if (rf.max_decisions_per_epoch < 0)

@@ -210,6 +210,21 @@ RingFixGate ringFixGate(double f1, double f2, double q11, double q12, double q22
  */
 bool ringFixCodeEventOpen(double code_event_s, double window_s, double now_s);
 
+/**
+ * @brief The satellites of one held family that are settled: reached from their tree's datum receiver through
+ *        held links and tree edges that entered the tree as held links (network.ring_fix.settled_flags).
+ *
+ * The links form a graph over receivers and satellites; a satellite is settled when it lies in one component
+ * with its own datum receiver.  The components are the arc graph's disjoint sets (@ref arcgraph::Dsu).
+ *
+ * @param links       The family's certified links, (station index, satellite): its held links and its tree
+ *                    edges that entered as held links.
+ * @param root_of_sat Every satellite of the family's tree -> its tree's datum receiver (station index).
+ * @return The settled satellites (a subset of the keys of @p root_of_sat).
+ */
+std::set<std::string> ringFixSettledSats(const std::vector<std::pair<int, std::string>>& links,
+                                         const std::map<std::string, int>& root_of_sat);
+
 // ---- Rings and candidates ---------------------------------------------------------------------
 
 /// A link's identity: the station (roster index), the satellite and its pair family's signals.
@@ -392,6 +407,9 @@ struct RingFixCounters {
     long long rehost_kept{0};             ///< Chain re-hosts onto a held link kept, not released (rehost_keep_carry): the host's carry on the held integer.
     long long rehost_off_integer{0};      ///< Re-hosts onto a held link released: the host's carry 1e-4 cycle or more off the held integer.
     long long rehost_not_kept{0};         ///< Re-hosts onto a held link released for another cause (no carry, an unknown draft step).
+    long long settled_signal_epochs{0};   ///< Satellite-signal-epochs of held families flagged settled (settled_flags).
+    long long unsettled_signal_epochs{0}; ///< Satellite-signal-epochs of held families not flagged settled.
+    long long settled_flips{0};           ///< Changes of a satellite signal's settled flag between consecutive epochs.
     long long reattached{0};              ///< Re-attachments through a held link (one per released edge the walk took first).
     long long held_first_kept{0};         ///< Held links crossing those cuts, kept at their integers (the entry links not counted).
     long long cut_released_usable{0};     ///< Held links released across an unknown step while usable (not latched, monitor not tripped).
@@ -457,6 +475,13 @@ struct NetworkRingFix {
     double      code_event_window_s{0.0};   ///< No decision on a satellite's links this long after its code event (s; 0: none).
     bool        rehost_keep_carry{false};   ///< A chain re-host onto a held link keeps the moved side's carries (network.ring_fix.rehost_keep_carry).
     int         max_decisions_per_epoch{kRingFixMaxDecisionsPerEpoch};   ///< Decisions per epoch under the order certain (network.ring_fix.max_decisions_per_epoch; 0: no cap).
+    bool        settled_flags_on{false};    ///< The stream carries the settled flags (network.ring_fix.settled_flags).
+    /// Tree edges that entered the tree as held links, (station, satellite, first signal of the pair), kept while
+    /// the edge stays in the tree (settled_flags only).
+    std::set<std::tuple<int, std::string, std::string>> certified_edges;
+    /// This epoch's settled flag of every satellite signal of a held family present in its tree, (satellite,
+    /// signal) -> settled (settled_flags only).
+    std::map<std::pair<std::string, std::string>, bool> settled;
     // Simulation only: the slip mask (network.ring_fix.mask_slip_*).
     int         mask_station{-1};           ///< The masked arc's station (roster index; -1: no mask).
     std::string mask_sat;                   ///< The masked arc's satellite.

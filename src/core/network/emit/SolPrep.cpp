@@ -16,6 +16,7 @@
 #include "network/emit/SolPrep.hpp"
 
 #include "network/qc/RhsAttrib.hpp"   // flight-recorder trip latch (INC-5)
+#include "network/ar/RingFix.hpp"     // the settled flags (network.ring_fix.settled_flags)
 
 #include "network/state/RunContext.hpp"            // ctx.* aliases
 #include "common/GnssIdentity.hpp"              // systemOfSat, letterOfSat
@@ -148,6 +149,22 @@ NetworkSolPrepResult networkSolPrep(NetworkRun& run, const NetworkEpoch& ep, Epo
     // --- Emit -----------------------------------------------------------
     NetworkSolutionEpoch sol = est.toSolutionEpoch(x_s, se.time, iod++,
                                                    /*provider_id=*/0, /*solution_id=*/0);
+    // The settled flags (network.ring_fix.settled_flags): on a record of a held family signal_integer is the ring
+    // fix's settled flag of this epoch and wide_lane_integer 1; on a record of no held family both are 0.
+    if (ctx.carry.ring_fix && ctx.carry.ring_fix->settled_flags_on) {
+        const NetworkRingFix& rf = *ctx.carry.ring_fix;
+        for (auto& s : sol.sats) {
+            for (auto& [signal, npb] : s.phase_bias) {
+                bool held_family = false;
+                const std::string ck_sat = constellationKey(systemOfSat(s.sat));
+                for (const auto& [ck, s1, s2] : rf.pairs)
+                    if (ck == ck_sat && (signal == s1 || signal == s2)) held_family = true;
+                const auto f = rf.settled.find({s.sat, signal});
+                npb.signal_integer    = held_family && f != rf.settled.end() && f->second;
+                npb.wide_lane_integer = held_family ? 1 : 0;
+            }
+        }
+    }
     // Stamp, per emitted satellite, the broadcast-ephemeris version (IODE) that the
     // producer's clock-C0 baseline used, so the consumer applies C0 against the same
     // broadcast clock (getSatelliteClockCorrection pinned to clock_iode) and
