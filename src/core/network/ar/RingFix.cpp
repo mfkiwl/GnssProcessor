@@ -340,7 +340,7 @@ std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
         int decided_now = 0;
         for (auto& [o, ev] : eligible) {
             RingFixLink& L = rf.links[o->id];
-            if (decided_now < kRingFixMaxDecisionsPerEpoch) {
+            if (rf.max_decisions_per_epoch <= 0 || decided_now < rf.max_decisions_per_epoch) {
                 hold(L, *o, ev);
                 ++decided_now;
             } else {

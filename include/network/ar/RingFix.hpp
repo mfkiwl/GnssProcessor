@@ -389,10 +389,9 @@ struct RingFixCounters {
     // Stage N2b.
     long long cuts_held_first{0};         ///< Cuts whose moved side re-attached through a held link the walk took first.
     long long cuts_held_first_zero{0};    ///< Of them, with a known step of 0.
-    long long rehost_kept{0};             ///< Chain re-hosts onto a held link kept, not released (rehost_keep_carry).
-    long long rehost_kept_step{0};        ///< Of them, with a step of 1e-4 cycle or more carried by the shift walk.
-    long long rehost_kept_retarget{0};    ///< Of them, whose held integer differs from the rounded carry the draft took.
-    long long rehost_not_kept{0};         ///< Re-hosts onto a held link released all the same (no carry, or a step the walk cannot carry).
+    long long rehost_kept{0};             ///< Chain re-hosts onto a held link kept, not released (rehost_keep_carry): the host's carry on the held integer.
+    long long rehost_off_integer{0};      ///< Re-hosts onto a held link released: the host's carry 1e-4 cycle or more off the held integer.
+    long long rehost_not_kept{0};         ///< Re-hosts onto a held link released for another cause (no carry, an unknown draft step).
     long long reattached{0};              ///< Re-attachments through a held link (one per released edge the walk took first).
     long long held_first_kept{0};         ///< Held links crossing those cuts, kept at their integers (the entry links not counted).
     long long cut_released_usable{0};     ///< Held links released across an unknown step while usable (not latched, monitor not tripped).
@@ -457,6 +456,7 @@ struct NetworkRingFix {
     double      sigma_scale{1.0};           ///< The odds gate's factor on the formal sigmas (network.ring_fix.sigma_scale).
     double      code_event_window_s{0.0};   ///< No decision on a satellite's links this long after its code event (s; 0: none).
     bool        rehost_keep_carry{false};   ///< A chain re-host onto a held link keeps the moved side's carries (network.ring_fix.rehost_keep_carry).
+    int         max_decisions_per_epoch{kRingFixMaxDecisionsPerEpoch};   ///< Decisions per epoch under the order certain (network.ring_fix.max_decisions_per_epoch; 0: no cap).
     // Simulation only: the slip mask (network.ring_fix.mask_slip_*).
     int         mask_station{-1};           ///< The masked arc's station (roster index; -1: no mask).
     std::string mask_sat;                   ///< The masked arc's satellite.
@@ -492,7 +492,8 @@ struct NetworkRingFix {
  * Under @ref RingFixGateRule::Odds the sigma test is replaced by the odds test (after the fraction
  * test): both log-odds at least @ref kRingFixMinLogOdds.  Under @ref RingFixOrder::Certain every link
  * with a float is a candidate, and the links that pass every test are decided after the loop, the
- * highest log-odds of N1 first (ties by link), at most @ref kRingFixMaxDecisionsPerEpoch; the others
+ * highest log-odds of N1 first (ties by link), at most @c rf.max_decisions_per_epoch (default
+ * @ref kRingFixMaxDecisionsPerEpoch; 0: no cap); the others
  * are refused with the cause cap and keep their persistence count.
  *
  * During the oracle phase (simulation only: @c rf.oracle_until_s after @c rf.t0_s) every link with

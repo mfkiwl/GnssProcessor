@@ -1349,8 +1349,9 @@ std::optional<long long> chainHeldInteger(const ChainElection& el, const ChainBa
     return std::nullopt;
 }
 
-/// Remedy (a): a kept re-host's displacement under this many cycles is a step of 0 (the hold's own residual,
-/// micrometres on the simulator and on DOY 145; card NRF section 41).
+/// Remedy (a): a re-host onto a held link is kept only when the new host's carry sits on the held integer to
+/// within this many cycles (the hold's own residual, micrometres on the simulator and on DOY 144 and 145; card
+/// NRF sections 41 and 42).
 constexpr double kRehostKeepZeroStepCyc = 1e-4;
 
 /// The rehost row of the chain's event table, applied to a pin after the as-built draft, the kept row
@@ -1369,13 +1370,14 @@ constexpr double kRehostKeepZeroStepCyc = 1e-4;
 /// side and drops the receiver phase-bias carries of its receivers, and releaseCutCarries erases the
 /// leveling carries that touch it.  The draft's facts are kept in @c d.as_built for the observatory.
 ///
-/// One exception (network.ring_fix.rehost_keep_carry): when the new edge's arc is a link the ring fix holds,
-/// its integer is certified, so the edge takes the held integer and the step is known: the displacement from
-/// the new host's carry, which the shift walk carries into the moved side.  A displacement under
-/// kRehostKeepZeroStepCyc is the hold's own residual (the held link's carry sits on its integer to within
-/// micrometres) and is a step of 0: nothing moves, whether or not the carry shift is armed.  Kept only where
-/// the host's carry exists, the draft's step was known otherwise (no unpinned root handover), and the walk can
-/// carry the step (0, or the carry shift armed); else the edge is released as above.
+/// One exception (network.ring_fix.rehost_keep_carry): when the new edge's arc is a link the ring fix holds and
+/// the new host's carry sits on the held integer (within kRehostKeepZeroStepCyc: the hold's own residual), the
+/// re-host changes nothing physical: the edge takes the held integer, the step is 0, and the moved side keeps its
+/// carries.  A held link whose carry is off its integer (one decided at the previous epoch, before the hold has
+/// pulled its carry) is released as above: a fractional step carried into the moved side would move every chord
+/// through it off its integer, held links included, and the ring fix sees no cut to re-express them by (card NRF
+/// section 42).  Kept only where the host's carry exists and the draft's step was known otherwise (no unpinned
+/// root handover).
 ///
 /// @param d The draft; replaced in place when the edge is released or kept on a held integer.
 void applyRehostRow(ChainElection& el, const ChainBand& band, std::size_t ri, const std::string& sat,
@@ -1389,23 +1391,22 @@ void applyRehostRow(ChainElection& el, const ChainBand& band, std::size_t ri, co
         ++cnt.eq34_rh_not_freed;
         return;
     }
-    // Kept on a held integer (remedy (a)): the step is known, the moved side keeps its carries.
+    // Kept on a held integer (remedy (a)): the host's carry on the held integer, a step of 0.
     if (const std::optional<long long> held = chainHeldInteger(el, band, ri, sat); held.has_value()) {
         NetworkRingFix& rf = *el.ctx.carry.ring_fix;
         const double target = static_cast<double>(*held) * band.lambda_m;
-        double move = std::isfinite(d.carry_val) ? target - d.carry_val : 0.0;
-        if (std::abs(move) < kRehostKeepZeroStepCyc * band.lambda_m) move = 0.0;   // the hold's residual: no step
-        if (band.lambda_m > 0.0 && std::isfinite(d.carry_val) && d.known && (el.shift_on || move == 0.0)) {
+        const bool   carry  = band.lambda_m > 0.0 && std::isfinite(d.carry_val);
+        const bool   on_int = carry && std::abs(target - d.carry_val) < kRehostKeepZeroStepCyc * band.lambda_m;
+        if (on_int && d.known) {
             ++rf.counters.rehost_kept;
-            if (move != 0.0) ++rf.counters.rehost_kept_step;
-            if (std::llround(d.target / band.lambda_m) != *held) ++rf.counters.rehost_kept_retarget;
             d.as_built = asBuilt(d);
             d.held     = true;
             d.target   = target;
-            d.pinmove  = move;
+            d.pinmove  = 0.0;
             return;
         }
-        ++rf.counters.rehost_not_kept;
+        if (carry && !on_int) ++rf.counters.rehost_off_integer;
+        else                  ++rf.counters.rehost_not_kept;
     }
     // Released.  What the as-built draft would have done is tallied and kept for the observatory.
     ++cnt.eq34_rh_released;

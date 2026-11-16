@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -475,6 +476,40 @@ TEST(RingFixDecideOrder, UnderTheCertainOrderARingWaitIsNoRefusal) {
     EXPECT_TRUE(rf.links.at(kId).held);
     EXPECT_EQ(rf.counters.refused[static_cast<std::size_t>(RingFixRefuse::NotCandidate)], 0);
     EXPECT_EQ(rf.counters.decided_by_ring[4], 1);
+}
+
+TEST(RingFixDecideOrder, TheCapIsAKeyAndZeroDecidesEveryLinkThatPasses) {
+    for (const int cap : {0, 2, 6}) {
+        double now = 100000.0;
+        NetworkRingFix rf;
+        rf.order = RingFixOrder::Certain;
+        rf.max_decisions_per_epoch = cap;
+        std::vector<RingFixLinkId> ids;
+        for (int i = 0; i < 5; ++i) {
+            RingFixLinkId id{i, "G0" + std::to_string(i + 1), "L1C", "L2W"};
+            ids.push_back(id);
+            RingFixLink& L = rf.links[id];
+            L.chord_since_s = now - 2.0 * kRingFixWindowS;
+            L.last_chord_s = now - 30.0;
+        }
+        const auto epochObs = [&]() {
+            std::vector<RingFixDecideObs> v;
+            for (int i = 0; i < 5; ++i)
+                v.push_back(obsNear(ids[static_cast<std::size_t>(i)], 10, 7, 0.0, 1e-5 * (i + 1)));
+            return v;
+        };
+        for (int k = 1; k < kRingFixPersistEpochs; ++k, now += 30.0) ringFixDecideStep(rf, epochObs(), now);
+        const auto ev = ringFixDecideStep(rf, epochObs(), now);
+        int holds = 0, caps = 0;
+        for (const RingFixEvent& e : ev) {
+            if (e.kind == RingFixEvent::Kind::Hold) ++holds;
+            if (e.kind == RingFixEvent::Kind::Refuse && e.refuse == RingFixRefuse::Cap) ++caps;
+        }
+        const int expect = cap == 0 ? 5 : std::min(cap, 5);
+        EXPECT_EQ(holds, expect) << cap;
+        EXPECT_EQ(caps, 5 - expect) << cap;
+    }
+    EXPECT_EQ(NetworkRingFix{}.max_decisions_per_epoch, kRingFixMaxDecisionsPerEpoch);
 }
 
 TEST(RingFixDecideOrder, TheCapDecidesTheMostCertainFirstAndKeepsTheOthersCount) {

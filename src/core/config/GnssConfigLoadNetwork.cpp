@@ -1536,6 +1536,10 @@ namespace GnssProcessor {
                                                   "network_ring_fix_code_event_window_s", 0.0);
             if (!(rf.code_event_window_s >= 0.0 && rf.code_event_window_s <= 86400.0))
                 throw std::runtime_error("network.ring_fix.code_event_window_s must be in [0, 86400] s.");
+            rf.max_decisions_per_epoch = jval<int>(json, "network.ring_fix.max_decisions_per_epoch",
+                                                   "network_ring_fix_max_decisions_per_epoch", 3);
+            if (rf.max_decisions_per_epoch < 0)
+                throw std::runtime_error("network.ring_fix.max_decisions_per_epoch must be 0 (no cap) or more.");
             rf.rehost_keep_carry = jval<bool>(json, "network.ring_fix.rehost_keep_carry",
                                               "network_ring_fix_rehost_keep_carry", false);
             rf.mask_slip_arc = jval<std::string>(json, "network.ring_fix.mask_slip_arc",

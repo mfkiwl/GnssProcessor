@@ -147,6 +147,7 @@ void networkRingFixArm(NetworkRun& run) {
              : nc.ring_fix.rule == "log"   ? RingFixRule::Log
                                            : RingFixRule::Gated;
     rf->held_first = nc.ring_fix.held_first;
+    rf->max_decisions_per_epoch = nc.ring_fix.max_decisions_per_epoch;
     rf->order = nc.ring_fix.order == "certain" ? RingFixOrder::Certain : RingFixOrder::Ring;
     rf->gate_rule = nc.ring_fix.gate == "odds" ? RingFixGateRule::Odds : RingFixGateRule::Sigma;
     rf->max_gap_s = ctx.knobs.pl_max_gap_s;
@@ -208,8 +209,9 @@ void networkRingFixArm(NetworkRun& run) {
     // The options of stage N1b, named only when armed (a run under the defaults logs what it logged before).
     if (rf->order == RingFixOrder::Certain)
         log->warn("Network (ring fix): order CERTAIN: every chord with a float is a candidate (rings reported, not "
-                  "enforced); the links that pass are decided the highest log-odds of N1 first, at most {} per epoch.",
-                  kRingFixMaxDecisionsPerEpoch);
+                  "enforced); the links that pass are decided the highest log-odds of N1 first, {}.",
+                  rf->max_decisions_per_epoch > 0 ? fmt::format("at most {} per epoch", rf->max_decisions_per_epoch)
+                                                  : std::string("with no cap per epoch"));
     if (rf->gate_rule == RingFixGateRule::Odds)
         log->warn("Network (ring fix): gate ODDS: in place of the sigma bound, the log-odds of N1 and of the wide "
                   "lane's own float at least {:.4f} (ln 1e6), the fraction of N1 at most {:.2f}.",
@@ -951,11 +953,11 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
                   C.release_floored, kRingFixReleaseFloorM2,
                   rf.held_first ? " Held first ARMED (network.ring_fix.held_first)." : "");
     if (rf.rehost_keep_carry)
-        log->warn("Network (ring fix, re-hosts onto held links): {} kept with their carries ({} with a step of "
-                  "1e-4 cycle or more carried by the shift walk, {} whose held integer differs from the rounded "
-                  "carry); {} "
-                  "released all the same (no carry at the new host, or a step the walk cannot carry).",
-                  C.rehost_kept, C.rehost_kept_step, C.rehost_kept_retarget, C.rehost_not_kept);
+        log->warn("Network (ring fix, re-hosts onto held links): {} kept with their carries (the new host's carry on "
+                  "the held integer); {} released because that carry was 1e-4 cycle or more off the held integer (a "
+                  "link decided the epoch before); {} released for another cause (no carry at the new host, an "
+                  "unknown draft step).",
+                  C.rehost_kept, C.rehost_off_integer, C.rehost_not_kept);
     if (!rf.pairs.empty())
         log->warn("Network (ring fix, pairs): {} chord link-epoch(s) of other pair families were not considered.",
                   C.excluded_link_epochs);

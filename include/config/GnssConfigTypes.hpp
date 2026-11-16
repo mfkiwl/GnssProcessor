@@ -1933,14 +1933,17 @@ namespace GnssProcessor {
         /// while its float looks clean.  Links already held are kept: they were decided on the level before the move.
         /// 0 (default): no such window.
         double code_event_window_s{ 0.0 };
-        /// @c network.ring_fix.rehost_keep_carry: a chain re-host onto a link the ring fix holds keeps the moved
-        /// side's carries.  The held integer is certified, so the new tree edge takes it and the step of the moved
-        /// side is known: its carried arc entries, receiver phase biases and satellite phase biases are carried by
-        /// the chain's shift walk (by nothing at a step of 0) instead of released.  Applied where the step is exact
-        /// (the new host's carry exists) and the walk can carry it (a step of 0, or the carry shift armed); a re-host
-        /// onto an arc that is not held, or held but latched or with its monitor tripped, is released as before.
-        /// False (default): every re-host is released.
+        /// @c network.ring_fix.rehost_keep_carry: a chain re-host onto a link the ring fix holds, whose carry sits on
+        /// the held integer (within 1e-4 cycle), keeps the moved side's carries: the new tree edge takes the held
+        /// integer at a step of 0, and the moved side's carried arc entries, receiver phase biases and satellite phase
+        /// biases stay as they are instead of being released.  A re-host onto an arc that is not held, held but
+        /// latched or with its monitor tripped, or held with its carry off the integer (decided the epoch before), is
+        /// released as before.  False (default): every re-host is released.
         bool rehost_keep_carry{ false };
+        /// @c network.ring_fix.max_decisions_per_epoch: under the order certain, at most this many links are decided
+        /// per epoch, the highest log-odds of N1 first; the others are refused with the cause cap and keep their
+        /// persistence count.  0: no cap.  Default 3, the value set when a wrong decision was still expected.
+        int max_decisions_per_epoch{ 3 };
         /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
         /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
         /// latch (the residual monitor's path).  Empty (default): no mask.
