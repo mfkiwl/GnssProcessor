@@ -1463,6 +1463,15 @@ int Application::networkSetup_(NetworkSetupResult& setup) {
                           nc.disc_mark_scope == "channel",   // per-channel mark scope
                           config_.networkDiscPhaseVisible() ? kPhaseVisibleMinSats : 0);  // discpv=
     NetworkProductEmitter& emitter = *setup.emitter;
+    if (!nc.disc_step_class_pairs.empty()) {
+        emitter.setStepClassTest(nc.disc_step_class_pairs, nc.disc_step_class_tol_cyc);
+        std::string fams;
+        for (const auto& f : nc.disc_step_class_pairs) fams += (fams.empty() ? "" : ", ") + f;
+        log->warn("Network: STEP-CLASS DECLARATION on {} (tolerance {:.3f} cycle): a whole or fraction "
+                  "step of a family's level declares its signals on the phase channel in place of the "
+                  "value test; quiet and ionosphere-like steps declare nothing.", fams,
+                  nc.disc_step_class_tol_cyc);
+    }
 
     // --- Optional on-disk product serialization -----------------------------
     // A reusable per-epoch dump of the emitted solution (the same pre-emit

@@ -230,6 +230,11 @@ void networkRingFixArm(NetworkRun& run) {
     // Stage O2: the odds gate's factor on the formal sigmas, named only when set.
     rf->sigma_scale = nc.ring_fix.sigma_scale;
     rf->code_event_window_s = nc.ring_fix.code_event_window_s;
+    rf->rehost_keep_carry = nc.ring_fix.rehost_keep_carry;
+    if (rf->rehost_keep_carry)
+        log->warn("Network (ring fix): RE-HOST KEEPS THE CARRY: a chain re-host onto a held link takes the held "
+                  "integer, and the moved side's carried entries, receiver and satellite phase biases are carried "
+                  "by the known step instead of released.");
     if (rf->code_event_window_s > 0.0)
         log->warn("Network (ring fix): CODE-EVENT WINDOW {:.0f} s: no decision on a satellite's links within that "
                   "time after its code reference moves or its code datum re-seeds (refusal code_event); links "
@@ -945,6 +950,11 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
                   C.cuts - C.cuts_known, C.reattached, C.held_first_kept, C.cut_released_usable, C.cuts_nested,
                   C.release_floored, kRingFixReleaseFloorM2,
                   rf.held_first ? " Held first ARMED (network.ring_fix.held_first)." : "");
+    if (rf.rehost_keep_carry)
+        log->warn("Network (ring fix, re-hosts onto held links): {} kept with their carries ({} with a non-zero "
+                  "step carried by the shift walk, {} whose held integer differs from the rounded carry); {} "
+                  "released all the same (no carry at the new host, or a step the walk cannot carry).",
+                  C.rehost_kept, C.rehost_kept_step, C.rehost_kept_retarget, C.rehost_not_kept);
     if (!rf.pairs.empty())
         log->warn("Network (ring fix, pairs): {} chord link-epoch(s) of other pair families were not considered.",
                   C.excluded_link_epochs);

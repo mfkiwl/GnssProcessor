@@ -1150,6 +1150,31 @@ static int networkPhaseVisibleStepRunEnd(const NetworkRunEndView& v) {
     return 0;
 }
 
+/**
+ * @brief Run-end report of the step-class declaration (network.disc_step_class_pairs): the
+ *        classified satellite-family-epochs by class, the signals declared, and how its
+ *        verdicts differ from the value test's on the same keys.
+ *
+ * Gate: the emitter armed with at least one family.
+ *
+ * @param v The run at its end (network/runend/RunEnd.hpp).
+ * @return 0 (this report does not set the exit code).
+ */
+static int networkStepClassRunEnd(const NetworkRunEndView& v) {
+    if (!v.setup.emitter || !v.setup.emitter->stepClassArmed()) return 0;
+    const NetworkProductEmitter& em = *v.setup.emitter;
+    const StepClassCounters& c = em.stepClassCounters();
+    v.log->info("Network (step-class declaration, tolerance {:.3f} cycle): family-epochs {} ({} below "
+                "the minimum count, not classified); satellite-family-epochs classified {}: quiet {}, "
+                "whole {}, ionosphere-like {}, fraction {}; signals declared {}; phase increments "
+                "raised by the class {}.  On the classified keys the value test alone would have "
+                "declared {} the class did not, and the class declared {} the value test would not.",
+                em.stepClassTolCyc(), c.families, c.families_below_min, c.sats_tested, c.quiet, c.whole,
+                c.iono_like, c.fraction, c.signals_declared, em.stepClassKeysStepped(),
+                em.stepClassValueOnly(), em.stepClassClassOnly());
+    return 0;
+}
+
 // Run-end report of this subsystem: its sections in print order (
 // declared in network/emit/EmitStore.hpp).
 int networkEmitStoreRunEnd(const NetworkRunEndView& v) {
@@ -1157,7 +1182,8 @@ int networkEmitStoreRunEnd(const NetworkRunEndView& v) {
         networkEmitOutcomeRunEnd,
         networkDeferredHeartbeatsRunEnd,
         networkProductContractRunEnd,
-        networkPhaseVisibleStepRunEnd
+        networkPhaseVisibleStepRunEnd,
+        networkStepClassRunEnd
     });
 }
 

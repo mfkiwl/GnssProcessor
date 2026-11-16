@@ -1536,6 +1536,8 @@ namespace GnssProcessor {
                                                   "network_ring_fix_code_event_window_s", 0.0);
             if (!(rf.code_event_window_s >= 0.0 && rf.code_event_window_s <= 86400.0))
                 throw std::runtime_error("network.ring_fix.code_event_window_s must be in [0, 86400] s.");
+            rf.rehost_keep_carry = jval<bool>(json, "network.ring_fix.rehost_keep_carry",
+                                              "network_ring_fix_rehost_keep_carry", false);
             rf.mask_slip_arc = jval<std::string>(json, "network.ring_fix.mask_slip_arc",
                                                  "network_ring_fix_mask_slip_arc", std::string{});
             rf.mask_slip_tow = jval<double>(json, "network.ring_fix.mask_slip_tow", "network_ring_fix_mask_slip_tow",
@@ -2736,6 +2738,26 @@ namespace GnssProcessor {
                       network_config_.disc_mark_scope);
             network_config_.disc_mark_scope = "sat";
         }
+        // The step-class declaration: families "<constellation>:<signal>/<signal>" and a tolerance.
+        network_config_.disc_step_class_pairs.clear();
+        if (jhas(json, "network.disc_step_class_pairs", "network_disc_step_class_pairs")) {
+            const nlohmann::json& arr =
+                jsection(json, "network.disc_step_class_pairs", "network_disc_step_class_pairs");
+            if (!arr.is_array())
+                throw std::runtime_error("network.disc_step_class_pairs must be an array of \"<constellation>:"
+                                         "<signal>/<signal>\" entries (\"E:L1X/L5X\").");
+            for (const auto& v : arr) {
+                const std::string e = v.is_string() ? v.get<std::string>() : std::string{};
+                if (e.size() != 9 || e[1] != ':' || e[5] != '/' || e[2] != 'L' || e[6] != 'L' || e[3] == e[7])
+                    throw std::runtime_error("network.disc_step_class_pairs: '" + e + "' is not of the form "
+                                             "\"<constellation>:<signal>/<signal>\" on two bands (\"E:L1X/L5X\").");
+                network_config_.disc_step_class_pairs.push_back(e);
+            }
+        }
+        network_config_.disc_step_class_tol_cyc =
+            jval<double>(json, "network.disc_step_class_tol_cyc", "network_disc_step_class_tol_cyc", 0.15);
+        if (!(network_config_.disc_step_class_tol_cyc > 0.0 && network_config_.disc_step_class_tol_cyc < 0.5))
+            throw std::runtime_error("network.disc_step_class_tol_cyc must be in (0, 0.5) cycle.");
         if (network_config_.disc_mark_scope == "channel") {
             log->info("Network: network.disc_mark_scope = 'channel' — a per-satellite "
                       "discontinuity mark now bumps ONLY the generations of the channels the "

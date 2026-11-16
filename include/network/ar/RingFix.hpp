@@ -389,6 +389,10 @@ struct RingFixCounters {
     // Stage N2b.
     long long cuts_held_first{0};         ///< Cuts whose moved side re-attached through a held link the walk took first.
     long long cuts_held_first_zero{0};    ///< Of them, with a known step of 0.
+    long long rehost_kept{0};             ///< Chain re-hosts onto a held link kept, not released (rehost_keep_carry).
+    long long rehost_kept_step{0};        ///< Of them, with a non-zero step carried by the shift walk.
+    long long rehost_kept_retarget{0};    ///< Of them, whose held integer differs from the rounded carry the draft took.
+    long long rehost_not_kept{0};         ///< Re-hosts onto a held link released all the same (no carry, or a step the walk cannot carry).
     long long reattached{0};              ///< Re-attachments through a held link (one per released edge the walk took first).
     long long held_first_kept{0};         ///< Held links crossing those cuts, kept at their integers (the entry links not counted).
     long long cut_released_usable{0};     ///< Held links released across an unknown step while usable (not latched, monitor not tripped).
@@ -452,6 +456,7 @@ struct NetworkRingFix {
     double      wl_frac_max{0.0};           ///< The decision's bound on the wide lane's fraction (cycles; 0: none).
     double      sigma_scale{1.0};           ///< The odds gate's factor on the formal sigmas (network.ring_fix.sigma_scale).
     double      code_event_window_s{0.0};   ///< No decision on a satellite's links this long after its code event (s; 0: none).
+    bool        rehost_keep_carry{false};   ///< A chain re-host onto a held link keeps the moved side's carries (network.ring_fix.rehost_keep_carry).
     // Simulation only: the slip mask (network.ring_fix.mask_slip_*).
     int         mask_station{-1};           ///< The masked arc's station (roster index; -1: no mask).
     std::string mask_sat;                   ///< The masked arc's satellite.

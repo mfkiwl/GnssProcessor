@@ -53,6 +53,7 @@
  * reads from, and tests do not modify global state.
  */
 
+#include "products/PhaseStepClassTest.hpp"     // the step-class declaration (network.disc_step_class_pairs)
 #include "products/PhaseVisibleStepTest.hpp"   // the phase-visible step test (network.disc_phase_visible)
 #include "rtcm/RtcmTypes.hpp"   // GnssTime, SSR record structs
 
@@ -341,6 +342,46 @@ public:
     /// @return 0 when the legacy phase test is in force (@c network.disc_phase_visible off),
     ///         else the minimum number of voting satellites for the median.
     int discPhaseVisibleMinSats() const { return disc_pv_min_sats_; }
+
+    /**
+     * @brief Arm the step-class declaration (@c network.disc_step_class_pairs).
+     *
+     * At every emission each family's satellites have their phase step classified against
+     * their previous emission (products/PhaseStepClassTest.hpp), and the signals of a whole
+     * or fraction step are declared on the phase channel in place of the value test; a
+     * classified key whose step is quiet or ionosphere-like is not declared.  A key of no
+     * family, or not classified at an emission (no previous emission of the stream within
+     * 45 s, the satellite absent from it, a code or phase bias or the clock missing, the
+     * family below @ref kStepClassMinSats), keeps the value test.  Forced marks are
+     * unchanged.  The baselines are not carried across a warm resume: the first emission
+     * after a restore re-seeds them.
+     *
+     * @param pairs   Families, "<constellation>:<phase signal>/<phase signal>" ("E:L1X/L5X");
+     *                each family's code signals are its phase signals with L read as C.
+     *                Empty disarms the test.
+     * @param tol_cyc The class tolerance (cycles, in (0, 0.5)).
+     * @throws std::invalid_argument on a malformed entry, a band without a nominal frequency
+     *         or a tolerance out of range.
+     */
+    void setStepClassTest(const std::vector<std::string>& pairs, double tol_cyc);
+    /// @brief Whether the step-class declaration is armed.
+    /// @return True when @ref setStepClassTest named at least one family.
+    bool stepClassArmed() const { return !sc_families_.empty(); }
+    /// @brief The step-class declaration's tolerance.
+    /// @return Cycles.
+    double stepClassTolCyc() const { return sc_tol_cyc_; }
+    /// @brief The step-class declaration's run-end counters (every family and emission so far).
+    /// @return The counters.
+    const StepClassCounters& stepClassCounters() const { return sc_counters_; }
+    /// @brief Phase-key increments the step-class declaration raised.
+    /// @return Count over emissions.
+    long long stepClassKeysStepped() const { return sc_keys_stepped_; }
+    /// @brief Classified keys the value test would have declared and the class test did not.
+    /// @return Count over emissions.
+    long long stepClassValueOnly() const { return sc_value_only_; }
+    /// @brief Classified keys the class test declared and the value test would not have.
+    /// @return Count over emissions.
+    long long stepClassClassOnly() const { return sc_class_only_; }
 
     /**
      * @brief Both edges of the phase-visible step test (standing invariant 7), counted over
@@ -728,6 +769,32 @@ private:
     // All of this state is populated only when the test is armed, so with it off the
     // emitter carries no extra state and its serialized section is unchanged.
     int disc_pv_min_sats_{0};          ///< Minimum voters for the median; 0 = the legacy phase test.
+
+    // --- The step-class declaration (network.disc_step_class_pairs; no family = off) -------
+    // Populated only when armed, so with it off the emitter carries no extra state.
+    /// One family: two phase signals on two bands, their code signals and frequencies.
+    struct StepClassFamily {
+        char        constellation{0};  ///< RINEX letter.
+        std::string p1, p2;            ///< Phase signals of bands 1 and 2.
+        std::string c1, c2;            ///< Code signals of bands 1 and 2.
+        double      f1_hz{0.0};        ///< Band 1's nominal frequency (Hz).
+        double      f2_hz{0.0};        ///< Band 2's nominal frequency (Hz).
+    };
+    /// One satellite's levels on one family at its last emission.
+    struct StepClassBaseline {
+        double e1{0.0};                ///< E_1 (cycles).
+        double e2{0.0};                ///< E_2 (cycles).
+        double epoch_s{0.0};           ///< Product time of that emission (s).
+    };
+    std::vector<StepClassFamily> sc_families_;              ///< The families; empty = off.
+    double sc_tol_cyc_{0.15};                               ///< The class tolerance (cycles).
+    std::map<std::string, StepClassBaseline> last_sc_;      ///< "<family index>|sat" -> baseline.
+    bool   sc_have_prev_{false};                            ///< An armed emission preceded this one.
+    double sc_prev_epoch_s_{0.0};                           ///< Its product time (s).
+    StepClassCounters sc_counters_;                         ///< Run-end counters.
+    long long sc_keys_stepped_{0};                          ///< Increments the class test raised.
+    long long sc_value_only_{0};                            ///< Classified keys only the value test declares.
+    long long sc_class_only_{0};                            ///< Classified keys only the class test declares.
     /// One key's phase-visible baseline: its clock less phase bias at its last emission
     /// with a clock, and that emission's product time.
     struct PvBaseline {

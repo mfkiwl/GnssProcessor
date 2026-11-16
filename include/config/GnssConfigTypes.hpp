@@ -1933,6 +1933,14 @@ namespace GnssProcessor {
         /// while its float looks clean.  Links already held are kept: they were decided on the level before the move.
         /// 0 (default): no such window.
         double code_event_window_s{ 0.0 };
+        /// @c network.ring_fix.rehost_keep_carry: a chain re-host onto a link the ring fix holds keeps the moved
+        /// side's carries.  The held integer is certified, so the new tree edge takes it and the step of the moved
+        /// side is known: its carried arc entries, receiver phase biases and satellite phase biases are carried by
+        /// the chain's shift walk (by nothing at a step of 0) instead of released.  Applied where the step is exact
+        /// (the new host's carry exists) and the walk can carry it (a step of 0, or the carry shift armed); a re-host
+        /// onto an arc that is not held, or held but latched or with its monitor tripped, is released as before.
+        /// False (default): every re-host is released.
+        bool rehost_keep_carry{ false };
         /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
         /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
         /// latch (the residual monitor's path).  Empty (default): no mask.
@@ -3297,6 +3305,22 @@ namespace GnssProcessor {
          * Default @c "sat" is byte-identical.
          */
         std::string disc_mark_scope{ "sat" };
+        /**
+         * @brief Declare each phase step by its class on the families listed
+         *        (@c network.disc_step_class_pairs, entries "<constellation>:<signal>/<signal>").
+         *
+         * At every emission each listed family's satellites have their step classified on the
+         * level a user's phase reads (products/PhaseStepClassTest.hpp: quiet, whole,
+         * ionosphere-like, fraction), and the signals of a whole or fraction step carry a
+         * phase discontinuity-counter increment in place of the value test; a quiet or
+         * ionosphere-like step carries none.  A key of no listed family, or not classified
+         * at an emission, keeps the value test.  A family's code signals are its phase
+         * signals with L read as C.  Emit side only.  Empty (default): off, byte-identical.
+         */
+        std::vector<std::string> disc_step_class_pairs;
+        /// @c network.disc_step_class_tol_cyc: the class test's tolerance (cycles, in (0, 0.5);
+        /// default 0.15, the stream-step read's own).
+        double disc_step_class_tol_cyc{ 0.15 };
         /**
          * @brief Hold the emitted phase bias of a (satellite, signal) at the first value
          *        of its generation (@c network.emit_pb_hold).

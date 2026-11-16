@@ -230,6 +230,7 @@ add_library(gnss_core STATIC
     src/core/products/SignalDeclaration.cpp
     src/core/products/NetworkProductEmitter.cpp
     src/core/products/PhaseVisibleStepTest.cpp
+    src/core/products/PhaseStepClassTest.cpp
     src/core/network/emit/EmitRebase.cpp
     src/core/network/emit/ClockEmitRebase.cpp
     src/core/products/NetworkProductIO.cpp
@@ -708,6 +709,7 @@ add_executable(gnss_tests
     tests/test_unrecorded_sat_gate.cpp
     tests/test_disc_mark_scope.cpp
     tests/test_phase_visible_step_test.cpp
+    tests/test_phase_step_class_test.cpp
     tests/test_consumer_sat_trace.cpp
     tests/test_ar_observe_search.cpp
     tests/test_ar_observe_trace.cpp

@@ -1329,6 +1329,26 @@ void applyReturningRow(ChainElection& el, System sys, const ChainBand& band, std
     d.frame_shiftable = false;
 }
 
+/// Remedy (a) (network.ring_fix.rehost_keep_carry): the integer the ring fix holds on arc (ri, sat) for the band,
+/// when the link is held and usable (held, its residual monitor not tripped, neither of its bands in this epoch's
+/// free-epoch latch); none otherwise, and none without the option.
+std::optional<long long> chainHeldInteger(const ChainElection& el, const ChainBand& band, std::size_t ri,
+                                          const std::string& sat) {
+    const NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->rehost_keep_carry) return std::nullopt;
+    const auto& free_ambs = el.events.slip.relevel.free_ambs;
+    for (const auto& [id, L] : rf->links) {
+        if (id.station != static_cast<int>(ri) || id.sat != sat) continue;
+        if (id.sig1 != band.signal && id.sig2 != band.signal) continue;
+        if (!L.held || L.monitor_trip) return std::nullopt;
+        if (free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig1)}) != 0
+            || free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig2)}) != 0)
+            return std::nullopt;
+        return id.sig1 == band.signal ? L.n1 : L.n2;
+    }
+    return std::nullopt;
+}
+
 /// The rehost row of the chain's event table, applied to a pin after the as-built draft, the kept row
 /// and the returning row.  A tree edge is released (the cut release of its moved side) when all of
 /// these hold:
@@ -1345,7 +1365,13 @@ void applyReturningRow(ChainElection& el, System sys, const ChainBand& band, std
 /// side and drops the receiver phase-bias carries of its receivers, and releaseCutCarries erases the
 /// leveling carries that touch it.  The draft's facts are kept in @c d.as_built for the observatory.
 ///
-/// @param d The draft; replaced in place when the edge is released.
+/// One exception (network.ring_fix.rehost_keep_carry): when the new edge's arc is a link the ring fix holds,
+/// its integer is certified, so the edge takes the held integer and the step is known: the displacement from
+/// the new host's carry, which the shift walk carries into the moved side (a step of 0 moves nothing).  Kept
+/// only where the host's carry exists, the draft's step was known otherwise (no unpinned root handover), and
+/// the walk can carry the step (0, or the carry shift armed); else the edge is released as above.
+///
+/// @param d The draft; replaced in place when the edge is released or kept on a held integer.
 void applyRehostRow(ChainElection& el, const ChainBand& band, std::size_t ri, const std::string& sat,
                     const std::string& amb, bool sat_is_child, PinDraft& d) {
     if (d.held) return;
@@ -1356,6 +1382,23 @@ void applyRehostRow(ChainElection& el, const ChainBand& band, std::size_t ri, co
     if (el.events.slip.relevel.free_ambs.count({static_cast<int>(ri), amb}) != 0) {
         ++cnt.eq34_rh_not_freed;
         return;
+    }
+    // Kept on a held integer (remedy (a)): the step is known, the moved side keeps its carries.
+    if (const std::optional<long long> held = chainHeldInteger(el, band, ri, sat); held.has_value()) {
+        NetworkRingFix& rf = *el.ctx.carry.ring_fix;
+        const double target = static_cast<double>(*held) * band.lambda_m;
+        const double move   = std::isfinite(d.carry_val) ? target - d.carry_val : 0.0;
+        if (band.lambda_m > 0.0 && std::isfinite(d.carry_val) && d.known && (el.shift_on || move == 0.0)) {
+            ++rf.counters.rehost_kept;
+            if (move != 0.0) ++rf.counters.rehost_kept_step;
+            if (std::llround(d.target / band.lambda_m) != *held) ++rf.counters.rehost_kept_retarget;
+            d.as_built = asBuilt(d);
+            d.held     = true;
+            d.target   = target;
+            d.pinmove  = move;
+            return;
+        }
+        ++rf.counters.rehost_not_kept;
     }
     // Released.  What the as-built draft would have done is tallied and kept for the observatory.
     ++cnt.eq34_rh_released;

@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <istream>
+#include <stdexcept>
 #include <ostream>
 #include <vector>
 
@@ -77,6 +78,32 @@ NetworkProductEmitter::NetworkProductEmitter(double disc_threshold_m, bool emit_
     // The phase-visible step test is armed by a positive minimum voter count; anything
     // else is the legacy phase test (the member's default 0).
     if (disc_phase_visible_min_sats > 0) disc_pv_min_sats_ = disc_phase_visible_min_sats;
+}
+
+void NetworkProductEmitter::setStepClassTest(const std::vector<std::string>& pairs, double tol_cyc) {
+    if (!(tol_cyc > 0.0 && tol_cyc < 0.5))
+        throw std::invalid_argument("step-class tolerance must be in (0, 0.5) cycle");
+    std::vector<StepClassFamily> fams;
+    for (const std::string& e : pairs) {
+        if (e.size() != 9 || e[1] != ':' || e[5] != '/' || e[2] != 'L' || e[6] != 'L' || e[3] == e[7])
+            throw std::invalid_argument("step-class family '" + e + "' is not \"<c>:<signal>/<signal>\"");
+        StepClassFamily f;
+        f.constellation = e[0];
+        f.p1 = e.substr(2, 3);
+        f.p2 = e.substr(6, 3);
+        f.c1 = "C" + f.p1.substr(1);
+        f.c2 = "C" + f.p2.substr(1);
+        const System sys = systemFromLetter(f.constellation);
+        f.f1_hz = nominalCarrierFrequencyOfDigitHz(sys, f.p1[1]);
+        f.f2_hz = nominalCarrierFrequencyOfDigitHz(sys, f.p2[1]);
+        if (!(f.f1_hz > 0.0 && f.f2_hz > 0.0) || f.f1_hz == f.f2_hz)
+            throw std::invalid_argument("step-class family '" + e + "' has no two distinct nominal frequencies");
+        fams.push_back(f);
+    }
+    sc_families_ = std::move(fams);
+    sc_tol_cyc_  = tol_cyc;
+    last_sc_.clear();
+    sc_have_prev_ = false;
 }
 
 const char* NetworkProductEmitter::discChannelName(DiscChannel c) {
@@ -427,6 +454,59 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
             if (pv_below_min.count(g) == 0) ++pv_edges_.below_min_exits;
     }
 
+    // --- Step-class test pre-pass (network.disc_step_class_pairs) -------------------------
+    // Each family's satellites are classified on the levels E_1, E_2 of
+    // products/PhaseStepClassTest.hpp against their previous emission, which must be the
+    // stream's previous emission and at most 45 s earlier.  A classified key is declared when
+    // its band stepped by a whole or fraction step and is not declared otherwise (the value
+    // test does not apply to it); an unclassified key keeps the value test.  Off (no family),
+    // nothing here runs.
+    std::map<std::string, bool> sc_verdict;   // "sat|signal" -> declared (classified keys only)
+    if (!sc_families_.empty()) {
+        const bool consecutive = sc_have_prev_ && epoch_s - sc_prev_epoch_s_ <= 45.0;
+        std::map<std::string, StepClassBaseline> next_base;
+        for (std::size_t fi = 0; fi < sc_families_.size(); ++fi) {
+            const StepClassFamily& fam = sc_families_[fi];
+            std::vector<StepClassSat> in;
+            for (const auto& s : sol.sats) {
+                if (s.sat.empty() || !s.has_clock || letterOfSat(s.sat) != fam.constellation) continue;
+                const auto p1 = s.phase_bias.find(fam.p1);
+                const auto p2 = s.phase_bias.find(fam.p2);
+                const auto b1 = s.code_bias_m.find(fam.c1);
+                const auto b2 = s.code_bias_m.find(fam.c2);
+                if (p1 == s.phase_bias.end() || p2 == s.phase_bias.end() || b1 == s.code_bias_m.end()
+                    || b2 == s.code_bias_m.end())
+                    continue;
+                double e1 = 0.0, e2 = 0.0;
+                stepClassLevels(s.clock_c0_m, p1->second.bias_m, p2->second.bias_m, b1->second, b2->second,
+                                fam.f1_hz, fam.f2_hz, e1, e2);
+                const std::string bkey = std::to_string(fi) + "|" + s.sat;
+                StepClassSat x;
+                x.sat = s.sat;
+                const auto base = last_sc_.find(bkey);
+                if (consecutive && base != last_sc_.end() && base->second.epoch_s == sc_prev_epoch_s_) {
+                    x.tested = true;
+                    x.d1_cyc = e1 - base->second.e1;
+                    x.d2_cyc = e2 - base->second.e2;
+                }
+                in.push_back(x);
+                next_base[bkey] = StepClassBaseline{ e1, e2, epoch_s };
+            }
+            const std::vector<StepClassVerdict> verdicts =
+                classifyStepClasses(in, fam.f1_hz, fam.f2_hz, sc_tol_cyc_, kStepClassMinSats, &sc_counters_);
+            for (std::size_t i = 0; i < in.size(); ++i) {
+                if (verdicts[i].cls == StepClass::Untested) continue;
+                bool& d1 = sc_verdict[in[i].sat + "|" + fam.p1];
+                bool& d2 = sc_verdict[in[i].sat + "|" + fam.p2];
+                d1 = d1 || verdicts[i].step1;
+                d2 = d2 || verdicts[i].step2;
+            }
+        }
+        last_sc_         = std::move(next_base);
+        sc_have_prev_    = true;
+        sc_prev_epoch_s_ = epoch_s;
+    }
+
     for (const auto& s : sol.sats) {
         SsrHeader header;
         header.epoch_time  = sol.epoch_time;
@@ -622,6 +702,17 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                             if (raw_over) ++pv_edges_.legacy_would_step;
                             if (pv->second.step && !raw_over) ++pv_edges_.stepped_not_legacy;
                             value_jump = pv->second.step;
+                        }
+                    }
+                    // Under the step-class declaration a classified key is declared by its
+                    // class alone (a whole or fraction step of its band).
+                    if (!sc_verdict.empty()) {
+                        const auto sc = sc_verdict.find(key);
+                        if (sc != sc_verdict.end()) {
+                            if (value_jump && !sc->second) ++sc_value_only_;
+                            if (sc->second && !value_jump) ++sc_class_only_;
+                            value_jump = sc->second;
+                            if (sc->second && !forced) ++sc_keys_stepped_;
                         }
                     }
                 }
