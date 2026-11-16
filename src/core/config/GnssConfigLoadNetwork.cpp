@@ -1594,6 +1594,14 @@ namespace GnssProcessor {
                     rf.cascade.push_back(e);
                 }
             }
+            rf.cascade_tree = jval<bool>(json, "network.ring_fix.cascade_tree", "network_ring_fix_cascade_tree", false);
+            if (rf.cascade_tree && rf.cascade.empty())
+                throw std::runtime_error("network.ring_fix.cascade_tree grows a cascade's third band on its pair's "
+                                         "forest: it needs network.ring_fix.cascade.");
+            rf.cascade_log = jval<bool>(json, "network.ring_fix.cascade_log", "network_ring_fix_cascade_log", false);
+            if (rf.cascade_log && rf.cascade.empty())
+                throw std::runtime_error("network.ring_fix.cascade_log traces the cascades' decisions without holding "
+                                         "them: it needs network.ring_fix.cascade.");
             rf.max_decisions_per_epoch = jval<int>(json, "network.ring_fix.max_decisions_per_epoch",
                                                    "network_ring_fix_max_decisions_per_epoch", 3);
             if (rf.max_decisions_per_epoch < 0)

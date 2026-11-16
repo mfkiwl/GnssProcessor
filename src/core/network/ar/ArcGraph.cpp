@@ -495,15 +495,38 @@ SpanningForest growChainForest(const ArcGraph& g, const Component& c, const std:
         inc_arcs[static_cast<std::size_t>(satVertex(g, g.row_sat[static_cast<std::size_t>(a)]))].push_back(a);
     }
 
+    // The lead arcs (ForestRules::lead_rank): each arc's rank, the highest rank, and which arcs are incumbents (a lead
+    // edge on one reads as kept).
+    const bool lead_on = rules.lead_rank != nullptr;
+    const auto leadOf = [&](int a) {
+        return a >= 0 && static_cast<std::size_t>(a) < rules.lead_rank->size()
+                   ? static_cast<int>((*rules.lead_rank)[static_cast<std::size_t>(a)])
+                   : 0;
+    };
+    int max_lead = 0;
+    std::vector<char> is_inc;
+    if (lead_on) {
+        for (char r : *rules.lead_rank) max_lead = std::max(max_lead, static_cast<int>(r));
+        is_inc.assign(g.rows.size(), 0);
+        for (int a : incumbent_arcs)
+            if (a >= 0 && static_cast<std::size_t>(a) < g.rows.size()) is_inc[static_cast<std::size_t>(a)] = 1;
+    }
+
     std::vector<char> visited(static_cast<std::size_t>(nv), 0);
     std::size_t n_visited = 0;
     std::deque<int> inc_q, new_q;
+    std::deque<int> lead_q;      // lead arcs only: the attached vertices whose rank-1 arcs are still to be scanned
+    std::vector<int> attached;   // lead arcs only: the attached vertices in attachment order (the higher ranks' scan)
     int pass = 1;
     const auto attach = [&](int v) {
         visited[static_cast<std::size_t>(v)] = 1;
         ++n_visited;
         inc_q.push_back(v);
         new_q.push_back(v);
+        if (lead_on) {
+            lead_q.push_back(v);
+            attached.push_back(v);
+        }
         if (!isSatVertex(g, v)) f.station_order.push_back(v);
     };
     const auto record = [&](int a, int child, bool from_incumbent) {
@@ -528,6 +551,47 @@ SpanningForest growChainForest(const ArcGraph& g, const Component& c, const std:
         if (!allow_slipped && slippedIn(g, a, mask)) return false;
         return g.rows[static_cast<std::size_t>(a)].eligible_host || allow_ineligible;
     };
+    // One lead step: rank 1 drains breadth first; when it attaches nothing, the first arc of the lowest higher rank
+    // from an attached vertex (in attachment order, each one's arcs in the walk's own order) to an unattached one.
+    // Returns whether a vertex was attached.
+    const auto takeLead = [&]() {
+        bool took = false;
+        while (!lead_q.empty()) {
+            const int v = lead_q.front();
+            lead_q.pop_front();
+            for (int a : chainCandidates(g, v, rules, station_rank)) {
+                if (leadOf(a) != 1) continue;
+                const int u = otherEnd(g, a, v);
+                if (visited[static_cast<std::size_t>(u)]) continue;
+                record(a, u, is_inc[static_cast<std::size_t>(a)] != 0);
+                f.edges.back().lead = 1;
+                attach(u);
+                took = true;
+            }
+        }
+        if (took) return true;
+        for (int r = 2; r <= max_lead; ++r) {
+            int arc = -1, child = -1;
+            for (std::size_t i = 0; i < attached.size() && arc < 0; ++i) {
+                const int v = attached[i];
+                for (int a : chainCandidates(g, v, rules, station_rank)) {
+                    if (leadOf(a) != r) continue;
+                    const int u = otherEnd(g, a, v);
+                    if (visited[static_cast<std::size_t>(u)]) continue;
+                    arc   = a;
+                    child = u;
+                    break;
+                }
+            }
+            if (arc >= 0) {
+                record(arc, child, is_inc[static_cast<std::size_t>(arc)] != 0);
+                f.edges.back().lead = r;
+                attach(child);
+                return true;
+            }
+        }
+        return false;
+    };
     for (int p = 0; p < 2; ++p) {
         if (p == 1) {
             // Pass 2: only when a refusal is armed and a vertex is still unreached; the frontier is
@@ -539,6 +603,8 @@ SpanningForest growChainForest(const ArcGraph& g, const Component& c, const std:
             for (int v : chainFrontier(visited, frontier_rank)) new_q.push_back(v);
         }
         while (!inc_q.empty() || !new_q.empty()) {
+            // Lead arcs first: before any incumbent, held or new edge.
+            if (lead_on && n_visited < comp_vertices && takeLead()) continue;
             if (inc_q.empty() && rules.held_arcs != nullptr && n_visited < comp_vertices) {
                 // Held first: a held arc from an attached vertex to an unattached one, the
                 // attached vertices in attachment order and each one's candidates in the walk's
@@ -564,14 +630,17 @@ SpanningForest growChainForest(const ArcGraph& g, const Component& c, const std:
             }
             if (!inc_q.empty()) {   // the incumbent queue drains before any new edge
                 const int v = inc_q.front();
-                inc_q.pop_front();
+                bool took = false;
                 for (int a : inc_arcs[static_cast<std::size_t>(v)]) {
                     const int u = otherEnd(g, a, v);
                     if (visited[static_cast<std::size_t>(u)]) continue;
                     record(a, u, /*from_incumbent=*/true);
                     attach(u);
+                    took = true;
+                    if (lead_on) break;   // one at a time: the lead arcs of the vertex it attached come first
                 }
-            } else if (rules.held_arcs == nullptr) {
+                if (!lead_on || !took) inc_q.pop_front();
+            } else if (rules.held_arcs == nullptr && !lead_on) {
                 const int v = new_q.front();
                 new_q.pop_front();
                 for (int a : chainCandidates(g, v, rules, station_rank)) {
@@ -582,8 +651,9 @@ SpanningForest growChainForest(const ArcGraph& g, const Component& c, const std:
                     attach(u);
                 }
             } else {
-                // Held first: one new edge at a time, so the incumbent queue re-attaches the
-                // fragment it reached and that fragment's held arcs are tried before the next one.
+                // Held first or lead arcs: one new edge at a time, so the incumbent queue re-attaches
+                // the fragment it reached and that fragment's lead and held arcs are tried before the
+                // next one.
                 const int v = new_q.front();
                 bool took = false;
                 for (int a : chainCandidates(g, v, rules, station_rank)) {

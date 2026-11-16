@@ -1987,6 +1987,18 @@ namespace GnssProcessor {
         /// per family.  Each entry's pair must be one of network.ring_fix.pairs, and its third signal in none of them.
         /// Empty (default): no cascade.
         std::vector<std::string> cascade{};
+        /// @c network.ring_fix.cascade_tree: a cascade's third band grows its tree on its pair's forest.  The chain's
+        /// walk of the third band takes first the arcs that are tree edges of both bands of the pair, then the links
+        /// the pair holds (those already in the band's tree before the others), and only then the band's own
+        /// incumbents and new edges, so that the band's tree paths close over arcs whose slant ionosphere the pair's
+        /// integers fix and the cascade's float difference keeps its extra-wide-lane precision.  Needs
+        /// network.ring_fix.cascade.  False (default): the third band's tree as built.
+        bool cascade_tree{ false };
+        /// @c network.ring_fix.cascade_log: the cascades decide and trace, never hold.  A link whose third-signal integer
+        /// passes the gate for the persistence is traced as "would_hold" at every such epoch (with truth on the
+        /// simulator) and never enters the hold table, so the third signal stays float.  For a read of the would-be
+        /// decisions on observed data.  Needs network.ring_fix.cascade.  False (default): the cascades hold.
+        bool cascade_log{ false };
         /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
         /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
         /// latch (the residual monitor's path).  Empty (default): no mask.

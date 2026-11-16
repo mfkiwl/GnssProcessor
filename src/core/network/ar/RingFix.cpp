@@ -109,6 +109,14 @@ std::string ringFixCascadeReference(const std::string& sat, const std::string& s
     return std::abs(1.0 / l1 - 1.0 / l3) <= std::abs(1.0 / l2 - 1.0 / l3) ? s1 : s2;
 }
 
+int ringFixCascadeLeadRank(bool pair_tree_edge, bool pair_held, bool third_incumbent, bool third_slipped,
+                           bool eligible_host) {
+    if (third_slipped || (!eligible_host && !third_incumbent)) return 0;
+    if (pair_tree_edge) return 1;
+    if (pair_held) return third_incumbent ? 2 : 3;
+    return 0;
+}
+
 RingFixLargestSet ringFixLargestSettledSet(const std::vector<std::pair<int, std::string>>& links,
                                            const std::set<std::string>& tree_sats,
                                            const std::set<std::string>& incumbent, int min_sats, int hysteresis) {

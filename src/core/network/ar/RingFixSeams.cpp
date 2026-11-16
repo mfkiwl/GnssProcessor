@@ -266,6 +266,16 @@ void networkRingFixArm(NetworkRun& run) {
                   "monitor or after a gap.", e, c.s3, c.ref, kRingFixCascadeMaxFracCyc, kRingFixPersistEpochs, c.s3);
         rf->cascades.push_back(c);
     }
+    rf->cascade_tree = nc.ring_fix.cascade_tree && !rf->cascades.empty();
+    if (rf->cascade_tree)
+        log->warn("Network (ring fix): CASCADE TREE: a cascade's third band grows its tree on its pair's forest: the "
+                  "chain's walk takes first the tree edges of both of the pair's bands, then the links the pair holds, "
+                  "then the band's own incumbents and new edges.");
+    rf->cascade_log = nc.ring_fix.cascade_log && !rf->cascades.empty();
+    if (rf->cascade_log)
+        log->warn("Network (ring fix): CASCADE LOG: the cascades decide and trace, never hold: a link that passes the "
+                  "gate for the persistence is traced as would_hold at every such epoch, and its third signal stays "
+                  "float.");
     rf->flags_per_family = rf->settled_flags_on && !rf->cascades.empty();
     if (rf->flags_per_family)
         log->warn("Network (ring fix): SETTLED FLAGS PER FAMILY: a satellite signal is flagged only while every family "
@@ -1043,7 +1053,13 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                     else { CL.streak = 1; CL.streak_n3 = n3; }
                     tr.n3 = n3;
                     tr.have_n3 = true;
-                    if (CL.streak >= kRingFixPersistEpochs) {
+                    if (CL.streak >= kRingFixPersistEpochs && rf.cascade_log) {
+                        // The log mode: the decision is traced at every epoch it stands, never held.
+                        ++CC.would_hold;
+                        if (have_truth && truth3 != n3) ++CC.would_truth_wrong;
+                        tr.state = "would_hold";
+                        if (have_truth) tr.audit = truth3 == n3 ? "right" : "WRONG";
+                    } else if (CL.streak >= kRingFixPersistEpochs) {
                         CL.held = true;
                         CL.n3 = n3;
                         CL.n_ref = tr.n_ref;
@@ -1346,12 +1362,20 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
             rel_n += n;
         }
         log->warn("Network (ring fix, cascade {} against {}): decided {}; held link-epochs {}; released {}{}; to the "
-                  "tree {}; refused link-epochs: fraction {}, odds {}, persistence {}, no float {}.{}",
+                  "tree {}; refused link-epochs: fraction {}, odds {}, persistence {}, no float {}.{}{}{}",
                   c.name, c.ref, CC.decided, CC.held_link_epochs, rel_n, rel.empty() ? std::string() : " (" + rel + ")",
                   CC.to_tree, CC.refused_fraction, CC.refused_odds, CC.refused_persist, CC.refused_no_float,
                   rf.truth ? fmt::format("  Truth: held link-epochs right {}, WRONG {}; decisions WRONG {}.",
                                          CC.truth_right, CC.truth_wrong, CC.decided_truth_wrong)
-                           : std::string());
+                           : std::string(),
+                  rf.cascade_tree ? fmt::format("  Tree on the pair's forest: {} tree edge-epochs of {}, {} on the "
+                                                "pair's tree edges, {} on links the pair holds, {} otherwise.",
+                                                CC.tree_edges, c.s3, CC.tree_pair, CC.tree_held, CC.tree_other)
+                                  : std::string(),
+                  rf.cascade_log ? fmt::format("  Log mode: {} would-hold link-epochs, none held{}.", CC.would_hold,
+                                               rf.truth ? fmt::format(" (truth: WRONG {})", CC.would_truth_wrong)
+                                                        : std::string())
+                                 : std::string());
     }
     if (rf.rehost_keep_carry)
         log->warn("Network (ring fix, re-hosts onto held links): {} kept with their carries (the new host's carry on "

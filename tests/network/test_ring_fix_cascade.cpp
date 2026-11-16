@@ -17,6 +17,18 @@ TEST(RingFixCascade, TheReferenceIsTheSiblingOnTheThirdsBandElseTheNearestFreque
     EXPECT_EQ(ringFixCascadeReference("E01", "L1X", "L5X", "L6C"), "L5X");   // Galileo E6 nearer E5a than E1
 }
 
+TEST(RingFixCascade, TheLeadRankPutsThePairsTreeEdgesFirstThenItsHeldLinks) {
+    // (tree edge of the pair, held by the pair, incumbent of the third band, slipped on it, eligible host)
+    EXPECT_EQ(ringFixCascadeLeadRank(true, false, false, false, true), 1);
+    EXPECT_EQ(ringFixCascadeLeadRank(true, true, true, false, true), 1);     // a tree edge of the pair before a held link
+    EXPECT_EQ(ringFixCascadeLeadRank(false, true, true, false, true), 2);    // a held link already in the third's tree
+    EXPECT_EQ(ringFixCascadeLeadRank(false, true, false, false, true), 3);
+    EXPECT_EQ(ringFixCascadeLeadRank(false, false, true, false, true), 0);   // the band's own incumbent: the walk as built
+    EXPECT_EQ(ringFixCascadeLeadRank(true, true, true, true, true), 0);      // slipped on the third band
+    EXPECT_EQ(ringFixCascadeLeadRank(true, false, false, false, false), 0);  // a fresh host
+    EXPECT_EQ(ringFixCascadeLeadRank(true, false, true, false, false), 1);   // ...unless it is an incumbent
+}
+
 TEST(RingFixCascadeGate, TheDifferenceDecidesWithinTheFractionAndTheOdds) {
     // A float difference 0.03 cycle off 7 with a sigma of 0.02: decided.
     RingFixCascadeGate g = ringFixCascadeGate(105.0, 98.03, 1e-8, 0.0, 4e-4, 1.0);

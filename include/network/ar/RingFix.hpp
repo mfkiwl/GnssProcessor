@@ -302,6 +302,22 @@ RingFixCascadeGate ringFixCascadeGate(double f_ref, double f3, double q11, doubl
 std::string ringFixCascadeReference(const std::string& sat, const std::string& s1, const std::string& s2,
                                     const std::string& s3);
 
+/**
+ * @brief The lead rank of one arc of a cascade's third band grown on its pair's forest (network.ring_fix.cascade_tree,
+ *        arcgraph::ForestRules::lead_rank): the arcs on which the pair fixes both integers come first, so that the
+ *        third band's tree paths close over arcs whose slant ionosphere the pair's integers fix.
+ * @param pair_tree_edge  The arc is a tree edge of both bands of the pair at this election.
+ * @param pair_held       The pair holds the arc's integers (a held link, its monitor not tripped, not freed).
+ * @param third_incumbent The arc was a tree edge of the third band at the last election.
+ * @param third_slipped   The arc slipped on the third band this epoch.
+ * @param eligible_host   The arc is an eligible host on the third band (its ambiguity has converged).
+ * @return 1 for a tree edge of the pair, 2 for a held link that is an incumbent of the third band, 3 for another held
+ *         link; 0 (no lead) for any other arc, for an arc slipped on the third band, and for an ineligible host that is
+ *         no incumbent (a fresh arc is not pinned ahead of the walk's own rules).
+ */
+int ringFixCascadeLeadRank(bool pair_tree_edge, bool pair_held, bool third_incumbent, bool third_slipped,
+                           bool eligible_host);
+
 /// One link of a cascade: the third signal of a link the pair holds.
 struct RingFixCascadeLink {
     bool      held{false};          ///< Held now.
@@ -331,6 +347,15 @@ struct RingFixCascadeCounters {
     long long truth_wrong{0};          ///< Simulation: held link-epochs wrong.
     long long decided_truth_wrong{0};  ///< Simulation: decisions wrong.
     std::map<std::string, long long> released;   ///< Releases by cause (pair, slip, cut, monitor, gap).
+    // The third band's tree on the pair's forest (network.ring_fix.cascade_tree): its tree edge-epochs by how the walk
+    // took them.
+    long long tree_edges{0};           ///< Tree edge-epochs of the third band.
+    long long tree_pair{0};            ///< ...taken as a tree edge of the pair (lead rank 1).
+    long long tree_held{0};            ///< ...taken as a link the pair holds (lead ranks 2 and 3).
+    long long tree_other{0};           ///< ...taken otherwise (an incumbent or a new edge of the walk).
+    // The log mode (network.ring_fix.cascade_log).
+    long long would_hold{0};           ///< Link-epochs that passed the gate for the persistence, traced, not held.
+    long long would_truth_wrong{0};    ///< Simulation: of them, wrong against truth in the epoch's frame.
 };
 
 /**
@@ -621,6 +646,8 @@ struct NetworkRingFix {
     /// Each cascade's run counters, by its name.
     std::map<std::string, RingFixCascadeCounters> cascade_counters;
     bool        flags_per_family{false};    ///< The settled flags are kept per family (armed with a cascade).
+    bool        cascade_tree{false};        ///< A cascade's third band grows its tree on its pair's forest (network.ring_fix.cascade_tree).
+    bool        cascade_log{false};         ///< The cascades decide and trace, never hold (network.ring_fix.cascade_log).
     /**
      * @brief The cascade a cascade link belongs to.
      * @param id The link (station, satellite, reference, third signal).

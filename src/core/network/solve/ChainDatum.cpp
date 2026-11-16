@@ -266,6 +266,10 @@ struct ChainElection {
     int n_pins = 0, gauge_dim = 0;
     // The tree edges kept across a row gap while their carry lives (extend-only): replaces the arcs' retained edges.
     std::set<std::pair<int, std::string>> new_retained_edges;
+    /// The bands elected so far at this election ("<constellation key>|<signal>"): a cascade's third band reads its
+    /// pair's trees of this election from @ref this_epoch_anchor and @ref new_rx_parent when they are here, else from
+    /// the last election's maps (network.ring_fix.cascade_tree).
+    std::set<std::string> elected_bands;
 
     /// True when a row that releases edges (the returning, the rehost, the slip or the merge and split row) is armed.
     bool cutsEdges() const { return returning_row || rehost_row || slip_row || merge_split_row; }
@@ -784,18 +788,128 @@ std::vector<char> chainHeldArcs(const ChainElection& el, const ChainFamily& fam,
     return held;
 }
 
+/// The arcs of a family's graph that are tree edges of one band of its constellation: at this election when that
+/// band was elected already (this_epoch_anchor and new_rx_parent), else at the last election (anchor_incumbent and
+/// eq34_rx_parent).  Per arc of @p cg: 1 for a tree edge.
+std::vector<char> chainBandTreeArcs(const ChainElection& el, const ChainGraph& cg, System sys,
+                                    const std::string& signal) {
+    std::vector<char> tree(cg.graph.rows.size(), 0);
+    const std::string cell = constellationKey(sys) + "|" + signal;   // the band's key, "<constellation key>|<signal>"
+    const bool now = el.elected_bands.count(cell) != 0;
+    const auto mark = [&](int s, int k) {
+        const int arc = arcgraph::arcIndex(cg.graph, s, k);
+        if (arc >= 0) tree[static_cast<std::size_t>(arc)] = 1;
+    };
+    // The satellite-side edges: each satellite's parent station.
+    for (int k = 0; k < static_cast<int>(cg.graph.sats.size()); ++k) {
+        const std::string amb = StateKeys::makeAmbiguityKey(cg.satName(k), signal);
+        const std::string* sta = nullptr;
+        if (now) {
+            const auto it = el.this_epoch_anchor.find(amb);
+            if (it != el.this_epoch_anchor.end()) sta = &it->second;
+        } else {
+            sta = net::getSig(el.sig_rows, amb, &net::SatSignalState::anchor_incumbent);
+        }
+        if (sta == nullptr) continue;
+        if (const auto ni = cg.slot_of_name.find(*sta); ni != cg.slot_of_name.end()) mark(ni->second, k);
+    }
+    // The receiver-side edges: each station's parent satellite.
+    for (int s = 0; s < static_cast<int>(cg.graph.stations.size()); ++s) {
+        const std::size_t ri = cg.staIdx(s);
+        const std::string* sat = nullptr;
+        if (now) {
+            const auto it = el.new_rx_parent.find(el.stations[ri].name + "|" + cell);
+            if (it != el.new_rx_parent.end()) sat = &it->second;
+        } else {
+            sat = net::get(el.entities.stations, StationId{static_cast<int>(ri)}, &net::StationState::signals, cell,
+                           &net::StationSignalState::eq34_rx_parent);
+        }
+        if (sat == nullptr) continue;
+        if (const auto ki = cg.slot_of_sat.find(*sat); ki != cg.slot_of_sat.end()) mark(s, ki->second);
+    }
+    return tree;
+}
+
+/// A cascade's third band grown on its pair's forest (network.ring_fix.cascade_tree): the cascade, and the lead rank
+/// of every arc of the band's graph.
+struct ChainCascadeLead {
+    const RingFixCascade* cascade{nullptr};   ///< The cascade whose third band the family is (null: none).
+    std::vector<char>     rank;               ///< Per arc: its lead rank (ringFixCascadeLeadRank); empty: no lead arc.
+};
+
+/// The lead ranks of a family that is the one band of a cascade's third signal, with the option armed: per arc,
+/// whether it is a tree edge of both bands of the cascade's pair (chainBandTreeArcs), a link the pair holds (held, its
+/// monitor not tripped, neither signal freed this epoch), an incumbent of the band (the seed), slipped on the band, and
+/// an eligible host.  Empty otherwise.
+ChainCascadeLead chainCascadeLead(const ChainElection& el, const ChainFamily& fam, const ChainGraph& cg,
+                                  const ChainSeeds& seeds) {
+    ChainCascadeLead lead;
+    const NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->cascade_tree || fam.bands.size() != 1) return lead;
+    const std::string ck = constellationKey(fam.sys);
+    for (const RingFixCascade& c : rf->cascades)
+        if (c.ck == ck && c.s3 == fam.bands[0].signal) lead.cascade = &c;
+    if (lead.cascade == nullptr) return lead;
+    const RingFixCascade& c = *lead.cascade;
+    const std::size_t n_arcs = cg.graph.rows.size();
+    const std::vector<char> tree1 = chainBandTreeArcs(el, cg, fam.sys, c.s1);
+    const std::vector<char> tree2 = chainBandTreeArcs(el, cg, fam.sys, c.s2);
+    std::vector<char> held(n_arcs, 0);
+    const auto& free_ambs = el.events.slip.relevel.free_ambs;
+    for (const auto& [id, L] : rf->links) {
+        if (!L.held || L.monitor_trip || id.sig1 != c.s1 || id.sig2 != c.s2 || id.sat.empty() || id.sat[0] != c.letter)
+            continue;
+        if (free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig1)}) != 0
+            || free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig2)}) != 0)
+            continue;
+        const auto ni = cg.slot_of_name.find(el.stations[static_cast<std::size_t>(id.station)].name);
+        const auto ki = cg.slot_of_sat.find(id.sat);
+        if (ni == cg.slot_of_name.end() || ki == cg.slot_of_sat.end()) continue;
+        const int arc = arcgraph::arcIndex(cg.graph, ni->second, ki->second);
+        if (arc >= 0) held[static_cast<std::size_t>(arc)] = 1;
+    }
+    std::vector<char> incumbent(n_arcs, 0);
+    for (int a : seeds.family)
+        if (a >= 0 && static_cast<std::size_t>(a) < n_arcs) incumbent[static_cast<std::size_t>(a)] = 1;
+    lead.rank.assign(n_arcs, 0);
+    bool any = false;
+    for (std::size_t a = 0; a < n_arcs; ++a) {
+        const int r = ringFixCascadeLeadRank(tree1[a] != 0 && tree2[a] != 0, held[a] != 0, incumbent[a] != 0,
+                                            arcgraph::slippedIn(cg.graph, static_cast<int>(a), fam.mask()),
+                                            cg.graph.rows[a].eligible_host);
+        lead.rank[a] = static_cast<char>(r);
+        any = any || r > 0;
+    }
+    if (!any) lead.rank.clear();   // no lead arc: the walk as built
+    return lead;
+}
+
+/// The third band's tree edges of this election by how the walk took them, into the cascade's run counters.
+void tallyCascadeTree(ChainElection& el, const RingFixCascade& c, const ChainFamilyPlan& plan) {
+    RingFixCascadeCounters& CC = el.ctx.carry.ring_fix->cascade_counters[c.name];
+    for (const ChainComponentPlan& cp : plan.comps)
+        for (const arcgraph::TreeEdge& e : cp.forest.edges) {
+            ++CC.tree_edges;
+            if (e.lead == 1)      ++CC.tree_pair;
+            else if (e.lead >= 2) ++CC.tree_held;
+            else                  ++CC.tree_other;
+        }
+}
+
 /// The family's components, each with its datum receiver and forest, in component order.  The
 /// connected components come in the order of their roots: under the shared link rule (a station
 /// is united under a satellite, arc by arc) every root is a satellite, so the components come in
 /// the string order of their root satellites; legacyChainVertexRank also orders the second pass's
-/// frontier (receivers by the decimal string of their roster index, then satellites).
+/// frontier (receivers by the decimal string of their roster index, then satellites).  With
+/// @p lead_rank (a cascade's third band on its pair's forest) the walk takes the lead arcs first.
 ChainFamilyPlan planChainFamily(const ChainElection& el, const ChainFamily& fam, const ChainGraph& cg,
                                 const ChainSeeds& seeds, const std::vector<int>& chain_rank,
-                                const std::vector<int>& station_rank) {
+                                const std::vector<int>& station_rank, const std::vector<char>& lead_rank) {
     ChainFamilyPlan fp;
     arcgraph::ForestRules rules = chainForestRules(el, fam.mask());
     const std::vector<char> held = chainHeldArcs(el, fam, cg);
     if (!held.empty()) rules.held_arcs = &held;
+    if (!lead_rank.empty()) rules.lead_rank = &lead_rank;
     std::size_t best_comp = 0;
     for (const arcgraph::Component& comp : arcgraph::arcComponents(cg.graph, fam.mask(), chain_rank)) {
         std::optional<ChainComponentPlan> plan =
@@ -2208,7 +2322,9 @@ void electFamily(ChainElection& el, const ChainGroups& groups, const ChainFamily
     std::vector<int> station_rank;   // per station slot: the coverage
     for (int s = 0; s < static_cast<int>(cg.graph.stations.size()); ++s)
         station_rank.push_back(chainCoverage(el, fam.sys, cg.staIdx(s)));
-    const ChainFamilyPlan plan = planChainFamily(el, fam, cg, seeds, chain_rank, station_rank);
+    const ChainCascadeLead lead = chainCascadeLead(el, fam, cg, seeds);   // empty unless a cascade's third band
+    const ChainFamilyPlan plan = planChainFamily(el, fam, cg, seeds, chain_rank, station_rank, lead.rank);
+    if (lead.cascade != nullptr) tallyCascadeTree(el, *lead.cascade, plan);
     for (std::size_t b = 0; b < fam.bands.size(); ++b) {
         BandWalk walk(cg);
         if (el.root_row) buildRootKeepers(el, fam.bands[b], plan.comps);
@@ -2220,6 +2336,7 @@ void electFamily(ChainElection& el, const ChainGroups& groups, const ChainFamily
         if (!plan.best_datum_rx.empty())
             net::put(el.entities.constellations, fam.sys, &net::ConstellationState::channels,
                      fam.bands[b].signal, &net::ChannelState::datum_rx) = plan.best_datum_rx;
+        el.elected_bands.insert(fam.bands[b].dr_key);
     }
 }
 
