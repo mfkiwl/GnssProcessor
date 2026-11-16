@@ -248,6 +248,17 @@ Exe nrf28; both runs exit 0 with 720 of 720 epochs emitted, RAIM rows 1 and 1 (a
 
 **Bars.** The third signals' held link-epochs right against truth at 99.9 % or more and no wrong decision; the pairs' held link-epochs within 5 % of `t3c_sim[_r]`'s and their truth audit zero; every epoch emitted; RAIM rows not above `t3c_sim[_r]`'s by more than a tenth; keys absent identical.
 
+### 71.1 2026-11-16: the cascade on the simulator: every bar passes
+
+Exe nrf29 (`ea1265068185e37c`, commit e820280); all three arms exit 0 with every epoch emitted; the smoke `t3xsmoke` first (exit 0; no pair held in its 10 epochs). Grade `_irdu_grades/nrf_t3x_grade.txt` (script `_irdu_grades/scripts_s20/grade_f13_t3x.sh t3x`).
+
+- **The third signals right against truth:** GPS L5Q (from L2W) 55 402 and 58 722 held link-epochs, Galileo L7Q (from L5Q) 59 970 and 56 978, every one right in its epoch's frame; decisions 1 035 and 962 (GPS), 1 012 and 983 (Galileo), none wrong. The same-start audit of the two runs, with the third bands' integers in it, fails 0 of 390 530 checks (Galileo L7Q 42 690, GPS L5Q 32 348).
+- **The pairs unchanged:** held link-epochs against `t3c_sim[_r]` Galileo L1C/L5Q +0.0 and -0.1 %, GPS L1C/L2W +0.1 and +0.0 %; their truth audit 174 028 and 171 096 right, 0 wrong (`t3c`: 173 954 and 171 143).
+- **Every epoch emitted; RAIM rows** 0 and 0, as `t3c`. **Keys absent identical:** `kr_sim` (nrf29) against `kd_sim`: the products and the 42 CSV traces identical, wall-clock columns aside.
+- **Reads:** among the links the pair holds, the cascade holds GPS L5Q 46 to 62 % and 22 to 75 % by half hour, Galileo L7Q 24 to 87 % and 40 to 92 %. Releases are mostly at cuts of the third band (GPS 718 and 664, Galileo 694 and 627; with the pair 102, 122, 97 and 87), the cut rule being the cautious one (any cut a link crosses releases it). Refusals: GPS L5Q 19 557 and 18 388 link-epochs for the fraction and 6 252 and 5 349 for the odds; Galileo L7Q 7 208 and 3 300, 363 and 3 063.
+
+The cascade decides the third frequency right on the simulator with the pairs unchanged. Two refinements are open: re-expressing a held third signal across a cut of known step instead of releasing it, and reading where GPS L5Q's fraction refusals come from. The same-frequency sibling needs observed data (a receiver that reports GPS L1C and L1W); its unsettled steps are not built yet.
+
 ## 72. 2026-11-16: the fallback pair: the package without Galileo C/Q held (pre-registered)
 
 **Why** (the requesting session's request after section 70): `f13` holds the Galileo C/Q family, whose flagged levels move on DOY 144 (section 68.1); in case that fails at the user, the same package with Galileo L1C/L5Q left a signal of no held family, so that its counters step at every emission.
