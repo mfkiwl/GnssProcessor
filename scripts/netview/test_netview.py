@@ -1,0 +1,324 @@
+"""Unit tests of the network view tool on a small synthetic run folder.
+
+    py -3.14 scripts/netview/test_netview.py        (or: py -3.14 -m unittest scripts/netview/test_netview.py)
+
+The fixture is written to a temporary folder: three receivers, five Galileo satellites, three epochs, the tree of
+L1X and L5X, two links that are not tree links (one refused, then held), events, receiver states and products.
+"""
+from __future__ import annotations
+
+import gzip
+import json
+import re
+import struct
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+import numpy as np
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import netview  # noqa: E402
+import nv_arm  # noqa: E402
+import nv_build as B  # noqa: E402
+import nv_page  # noqa: E402
+import nv_read as R  # noqa: E402
+
+WEEK = 2420
+TOWS = (0.0, 30.0, 60.0)
+SATS = ('E01', 'E02', 'E03', 'E04', 'E05')
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding='utf-8', newline='\n')
+
+
+def _tree_rows():
+    """Root R1; E01 under R1, R2 under E01, E02 under R2, R3 under E02; at tow 60 E02 moves under R1."""
+    hdr = ('week,tow,system,family,band,comp,r1,edge_sta,edge_sat,child,parent,depth,target_m,target_cyc,'
+           'prev_target_m,pinmove_m,known,legacy_cause,row,row_armed,certified,cert_source,flipped,returning,life_stamp\n')
+    out = [hdr]
+    for tow in TOWS:
+        moved = tow >= 60.0
+        edges = [('R1', 'E01', 'E01', 'R1', 1, 0), ('R2', 'E01', 'R2', 'E01', 2, 5)]
+        if moved:
+            edges += [('R1', 'E02', 'E02', 'R1', 1, -3), ('R3', 'E02', 'R3', 'E02', 2, 7)]
+        else:
+            edges += [('R2', 'E02', 'E02', 'R2', 3, 4), ('R3', 'E02', 'R3', 'E02', 4, 7)]
+        for band in ('L1X', 'L5X'):
+            for (es, et, child, parent, depth, tgt) in edges:
+                row = 'RehostUncertified' if moved and child == 'E02' and tow == 60.0 else 'Kept'
+                out.append(f'{WEEK},{tow:.3f},E,signal,{band},0,R1,{es},{et},{child},{parent},{depth},0,{tgt},,0,1,'
+                           f'same_edge,{row},1,0,none,0,0,x\n')
+    return ''.join(out)
+
+
+#: A real chord row of _rap_o2s1j_n144 (MBAR00UGA-E07 at TOW 180) and what network_ring_fix.csv says of it.
+REAL = dict(f1=-128.168544, f2=-37.464292, q11=22.64359, q12=24.03773, q22=26.01514,
+            n_if=-127.2965, sigma_if=4.4151, wl=-91, frac_wl=0.2957)
+
+
+def make_run(root: Path, fixing=True, raim_header_only=True, rpb=False) -> Path:
+    run = root / 'run'
+    logs = run / 'logs'
+    _write(logs / 'network_stations.csv', 'station,role,ecef_x,ecef_y,ecef_z\n'
+           'R1,datum,6378137.0,0.0,0.0\nR2,network,0.0,6378137.0,0.0\nR3,network,0.0,0.0,6356752.3\n')
+    _write(logs / 'network_chain_edges.csv', _tree_rows())
+    frame = ['week,tow,family,arc_sta,arc_sat,float_cyc_1,float_cyc_2,q11,q12,q22,int_1,int_2,source,conflict,lattice_int\n']
+    for tow in TOWS[1:]:
+        frame.append(f'{WEEK},{tow:.3f},E|L1X+L5X,R3,E01,{REAL["f1"]},{REAL["f2"]},{REAL["q11"]},{REAL["q12"]},'
+                     f'{REAL["q22"]},,,none,0,/\n')
+        frame.append(f'{WEEK},{tow:.3f},E|L1X+L5X,R1,E03,10.02,7.01,0.0004,0.0003,0.0004,,,none,0,/\n')
+    _write(logs / 'network_chain_frame.csv', ''.join(frame))
+    if fixing:
+        _write(logs / 'network_ring_fix.csv',
+               'week,tow,station,sat,sig1,sig2,ring,candidate,state,refused,f1,f2,n_if,sigma_if,frac_if,wl,frac_wl,'
+               'n1,n2,lat1,lat2,resid_if_m,streak,audit\n'
+               f'{WEEK},30.000,R3,E01,L1X,L5X,4,1,refused,window,{REAL["f1"]},{REAL["f2"]},-127.2965,4.4151,0.2965,'
+               f'-91,0.2957,-127,-36,,,,0,\n'
+               f'{WEEK},60.000,R3,E01,L1X,L5X,4,1,held,,{REAL["f1"]},{REAL["f2"]},-127.2965,4.4151,0.2965,-91,0.2957,'
+               f'-128,-37,,,0.004,0,unlisted\n')
+    _write(logs / 'network_events.csv',
+           'week,tow,tier,event,sat,station,statistic,threshold,action,detail\n'
+           f'{WEEK},30.000,RINGFIX,hold,E01,R3,0.13,0.10,decide,sig1=L1X sig2=L5X ring=4 n1=-128 n2=-37\n'
+           f'{WEEK},60.000,RINGFIX,release,E03,R1,,,slip,sig1=L1X sig2=L5X n1=10 n2=7\n'
+           f'{WEEK},60.000,T1_gf_jump,gf_jump,E03,R1,0.17,0.04,refloat,L1X;L5X;r=+0.17\n'
+           f'{WEEK},60.000,CHAIN,rehost,E02,R1,0.0,,join,sig=L1X comp=0 row=RehostUncertified\n'
+           f'{WEEK},60.000,PRIORRES,prior_residual,E02,,5.4,4.0,report,family=pb\n'
+           f'{WEEK},60.000,GROSSLOS,gross_los_declare,E04,R2,9.6,8.0,declare,wire_latency_ep=1\n')
+    if raim_header_only:
+        _write(logs / 'network_raim.csv', 'week,tow,sat,station,s_max_raw,s_max_norm,sigma0,raim_k,spiked,'
+               'n_sta_spiked,min_sta,refloated\n')
+    _write(logs / 'network_zwd.csv', 'week,tow,station,zwd_m,std_m,carried\n' + ''.join(
+        f'{WEEK},{t:.3f},R{i},0.1{i},0.01,1\n' for t in TOWS for i in (1, 2, 3)))
+    _write(logs / 'network_rx_states.csv', 'week,tow,station,kind,key,value_m,std_m\n' + ''.join(
+        f'{WEEK},{t:.3f},R{i},CLK,,{i * 10.0 + t / 30.0},0.5\n' for t in TOWS for i in (1, 2, 3)))
+    if rpb:
+        _write(logs / 'network_rpb_states.csv', 'week,tow,station,system,signal,value_m,sigma_m,pinned,floor_w,'
+               'timelink_var_m2,parent_sat,depth,comp,event,shift_m\n' + ''.join(
+                   f'{WEEK},{t:.3f},R2,Galileo,L1X,0.5,0.01,0,,,E01,2,0,Kept,0\n' for t in TOWS))
+    _write(logs / 'network_ionosphere.csv', 'week,tow,station,sat,iono_m,elevation_deg,azimuth_deg,x_lin_m,'
+           'iono_total_m\n' + ''.join(f'{WEEK},{t:.3f},R1,E01,0.1,90.0,0.0,0.0,0.1\n' for t in TOWS))
+    _write(run / 'products.txt', _products())
+    return run
+
+
+def _products():
+    """Five Galileo satellites; E01 steps by whole cycles (+1, +1) and E02 by a fraction (+0.5, 0) at the third
+    epoch, on L1X / L5X (codes C1X / C5X stay put)."""
+    l1 = R.C_M_S / (R.freq_mhz('E', 'L1X') * 1e6)
+    l5 = R.C_M_S / (R.freq_mhz('E', 'L5X') * 1e6)
+    lines = ['# gnss_network_product v2\n', 'S,R1,1,nominal-wu93,2,0,1,0,0.05,1,x\n']
+    for k, tow in enumerate(TOWS):
+        lines.append(f'H,{WEEK},{int(tow)},ok,1.0,5,-\n')
+        lines.append(f'E,{WEEK},{int(tow)},0,0,0,0\n')
+        for j, s in enumerate(SATS):
+            c1, c5 = 0.0, 0.0
+            if k == 2 and s == 'E01':
+                c1, c5 = 1.0, 1.0
+            if k == 2 and s == 'E02':
+                c1 = 0.5
+            lines.append(f'C,{s},{0.1 * j}\n')
+            lines.append(f'B,{s},C1X,{0.2 * j}\nB,{s},C5X,{0.3 * j}\n')
+            # the level E_b = (C - P_b + mu_b x) / lambda_b rises by c_b cycles when P_b falls by c_b lambda_b
+            lines.append(f'P,{s},L1X,{1.0 + j - c1 * l1},1,0\nP,{s},L5X,{2.0 + j - c5 * l5},1,0\n')
+    return ''.join(lines)
+
+
+class Fixture(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+
+class TestReaders(Fixture):
+    def test_tree_rows_and_bands(self):
+        run = make_run(self.root)
+        rows, bands = R.read_tree(run / 'logs')
+        self.assertEqual(bands, ['E:L1X', 'E:L5X'])
+        self.assertEqual(len(rows), 3 * 2 * 4)
+        self.assertEqual(rows[0][0], WEEK * R.WEEK_MS)
+
+    def test_missing_file_is_none(self):
+        self.assertIsNone(R.read_ring_fix(self.root))
+        self.assertIsNone(R.read_rpb(self.root))
+
+    def test_events_drop_diagnostics(self):
+        run = make_run(self.root)
+        rows, dropped = R.read_events(run / 'logs')
+        self.assertEqual(dropped, {'PRIORRES': 1})
+        self.assertEqual(len(rows), 5)
+
+    def test_ecef_to_geodetic(self):
+        lat, lon, h = R.ecef_to_geodetic(0.0, 6378137.0, 0.0)
+        self.assertAlmostEqual(lat, 0.0, places=6)
+        self.assertAlmostEqual(lon, 90.0, places=6)
+        self.assertAlmostEqual(h, 0.0, places=3)
+
+
+class TestQuantities(Fixture):
+    def test_gate_algebra_matches_the_fixing_trace(self):
+        wl_int, wl_frac, s_wl, n_int, n_frac, s_if = B.chord_quantities(
+            'E|L1X+L5X', [REAL['f1']], [REAL['f2']], [REAL['q11']], [REAL['q12']], [REAL['q22']])
+        self.assertEqual(int(wl_int[0]), REAL['wl'])
+        self.assertAlmostEqual(abs(wl_frac[0]), REAL['frac_wl'], places=3)
+        self.assertAlmostEqual(n_int[0] + n_frac[0], REAL['n_if'], places=3)
+        self.assertAlmostEqual(s_if[0], REAL['sigma_if'], places=3)
+
+    def test_jump_classes(self):
+        r = (R.freq_mhz('E', 'L1X') / R.freq_mhz('E', 'L5X'))
+        f1, f2 = R.freq_mhz('E', 'L1X'), R.freq_mhz('E', 'L5X')
+        dn = lambda a1, a2: (f1 * a1 - f2 * a2) / (f1 - f2)          # noqa: E731
+        self.assertEqual(B.jump_class(0.05, 0.02, dn(0.05, 0.02)), 0)
+        self.assertEqual(B.jump_class(1.02, 0.98, dn(1.02, 0.98)), 1)
+        self.assertEqual(B.jump_class(0.3, 0.3 * r, dn(0.3, 0.3 * r)), 2)
+        self.assertEqual(B.jump_class(0.5, 0.0, dn(0.5, 0.0)), 3)
+
+    def test_event_lanes(self):
+        self.assertEqual(B.event_lane('RINGFIX', 'hold', 'decide'), 'hold')
+        self.assertEqual(B.event_lane('RINGFIX', 'release', 'gap'), 'release')
+        self.assertEqual(B.event_lane('RINGFIX', 'to_tree', 'chain'), 'tree')
+        self.assertEqual(B.event_lane('CHAIN', 'rehost', 'join'), 'tree')
+        self.assertEqual(B.event_lane('T1_gf_jump', 'gf_jump', 'refloat'), 'slip')
+        self.assertEqual(B.event_lane('T0_gap', 'arc_resume', 'clean'), 'gap')
+        self.assertEqual(B.event_lane('GROSSLOS', 'gross_los_declare', 'declare'), 'alarm')
+        self.assertEqual(B.event_lane('CB_DATUM', 'reseed_disc_landed', 'disc_bump'), 'coderef')
+        self.assertEqual(B.event_lane('MDB', 'mdb_exceedance', 'observe'), 'other')
+
+    def test_hops_classes(self):
+        d = np.array([-1, 1, 3, 5, 7, 9])
+        np.testing.assert_array_equal(B.hops_class_of(d, d), [0, 1, 2, 3, 4, 4])
+
+
+class TestBlock(Fixture):
+    def test_tree_arrays(self):
+        header, a = B.build_block(make_run(self.root), log=lambda *x: None)
+        nodes = [s['name'] for s in header['stations']] + header['sats']
+        n = {name: i for i, name in enumerate(nodes)}
+        b = header['bands'].index('E:L1X')
+        par, dep, tgt = a['tree_parent'], a['tree_depth'], a['tree_target']
+        self.assertEqual(par[b, n['R1'], 0], -2)                      # the reference receiver
+        self.assertEqual(par[b, n['E02'], 0], n['R2'])
+        self.assertEqual(dep[b, n['E02'], 0], 3)
+        self.assertEqual(par[b, n['E02'], 2], n['R1'])                # moved at the third epoch
+        self.assertEqual(dep[b, n['E02'], 2], 1)
+        self.assertEqual(tgt[b, n['E02'], 2], -3)
+        self.assertEqual(par[b, n['E05'], 0], -1)                     # never on the tree
+
+    def test_held_whole_numbers_decode(self):
+        header, a = B.build_block(make_run(self.root), log=lambda *x: None)
+        sta = [s['name'] for s in header['stations']].index('R3')
+        sat = header['sats'].index('E01')
+        link = [l for l in range(len(a['link_fam'])) if a['link_sta'][l] == sta and a['link_sat'][l] == sat][0]
+        rows = range(a['link_start'][link], a['link_start'][link] + a['link_count'][link])
+        states = [int(a['ce_state'][r]) for r in rows]
+        self.assertEqual(states, [R.STATE_CODES['window'], R.STATE_CODES['held']])
+        r = list(rows)[1]
+        n1 = int(a['ce_nint'][r]) + int(a['ce_dn1'][r])
+        wl = int(a['ce_wlint'][r]) + int(a['ce_dwl'][r])
+        self.assertEqual((n1, n1 - wl), (-128, -37))                  # the held whole numbers of the trace
+        self.assertAlmostEqual(float(a['ce_res'][r]), 0.004, places=6)
+        summary = a['sum_links']
+        self.assertEqual(int(summary[1, 0, 2]), 1)                     # one held link at the third epoch
+
+    def test_jumps_from_products(self):
+        header, a = B.build_block(make_run(self.root), log=lambda *x: None)
+        got = {(header['sats'][int(s)], int(c)) for s, c in zip(a['jp_sat'], a['jp_cls'])}
+        self.assertIn(('E01', 1), got)                                 # whole cycles
+        self.assertIn(('E02', 3), got)                                 # a fraction of a cycle
+        self.assertEqual(len(got), 2)
+
+    def test_missing_and_empty_parts(self):
+        header, _a = B.build_block(make_run(self.root, fixing=False), log=lambda *x: None)
+        parts = {m['part'] for m in header['missing']}
+        self.assertIn('fixing', parts)
+        self.assertIn('receiver phase bias', parts)
+        self.assertNotIn('alarms', parts)                              # present with a header and no rows
+        header, a = B.build_block(make_run(self.root / 'b', rpb=True), log=lambda *x: None)
+        self.assertNotIn('receiver phase bias', {m['part'] for m in header['missing']})
+        self.assertIn('rx_rpb', a)
+
+    def test_sky_overhead_satellite(self):
+        header, a = B.build_block(make_run(self.root), log=lambda *x: None)
+        k = header['sats'].index('E01')
+        self.assertAlmostEqual(float(a['sat_lat'][k, 0]), 0.0, places=3)   # straight above R1 (0 N, 0 E)
+        self.assertAlmostEqual(float(a['sat_lon'][k, 0]), 0.0, places=3)
+        self.assertEqual(int(a['los_el'][0, k, 0]), 90)
+
+    def test_pack_round_trip(self):
+        header, a = B.build_block(make_run(self.root), log=lambda *x: None)
+        raw = nv_page.pack(header, a)
+        self.assertEqual(raw[:4], b'NVB1')
+        hlen = struct.unpack('<I', raw[4:8])[0]
+        head = json.loads(raw[8:8 + hlen].decode('utf-8'))
+        base = 8 + hlen + (-(8 + hlen)) % 8
+        types = {v: k for k, v in nv_page.JS_TYPES.items()}
+        for e in head['arrays']:
+            self.assertEqual((base + e['offset']) % 8, 0)
+            dt = types[e['type']]
+            got = np.frombuffer(raw, dtype=dt.newbyteorder('<'), count=e['length'], offset=base + e['offset'])
+            np.testing.assert_array_equal(got.reshape(e['shape']), np.asarray(a[e['name']]).astype(dt))
+
+
+class TestCommands(Fixture):
+    def test_build_writes_one_self_contained_page(self):
+        run = make_run(self.root)
+        out = self.root / 'out' / 'page.html'
+        self.assertEqual(netview.main(['build', str(run), '-o', str(out)]), 0)
+        html = out.read_text(encoding='utf-8')
+        self.assertNotRegex(html, r'<script[^>]+src=')                # nothing loaded from elsewhere
+        self.assertNotRegex(html, r'<link[^>]+href=')
+        m = re.search(r'<script id="nv-data"[^>]*data-encoding="gzip">([A-Za-z0-9+/=]+)</script>', html)
+        self.assertIsNotNone(m)
+        import base64
+        self.assertEqual(gzip.decompress(base64.b64decode(m.group(1)))[:4], b'NVB1')
+
+    def test_arm_switches_trace_keys_only(self):
+        src = self.root / 'cfg.json'
+        src.write_text(json.dumps({'network': {'trace_events': True, 'phase_datum_eq34': True}}), encoding='utf-8')
+        dst = self.root / 'armed.json'
+        changed, notes = nv_arm.arm(src, dst)
+        cfg = json.loads(dst.read_text(encoding='utf-8'))
+        for k, _what in nv_arm.TRACE_KEYS + [nv_arm.MAP_KEY]:
+            self.assertIs(cfg['network'][k], True)
+        self.assertNotIn('network.trace_events', [c[0] for c in changed])
+        self.assertTrue(any('ring_fix' in n for n in notes))           # the fixing is not switched on here
+        self.assertFalse(any('phase_datum_eq34' in n for n in notes))
+        self.assertNotIn('ring_fix', cfg['network'])
+        with self.assertRaises(SystemExit):
+            nv_arm.arm(src, src)
+
+    def test_compare_page_links_two_pages(self):
+        a, b = self.root / 'a.html', self.root / 'sub' / 'b.html'
+        _write(a, 'x')
+        _write(b, 'y')
+        out = self.root / 'cmp.html'
+        nv_page.write_compare(out, a, b)
+        html = out.read_text(encoding='utf-8')
+        self.assertIn('src="a.html"', html)
+        self.assertIn('src="sub/b.html"', html)
+
+
+class TestPlainWords(unittest.TestCase):
+    """The page's own text keeps to plain words (the author's list of words to avoid)."""
+    BANNED = ('wire', 'harness', 'field', 'producer', 'consumer', 'census', 'golden', 'ladder', 'legs', 'card',
+              'standing')
+
+    def test_page_sources(self):
+        for name in ('netview.js', 'netview.html', 'netview.css'):
+            text = (HERE / 'page' / name).read_text(encoding='utf-8').lower()
+            # the one substitution the page makes for a raw trace text names the word on purpose
+            text = text.replace(".replace(/wire/gi, 'stream')", '')
+            for w in self.BANNED:
+                self.assertIsNone(re.search(r'\b' + w + r's?\b', text), f'{name}: "{w}"')
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=1)
