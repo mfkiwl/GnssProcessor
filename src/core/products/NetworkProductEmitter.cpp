@@ -106,6 +106,17 @@ void NetworkProductEmitter::setStepClassTest(const std::vector<std::string>& pai
     sc_have_prev_ = false;
 }
 
+void NetworkProductEmitter::setUnsettledSteps(const std::vector<std::string>& families) {
+    std::vector<UnsettledFamily> fams;
+    for (const std::string& e : families) {
+        if (e.size() != 9 || e[1] != ':' || e[5] != '/' || e[2] != 'L' || e[6] != 'L' || e[3] == e[7])
+            throw std::invalid_argument("unsettled-steps family '" + e + "' is not \"<c>:<signal>/<signal>\"");
+        fams.push_back(UnsettledFamily{ e[0], e.substr(2, 3), e.substr(6, 3), e });
+    }
+    us_families_ = std::move(fams);
+    us_prev_both_.clear();
+}
+
 const char* NetworkProductEmitter::discChannelName(DiscChannel c) {
     switch (c) {
         case kDiscChanClock:     return "clk";
@@ -515,6 +526,32 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
         sc_prev_epoch_s_ = epoch_s;
     }
 
+    // --- The unsettled steps (network.ring_fix.unsettled_steps) -----------------------------------------------
+    // Per family and satellite, from the flags on this emission's P records: "sat|signal" -> (the family, whether
+    // the step is the settling one).  Off (no family), nothing here runs.
+    std::map<std::string, std::pair<const std::string*, bool>> us_step;
+    if (!us_families_.empty()) {
+        for (const auto& s : sol.sats) {
+            if (s.sat.empty()) continue;
+            for (const UnsettledFamily& f : us_families_) {
+                if (letterOfSat(s.sat) != f.constellation) continue;
+                const auto a = s.phase_bias.find(f.p1);
+                const auto b = s.phase_bias.find(f.p2);
+                if (a == s.phase_bias.end() && b == s.phase_bias.end()) continue;   // the family is not emitted
+                const bool both = a != s.phase_bias.end() && b != s.phase_bias.end() && a->second.signal_integer
+                                  && b->second.signal_integer;
+                const std::string k = f.name + "|" + s.sat;
+                const auto prev = us_prev_both_.find(k);
+                const bool settling = both && prev != us_prev_both_.end() && !prev->second;
+                if (!both || settling) {
+                    if (a != s.phase_bias.end()) us_step[s.sat + "|" + f.p1] = { &f.name, settling };
+                    if (b != s.phase_bias.end()) us_step[s.sat + "|" + f.p2] = { &f.name, settling };
+                }
+                us_prev_both_[k] = both;
+            }
+        }
+    }
+
     for (const auto& s : sol.sats) {
         SsrHeader header;
         header.epoch_time  = sol.epoch_time;
@@ -734,7 +771,15 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                         if (!forced && !value_jump) ++sc_release_only_;
                     }
                 }
-                if (have_baseline && (forced || value_jump || released)) {
+                // The unsettled steps: a key of a held family whose two signals are not both flagged, or that
+                // settles at this emission.
+                const auto us = us_step.find(key);
+                const bool unsettled = us != us_step.end();
+                if (unsettled && have_baseline) {
+                    auto& n = us_counts_[*us->second.first];
+                    ++(us->second.second ? n.second : n.first);
+                }
+                if (have_baseline && (forced || value_jump || released || unsettled)) {
                     ++ctr;
                 }
                 last_phase_bias_[key] = npb.bias_m;

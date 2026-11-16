@@ -1473,6 +1473,14 @@ int Application::networkSetup_(NetworkSetupResult& setup) {
                   "chain releases is declared at its release epoch.", fams,
                   nc.disc_step_class_tol_cyc);
     }
+    if (nc.ring_fix.enable && nc.ring_fix.unsettled_steps) {
+        emitter.setUnsettledSteps(nc.ring_fix.pairs);
+        std::string fams;
+        for (const auto& f : nc.ring_fix.pairs) fams += (fams.empty() ? "" : ", ") + f;
+        log->warn("Network (ring fix): UNSETTLED STEPS on {}: while a held family's two signals are not both flagged "
+                  "settled, both step their phase counters at every emission, and once more when both become "
+                  "flagged.", fams);
+    }
 
     // --- Optional on-disk product serialization -----------------------------
     // A reusable per-epoch dump of the emitted solution (the same pre-emit

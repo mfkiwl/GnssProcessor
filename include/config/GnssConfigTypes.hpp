@@ -1950,6 +1950,13 @@ namespace GnssProcessor {
         /// tree as held links, and wide_lane_integer is 1; on a record of no held family both are 0.  False
         /// (default): the records carry the flags as before.
         bool settled_flags{ false };
+        /// @c network.ring_fix.unsettled_steps: an unsettled signal declares itself at every emission.  For each held
+        /// family and satellite, while the family's two signals are not both flagged settled, both signals' phase
+        /// discontinuity counters step at every emission, and once more at the first emission at which both are
+        /// flagged after one at which they were not; while both stay flagged only the other rules step them.  A level
+        /// that is not tied to the network's integers is not continuous, and the stream then says so; a user that
+        /// restarts an ambiguity at an increment needs no change.  Needs settled_flags.  False (default): no such steps.
+        bool unsettled_steps{ false };
         /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
         /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
         /// latch (the residual monitor's path).  Empty (default): no mask.

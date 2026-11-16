@@ -414,6 +414,27 @@ public:
     std::size_t stepClassReleasePending() const { return sc_release_pending_.size(); }
 
     /**
+     * @brief Arm the unsettled steps (@c network.ring_fix.unsettled_steps).
+     *
+     * For each family and satellite at every emission: while the family's two phase signals are not both flagged
+     * settled (signal_integer on both P records), both signals step their phase counters; at the first emission at
+     * which both are flagged after one at which they were not, they step once more; while both stay flagged only the
+     * other rules step them.  A family signal absent from the emission counts as not flagged; a key without a
+     * baseline (a first sighting) does not step.  Signals of no family are untouched.  The previous emission's state
+     * is not carried across a warm resume.
+     *
+     * @param families "<constellation>:<phase signal>/<phase signal>" ("E:L1X/L5X"), the ring fix's held families.
+     * @throws std::invalid_argument on a malformed family.
+     */
+    void setUnsettledSteps(const std::vector<std::string>& families);
+    /// @brief Whether the unsettled steps are armed.
+    /// @return True when @ref setUnsettledSteps named at least one family.
+    bool unsettledStepsArmed() const { return !us_families_.empty(); }
+    /// @brief The phase-key steps the unsettled steps raised, per family: (while unsettled, at the settling).
+    /// @return Family name ("E:L1X/L5X") -> the two counts over the run.
+    const std::map<std::string, std::pair<long long, long long>>& unsettledStepCounts() const { return us_counts_; }
+
+    /**
      * @brief Both edges of the phase-visible step test (standing invariant 7), counted over
      *        the emitter's life.  All zero when the test is off.
      */
@@ -830,6 +851,17 @@ private:
     long long sc_release_landed_{0};                        ///< Release marks landed on a key with a baseline.
     long long sc_release_only_{0};                          ///< Landed marks no other trigger stepped.
     long long sc_release_no_baseline_{0};                   ///< Release marks consumed on a first sighting.
+
+    // --- The unsettled steps (network.ring_fix.unsettled_steps; no family = off) -------------------------------
+    /// One held family: its constellation and its two phase signals.
+    struct UnsettledFamily {
+        char        constellation{0};  ///< RINEX letter.
+        std::string p1, p2;            ///< Phase signals of bands 1 and 2.
+        std::string name;              ///< "<c>:<p1>/<p2>".
+    };
+    std::vector<UnsettledFamily> us_families_;                         ///< The families; empty = off.
+    std::map<std::string, bool> us_prev_both_;                          ///< "<family>|sat" -> both flagged at its last emission.
+    std::map<std::string, std::pair<long long, long long>> us_counts_;  ///< Family -> (unsettled steps, settling steps).
     /// One key's phase-visible baseline: its clock less phase bias at its last emission
     /// with a clock, and that emission's product time.
     struct PvBaseline {

@@ -1184,6 +1184,25 @@ static int networkStepClassRunEnd(const NetworkRunEndView& v) {
     return 0;
 }
 
+/**
+ * @brief Run-end report of the unsettled steps (network.ring_fix.unsettled_steps): the phase-key steps raised per
+ *        held family, while unsettled and at the settling.
+ *
+ * Gate: the emitter armed with at least one family.
+ *
+ * @param v The run at its end (network/runend/RunEnd.hpp).
+ * @return 0 (this report does not set the exit code).
+ */
+static int networkUnsettledStepsRunEnd(const NetworkRunEndView& v) {
+    if (!v.setup.emitter || !v.setup.emitter->unsettledStepsArmed()) return 0;
+    std::string line;
+    for (const auto& [fam, n] : v.setup.emitter->unsettledStepCounts())
+        line += fmt::format("{}{} {} while unsettled and {} at the settling", line.empty() ? "" : "; ", fam, n.first,
+                            n.second);
+    v.log->info("Network (ring fix, unsettled steps): phase-key steps raised: {}.", line.empty() ? "none" : line);
+    return 0;
+}
+
 // Run-end report of this subsystem: its sections in print order (
 // declared in network/emit/EmitStore.hpp).
 int networkEmitStoreRunEnd(const NetworkRunEndView& v) {
@@ -1192,7 +1211,8 @@ int networkEmitStoreRunEnd(const NetworkRunEndView& v) {
         networkDeferredHeartbeatsRunEnd,
         networkProductContractRunEnd,
         networkPhaseVisibleStepRunEnd,
-        networkStepClassRunEnd
+        networkStepClassRunEnd,
+        networkUnsettledStepsRunEnd
     });
 }
 

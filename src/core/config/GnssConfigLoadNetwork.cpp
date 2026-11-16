@@ -1541,6 +1541,11 @@ namespace GnssProcessor {
             if (rf.settled_flags && rf.pairs.empty())
                 throw std::runtime_error("network.ring_fix.settled_flags needs network.ring_fix.pairs (the held "
                                          "families whose records it flags).");
+            rf.unsettled_steps = jval<bool>(json, "network.ring_fix.unsettled_steps",
+                                            "network_ring_fix_unsettled_steps", false);
+            if (rf.unsettled_steps && !rf.settled_flags)
+                throw std::runtime_error("network.ring_fix.unsettled_steps steps the signals the settled flags leave "
+                                         "unsettled: it needs network.ring_fix.settled_flags.");
             rf.max_decisions_per_epoch = jval<int>(json, "network.ring_fix.max_decisions_per_epoch",
                                                    "network_ring_fix_max_decisions_per_epoch", 3);
             if (rf.max_decisions_per_epoch < 0)
