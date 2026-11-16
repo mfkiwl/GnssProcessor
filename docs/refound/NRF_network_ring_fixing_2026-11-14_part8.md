@@ -189,6 +189,17 @@ Exe nrf27 (`62ee00ce87b6aeeb`, commit 1246180); both arms exit 0 with every epoc
 
 **Bars.** p13: Galileo's held link-epochs not below l12's (the early loss of section 65.1 gone); GPS's not below p12's; every epoch emitted; RAIM rows and the segment drift of the flagged runs not above p12's by more than a tenth. g13 (against p13): every epoch emitted; Galileo L1X/L5X's and GPS's held link-epochs not below p13's by more than 2 %; RAIM rows not above p13's by more than a tenth. Reads: the held and flagged shares per family by half hour; the segment drift per family; every phase signal of the stream in a held family.
 
+### 68.1 2026-11-16: the cap of 12 removes Galileo's early loss; order G holds Galileo C/Q with every signal in a family, its flagged levels moving on DOY 144
+
+Exe nrf26; all four runs exit 0 with 720 of 720 epochs emitted; the smoke `g13smoke` first (exit 0). Grade `_irdu_grades/nrf_p13_grade.txt` (script `_irdu_grades/scripts_s20/grade_p13.sh`). DOY 144, then DOY 145.
+
+- **p13 against l12 and p12** (held link-epochs): Galileo L1X/L5X 88 842 and 76 671 (l12 86 909 and 75 202: +2.2 and +2.0 %; p12 84 747 and 73 867); GPS L1C/L2W 206 071 and 202 078 (p12 193 129 and 188 978: +6.7 and +6.9 %). Galileo's held share in half hours 2 and 3: 40.3 and 83.8 % on DOY 144, 40.3 and 80.4 % on DOY 145 (p12 24.9 and 56.5, 16.8 and 56.3; l12 33.0 and 77.0, 31.5 and 78.6); GPS's 56.6 and 87.0 %, 49.6 and 85.9 %.
+- **RAIM rows** 1 and 1 (p12 1 and 1). One change of rule L's identity (GPS, DOY 145, TOW 87 780, 10 satellites).
+- **Segment drift of the flagged runs** (p90, largest, share of flagged satellite-epochs in segments over 0.15 cycle; p12 in parentheses): GPS 0.162, 0.279, 18.6 % (0.161, 0.264, 28.2 %) and 0.163, 0.244, 15.7 % (0.167, 0.240, 27.3 %); Galileo 0.123, 0.259, 9.9 % (0.143, 0.248, 21.8 %) and 0.151, 0.211, 19.7 % (0.192, 0.254, 37.1 %). Galileo's DOY 145 excess of section 65.1 is gone (l12 0.158).
+- **g13 against p13:** Galileo L1X/L5X 88 710 and 76 637 (-0.1 and -0.04 %), GPS 206 610 and 202 379 (+0.3 and +0.1 %), RAIM rows 1 and 1; every phase record of the stream belongs to a held family (p13: Galileo L1C and L5Q outside, 21 513 and 20 928 records on DOY 144). Galileo L1C/L5Q holds 74 438 and 71 172 link-epochs; held share by half hour 3.5 53.4 71.3 70.8 74.4 73.3 73.3 72.6 85.5 86.5 86.2 89.7 % and 5.4 50.8 85.1 86.5 82.5 83.9 77.1 74.2 73.1 73.1 72.8 71.5 %; flagged share (rule L) 72 to 81 % and 74 to 83 % from the third half hour. Its flagged segments drift p90 0.356, largest 0.412, 90.3 % of flagged satellite-epochs in segments over 0.15 cycle on DOY 144, and 0.174, 0.248, 49.8 % on DOY 145 (Galileo L1X/L5X in the same runs 0.117 and 0.159).
+
+**Bars.** p13: every bar passes (Galileo not below l12, GPS not below p12, every epoch emitted, RAIM rows and the flagged segment drift within a tenth of p12's or below). g13: every bar passes (every epoch emitted, Galileo X/X and GPS within 2 % of p13, RAIM rows as p13). **Read:** the C/Q family holds and is flagged less than X/X, and on DOY 144 its flagged levels move under constant counters (p90 0.356 cycle), so a user at a C/Q receiver on `g13_n144` would follow a moving level with its flags up; why the C/Q family's levels move on DOY 144 is not yet traced.
+
 ## 69. 2026-11-16: the wait on the settled flag's raise (built)
 
 **Why** (the requesting session's decision 2): read H (section 67) as a parameter of the flag; its value comes from the requesting session's user replays, so it is built and not armed.
