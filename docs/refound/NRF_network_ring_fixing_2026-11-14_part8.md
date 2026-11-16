@@ -150,6 +150,15 @@ Exe nrf26; both runs exit 0, 720 of 720 epochs emitted (none withheld); a 10-epo
 
 **Arms** (exe nrf27): `e12_n144`, `l12_n144` with the key; `km_sim` (`kd_sim`'s configuration) for keys absent identical. **Bars:** keys absent identical; against `l12_n144`, the values unchanged, the family signals' counters unchanged, and every other phase signal's counter changing at every emission that has a baseline.
 
+### 66.1 2026-11-16: the steps of the signals of no held family: every bar passes
+
+Exe nrf27 (`62ee00ce87b6aeeb`, commit 1246180); both arms exit 0 with every epoch emitted. Grade `_irdu_grades/nrf_e12_grade.txt` (`_irdu_grades/scripts_s20/check_e12.py`).
+
+- **Keys absent identical:** `km_sim` (nrf27) against `kd_sim` (nrf20): the products and the 42 CSV traces identical, wall-clock columns aside.
+- **Values unchanged:** `e12_n144` against `l12_n144`, 389 271 lines each, none differing outside the phase counters (values, flags and records all equal).
+- **The family signals' counters unchanged** (Galileo L1X and L5X, GPS L1C and L2W): no P record differs; the run-end steps of the families equal l12's (Galileo 6 962 while unsettled and 66 at the settling, GPS 15 424 and 70).
+- **Every other phase signal steps at every emission that has a baseline:** 65 076 of 65 076 (Galileo L1C and L5Q, GPS L1W); the run-end line counts 42 381 steps under "E:no held family" and 22 695 under "G:no held family".
+
 ## 67. 2026-11-16: a wait on the flag's raise (read H)
 
 **Why** (the requesting session's read H): section 61.1 puts rule L's added pairs above 0.10 cycle in the first 90 min, where flagged levels still move (E27's phase biases moving 1 to 10 cm per epoch after its flag rose), and the requesting session's DOY 144 hour-2 cost at the user has the same address. A wait: a satellite is flagged only from the (N+1)-th consecutive emission at which rule L puts it in the set (the unsettled steps go on during the wait, the settling step comes at the delayed raise). A stamp and the truth audit; no run, no build.
@@ -171,3 +180,19 @@ Exe nrf26; both runs exit 0, 720 of 720 epochs emitted (none withheld); a 10-epo
 - **Flagged pair-epochs lost against rule L:** GPS 5 334, 10 544 and 20 907 (4.3, 8.6 and 17.0 %), Galileo 3 239, 6 469 and 12 920 (4.1, 8.1 and 16.2 %), most in the second and third half hours. Against rule B, GPS keeps 21, 16 and 5 % more flagged pairs and Galileo 3.4, 7.5 and 15.7 % fewer (rule B's Galileo flags rise in the second half hour and are not delayed).
 
 **Reading.** On the simulator a wait of 10 removes most of rule L's early inconsistency (GPS pairs above 0.10 cycle 894 to 203, about rule B's 198 with 21 % more flagged pairs; Galileo 256 to 35, against rule B's 180) for about 4 % of the flagged pairs; 20 brings them to 138 and 28 for twice that cost; 40 costs a sixth of the pairs for little more. Every wait is better than rule B above 0.25 cycle. The requesting session's N = 20 at the users on both observed days completes the read.
+
+## 68. 2026-11-16: the lineage at the adopted cap of 12; order G at the cap (pre-registered)
+
+**Why** (the requesting session's decision 1 after section 65.1): the early Galileo loss of section 65.1 sits at the decision cap of 3 that the u12 lineage keeps; the cap of 12 is adopted (section 48). Of the adopted keys of sections 41 to 56 (`sigma_scale`, `rehost_keep_carry`, `max_decisions_per_epoch`, the bad-epoch response's `amb_float_drop_jump_k`, `amb_float_drop_gap_cover`, `amb_float_drop_decouple_always` and `zwd_event_inflate_m`, `disc_step_class_pairs`, `disc_step_class_tol_cyc`), the lineage lacks only the cap (the tolerance is absent, its default 0.15 the adopted value). Order G's arms at the cap of 3 (`g12_n144`, `g12_n145`) were stopped early and are replaced.
+
+**Arms** (exe nrf26; the smoke `g13smoke` first): `p13_n144` and `p13_n145`, `p12` with `network.ring_fix.max_decisions_per_epoch` 12 (one knob); `g13_n144` and `g13_n145`, `p13` with the pairs of section 54.2 (`["E:L1X/L5X", "E:L1C/L5Q", "G:L1C/L2W"]`): every phase signal of the stream in a held family, for users at C/Q receivers.
+
+**Bars.** p13: Galileo's held link-epochs not below l12's (the early loss of section 65.1 gone); GPS's not below p12's; every epoch emitted; RAIM rows and the segment drift of the flagged runs not above p12's by more than a tenth. g13 (against p13): every epoch emitted; Galileo L1X/L5X's and GPS's held link-epochs not below p13's by more than 2 %; RAIM rows not above p13's by more than a tenth. Reads: the held and flagged shares per family by half hour; the segment drift per family; every phase signal of the stream in a held family.
+
+## 69. 2026-11-16: the wait on the settled flag's raise (built)
+
+**Why** (the requesting session's decision 2): read H (section 67) as a parameter of the flag; its value comes from the requesting session's user replays, so it is built and not armed.
+
+**The build** (exe nrf28; key `network.ring_fix.settled_wait_emissions`, default 0, needs `network.ring_fix.settled_flags` above 0; ledger row UNVALIDATED). `ringFixSettledWait` (`network/ar/RingFix`): a satellite the rule puts in a family's set is flagged only from its (N+1)-th consecutive emission in the set; its count restarts when it leaves the set or the family's tree is absent. The rule's own set is not changed (rule L's incumbent and hysteresis read the set before the wait), as in section 67's stamp. The emitter needs no change: with the unsettled steps a waiting satellite's signals step at every emission and take the settling step at the delayed raise. The run-end line adds the satellite-signal-epochs held back. Unit test `RingFixSettledFlags.AWaitRaisesASatellitesFlagOnlyAtItsWaitPlusFirstEmissionInTheSet`.
+
+**Arms** (exe nrf28): `kp_sim` (`kd_sim`'s configuration) for keys absent identical; `w10_sim`, `l12_sim` with the wait of 10, whose emitted flags must equal `flag_root.py --wait 10` at every record.

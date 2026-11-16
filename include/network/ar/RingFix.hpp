@@ -253,6 +253,17 @@ struct RingFixLargestSet {
  * @param hysteresis The lead another component needs to replace the incumbent.
  * @return The flagged set, whether it changed identity, and the satellites that changed side then.
  */
+/**
+ * @brief The wait on the settled flag's raise (network.ring_fix.settled_wait_emissions): a satellite in this epoch's
+ *        set is flagged only from its (wait + 1)-th consecutive emission in the set.
+ * @param in_set The family's set this epoch (the rule's choice).
+ * @param run    [in/out] Satellite -> its consecutive emissions in the set; a satellite out of the set leaves it.
+ * @param wait   Emissions in the set before the raise (0: the set itself).
+ * @return The flagged satellites.
+ */
+std::set<std::string> ringFixSettledWait(const std::set<std::string>& in_set, std::map<std::string, int>& run,
+                                         int wait);
+
 RingFixLargestSet ringFixLargestSettledSet(const std::vector<std::pair<int, std::string>>& links,
                                            const std::set<std::string>& tree_sats,
                                            const std::set<std::string>& incumbent, int min_sats, int hysteresis);
@@ -444,6 +455,7 @@ struct RingFixCounters {
     long long settled_flips{0};           ///< Changes of a satellite signal's settled flag between consecutive epochs.
     long long settled_identity_changes{0}; ///< Rule "largest": changes of a family's flagged set to another component.
     long long settled_side_changes{0};    ///< Rule "largest": satellites that changed side at those changes.
+    long long settled_wait_held{0};       ///< The wait: satellite-signal-epochs in the set held back before the raise.
     long long reattached{0};              ///< Re-attachments through a held link (one per released edge the walk took first).
     long long held_first_kept{0};         ///< Held links crossing those cuts, kept at their integers (the entry links not counted).
     long long cut_released_usable{0};     ///< Held links released across an unknown step while usable (not latched, monitor not tripped).
@@ -519,6 +531,9 @@ struct NetworkRingFix {
     bool        settled_largest{false};     ///< The settled flags follow rule "largest" (network.ring_fix.settled_rule).
     /// Rule "largest": each family's flagged set at the last epoch, "<letter>:<signal 1>/<signal 2>" -> satellites.
     std::map<std::string, std::set<std::string>> settled_incumbent;
+    int         settled_wait{0};            ///< The wait on the raise, emissions (network.ring_fix.settled_wait_emissions).
+    /// The wait: each family's satellites and their consecutive emissions in the set.
+    std::map<std::string, std::map<std::string, int>> settled_run;
     bool        form_configured_pairs{false};   ///< The chord table forms every configured family (network.ring_fix.form_configured_pairs).
     /// The configured families by constellation letter, for the chord table (form_configured_pairs only).
     std::map<char, std::vector<std::pair<std::string, std::string>>> configured_pairs;

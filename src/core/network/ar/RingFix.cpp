@@ -69,6 +69,16 @@ void ringFixStampSettledFlags(NetworkSolutionEpoch& sol, const NetworkRingFix& r
     }
 }
 
+std::set<std::string> ringFixSettledWait(const std::set<std::string>& in_set, std::map<std::string, int>& run,
+                                         int wait) {
+    for (auto it = run.begin(); it != run.end();)
+        it = in_set.count(it->first) != 0 ? std::next(it) : run.erase(it);
+    std::set<std::string> out;
+    for (const std::string& s : in_set)
+        if (++run[s] >= wait + 1) out.insert(s);
+    return out;
+}
+
 RingFixLargestSet ringFixLargestSettledSet(const std::vector<std::pair<int, std::string>>& links,
                                            const std::set<std::string>& tree_sats,
                                            const std::set<std::string>& incumbent, int min_sats, int hysteresis) {

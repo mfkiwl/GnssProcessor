@@ -232,6 +232,11 @@ void networkRingFixArm(NetworkRun& run) {
                   "traced (counted at run end).", list);
     }
     rf->settled_largest = rf->settled_flags_on && nc.ring_fix.settled_rule == "largest";
+    rf->settled_wait = rf->settled_flags_on ? nc.ring_fix.settled_wait_emissions : 0;
+    if (rf->settled_wait > 0)
+        log->warn("Network (ring fix): SETTLED WAIT {}: a satellite the settled flags' rule puts in a family's set is "
+                  "flagged only from its {}-th consecutive emission in the set.", rf->settled_wait,
+                  rf->settled_wait + 1);
     if (rf->settled_largest)
         log->warn("Network (ring fix): SETTLED RULE LARGEST: the settled flags flag the largest set of a family's "
                   "satellites mutually tied through held links and certified tree edges, whatever receiver roots it, "
@@ -951,6 +956,11 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                 inc = pick.sats;
                 settled = std::move(pick.sats);
             }
+            if (rf.settled_wait > 0) {
+                const std::size_t in_set = settled.size();
+                settled = ringFixSettledWait(settled, rf.settled_run[ck + ":" + s1 + "/" + s2], rf.settled_wait);
+                rf.counters.settled_wait_held += 2 * static_cast<long long>(in_set - settled.size());
+            }
             for (const auto& [sat, root] : root_of_sat) {
                 (void)root;
                 const bool f = settled.count(sat) != 0;
@@ -1035,10 +1045,14 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
         log->warn("Network (ring fix, settled flags): {} satellite-signal-epochs of held families flagged settled, "
                   "{} not; {} flips between consecutive epochs.{}",
                   C.settled_signal_epochs, C.unsettled_signal_epochs, C.settled_flips,
-                  rf.settled_largest ? fmt::format("  Rule largest: {} change(s) of identity, {} satellite(s) changed "
-                                                   "side at them.", C.settled_identity_changes,
-                                                   C.settled_side_changes)
-                                     : std::string());
+                  (rf.settled_largest ? fmt::format("  Rule largest: {} change(s) of identity, {} satellite(s) changed "
+                                                    "side at them.", C.settled_identity_changes,
+                                                    C.settled_side_changes)
+                                      : std::string())
+                      + (rf.settled_wait > 0 ? fmt::format("  Wait of {} emission(s): {} satellite-signal-epochs in "
+                                                           "the set held back before the raise.", rf.settled_wait,
+                                                           C.settled_wait_held)
+                                             : std::string()));
     if (rf.rehost_keep_carry)
         log->warn("Network (ring fix, re-hosts onto held links): {} kept with their carries (the new host's carry on "
                   "the held integer); {} released because that carry was 1e-4 cycle or more off the held integer (a "

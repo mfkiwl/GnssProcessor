@@ -1558,6 +1558,13 @@ namespace GnssProcessor {
             if (rf.settled_rule != "root" && !rf.settled_flags)
                 throw std::runtime_error("network.ring_fix.settled_rule chooses the settled flags' rule: it needs "
                                          "network.ring_fix.settled_flags.");
+            rf.settled_wait_emissions = jval<int>(json, "network.ring_fix.settled_wait_emissions",
+                                                  "network_ring_fix_settled_wait_emissions", 0);
+            if (rf.settled_wait_emissions < 0)
+                throw std::runtime_error("network.ring_fix.settled_wait_emissions counts emissions: it must be 0 or more.");
+            if (rf.settled_wait_emissions > 0 && !rf.settled_flags)
+                throw std::runtime_error("network.ring_fix.settled_wait_emissions delays the settled flags' raise: it "
+                                         "needs network.ring_fix.settled_flags.");
             rf.form_configured_pairs = jval<bool>(json, "network.ring_fix.form_configured_pairs",
                                                   "network_ring_fix_form_configured_pairs", false);
             if (rf.form_configured_pairs && rf.pairs.empty())

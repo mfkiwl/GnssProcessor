@@ -1968,6 +1968,12 @@ namespace GnssProcessor {
         /// roots it, once it holds at least 4 satellites; the incumbent set is kept until another holds 2 more.  Needs
         /// settled_flags.
         std::string settled_rule{ "root" };
+        /// @c network.ring_fix.settled_wait_emissions: the wait on the settled flag's raise.  A satellite the rule puts
+        /// in a family's set is flagged only from its (N+1)-th consecutive emission in the set; the count restarts when
+        /// it leaves the set or the family's tree is absent.  With network.ring_fix.unsettled_steps its signals step at
+        /// every emission of the wait and take the settling step at the delayed raise.  The rule's own set (rule L's
+        /// incumbent and hysteresis) is not changed.  Needs settled_flags when above 0.  0 (default): no wait.
+        int settled_wait_emissions{ 0 };
         /// @c network.ring_fix.form_configured_pairs: the chord table forms every family of network.ring_fix.pairs on
         /// an arc that tracks both its signals, beside the rule that pairs every band-1 signal with the arc's
         /// lowest-digit signal of another band, so that a family of a third band has chords.  Needs the pairs.  False

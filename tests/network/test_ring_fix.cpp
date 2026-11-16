@@ -1020,3 +1020,16 @@ TEST(RingFixSettledFlags, TheLargestSetNeedsFourSatellitesAndKeepsTheIncumbentUn
     EXPECT_EQ(p.side_changes, 10);           // A's 4 leave, B's 6 join
     EXPECT_TRUE(ringFixLargestSettledSet({{0, "E01"}, {0, "E02"}, {1, "E02"}}, tree, {}, 4, 2).sats.empty());
 }
+
+TEST(RingFixSettledFlags, AWaitRaisesASatellitesFlagOnlyAtItsWaitPlusFirstEmissionInTheSet) {
+    std::map<std::string, int> run;
+    const std::set<std::string> ab = {"E01", "E02"};
+    EXPECT_TRUE(ringFixSettledWait(ab, run, 2).empty());                       // 1st emission in the set
+    EXPECT_TRUE(ringFixSettledWait(ab, run, 2).empty());                       // 2nd
+    EXPECT_EQ(ringFixSettledWait(ab, run, 2), ab);                             // 3rd: raised
+    EXPECT_EQ(ringFixSettledWait({"E02"}, run, 2), std::set<std::string>{"E02"});   // E01 leaves: its count restarts
+    EXPECT_EQ(run.count("E01"), 0u);
+    EXPECT_EQ(ringFixSettledWait(ab, run, 2), std::set<std::string>{"E02"});   // E01 back: waits again
+    std::map<std::string, int> none;
+    EXPECT_EQ(ringFixSettledWait(ab, none, 0), ab);                            // no wait: the set itself
+}
