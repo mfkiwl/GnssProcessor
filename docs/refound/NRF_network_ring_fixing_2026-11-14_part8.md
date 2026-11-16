@@ -229,6 +229,15 @@ The requesting session sets the value at 10 emissions (its user replays on both 
 
 **Users for the Galileo C/Q family** (the requesting session's question, from `g13`'s ring-fix trace, hours 2 to 6): the family's 27 roster receivers are mostly Septentrio; the Asia-Pacific ones hold best and the European ones hold 70 to 80 % with more releases. Six spread out with clean days (held share on DOY 144 and 145; releases): SOLO00SLB (western Pacific; 93.7 and 90.4 %; 2 and 5), PARK00AUS (Australia; 91.4 and 89.7 %; 1 and 3), HKSL00HKG (East Asia, Leica GR50; 90.5 and 83.1 %; 2 and 6), JPLM00USA (western North America; 81.8 and 88.9 %; 1 and 3), MRC100USA (eastern North America; 75.0 and 87.2 %; 5 and 2), SEYG00SYC (Indian Ocean; 82.8 and 90.2 %; 3 and 3, fewer link-epochs on DOY 144). In Europe the best is GOP600CZE (80.5 and 72.8 %; 7 and 7). Not suitable: PALM00ATA (no held link-epoch) and WTZR00DEU (35.7 % on DOY 144).
 
+### 70.1 2026-11-16: the final candidate: every bar passes; the wait costs the first hour
+
+Exe nrf28; both runs exit 0 with 720 of 720 epochs emitted, RAIM rows 1 and 1 (as `g13`); the smoke `f13smoke` first (exit 0). Grade `_irdu_grades/nrf_f13_grade.txt` (script `_irdu_grades/scripts_s20/grade_f13_t3x.sh f13`). Streams for the user replays: `f13_n144`, `f13_n145`.
+
+- **f13 equals g13 apart from the flags and the counters:** 366 548 and 368 969 lines, none differing with both masked; the flags alone move 1 970 and 2 026 lines (the wait's held-back satellite-signal-epochs of the run-end line, exactly), the counters 110 107 and 111 463; of the 39 CSV traces 4 differ (the solution trace's counter column and the closed-loop consumer's three).
+- **The flags equal the stamp** (`flag_root.py --wait 10`): 0 of 130 079 and 0 of 131 108 family records differ.
+- **The wait's cost** (flagged share by half hour, f13 against g13): DOY 144 GPS 0 82 100 (4 95 100) %, Galileo X/X 0 41 91 97 (2 54 91 99), C/Q 0 53 73 (4 61 73); DOY 145 GPS 1 75 100 (8 86 100), X/X 0 40 82 95 (2 49 85 96), C/Q 1 54 82 (4 63 83); from the third half hour within a point.
+- **Run-end lines:** flagged 104 926 and 106 426 satellite-signal-epochs (g13 106 896 and 108 452), held back by the wait 1 970 and 2 026; unsettled steps (while unsettled; at the settling) DOY 144 Galileo C/Q 13 743; 62, X/X 6 458; 62, GPS 4 768; 72 (g13 13 113; 64, 5 838; 62, 4 048; 72), DOY 145 12 314; 60, 7 156; 66, 5 028; 72 (11 696; 62, 6 492; 68, 4 284; 80); no step of a signal of no held family (every signal of the stream is in one).
+
 ## 71. 2026-11-16: the cascade: a third signal's integer from a held pair (built, pre-registered)
 
 **Why** (the requesting session's order B after section 60, the step after `t3l`): one cascade that serves a third frequency (through the held pair) and a same-frequency sibling (GPS L1W from a held L1C, section 57 item 1), with the flags kept per family (section 57 item 2); default off; the simulator first, truth the judge.
@@ -238,3 +247,25 @@ The requesting session sets the value at 10 emissions (its user replays on both 
 **Arms** (exe nrf29): `t3x_sim` and `t3x_sim_r`, `t3c_sim[_r]` (the three bands, GPS L1C/L2W and Galileo L1C/L5Q held) with the cascades `"G:L1C/L2W>L5Q"` and `"E:L1C/L5Q>L7Q"`; `kr_sim` (`kd_sim`'s configuration) for keys absent identical; a 10-epoch smoke first. A same-frequency sibling needs a fixture with GPS L1W (the golden fixture has one channel per band): observed data later.
 
 **Bars.** The third signals' held link-epochs right against truth at 99.9 % or more and no wrong decision; the pairs' held link-epochs within 5 % of `t3c_sim[_r]`'s and their truth audit zero; every epoch emitted; RAIM rows not above `t3c_sim[_r]`'s by more than a tenth; keys absent identical.
+
+## 72. 2026-11-16: the fallback pair: the package without Galileo C/Q held (pre-registered)
+
+**Why** (the requesting session's request after section 70): `f13` holds the Galileo C/Q family, whose flagged levels move on DOY 144 (section 68.1); in case that fails at the user, the same package with Galileo L1C/L5Q left a signal of no held family, so that its counters step at every emission.
+
+**Arms** (exe nrf28): `h13_n144` and `h13_n145`, `p13` with `network.ring_fix.unsettled_steps_unheld` and `network.ring_fix.settled_wait_emissions` 10; a 10-epoch smoke first (`h13smoke`).
+
+**Bars** (section 70's, against `p13`): `h13` equals `p13` apart from the settled flags and the phase counters; every epoch emitted. **Reads:** the flagged share by half hour per family against `p13`; the run-end lines of the flags, the unsettled steps and the steps of the signals of no held family (Galileo L1C and L5Q among them).
+
+## 73. 2026-11-16: why Galileo C/Q's flagged levels move on DOY 144 (a read)
+
+**Why** (the requesting session's request after section 68.1): which receiver roots the C/Q trees on each day; how many receivers tie each flagged satellite; whether the movement is common to the family (a datum drifting against L1X/L5X, which a user's between-satellite differences cancel) or per satellite; whether it sits in satellites tied by one receiver only.
+
+**How** (`_irdu_grades/scripts_s20/cq_trace.py` on `g13_n144` and `g13_n145`, hours 1 to 6, with the levels, datum and segments of the requesting session's `stream_seg_drift.py`; grade `_irdu_grades/nrf_cq_trace.txt`). The tool removes each signal's median step over the family's satellites, so what it counts is each satellite's own movement against its family; the family's common part is read apart.
+
+**Results.**
+- **Roots:** the C/Q family's first-band tree (Galileo L1C) is rooted all day at COCO00AUS on DOY 144 and at MAJU00MHL on DOY 145; the X/X family's (L1X) at BOGT00COL and STHL00GBR.
+- **A common part:** the C/Q family's own datum (its running median step) moves against X/X's by 0.42 and 0.55 narrow-lane cycle over hours 1 to 6 (first to last 0.16 and 0.37). Common to the family's satellites, it cancels in a user's between-satellite differences, and the segment drift does not count it.
+- **A per-satellite part, on top of it:** on DOY 144, 23 of the family's 38 flagged runs move more than 0.15 cycle, 15 satellites over the whole window (the largest ranges 0.32 to 0.41). Per satellite, over its longest run of constant counters in both families, the C/Q level moves p50 0.272 cycle, the same satellite's X/X level 0.096 and their difference 0.236 (DOY 145: 0.142, 0.122 and 0.118). The movement is in the C/Q phase biases, not in what the two families share (the satellite clock).
+- **Not weak ties:** the moving satellites are tied by 5 to 13 receivers (p50 over the run), and only 0.1 % of their flagged satellite-epochs rest on one receiver (10.9 % outside the moving runs).
+
+**Reading.** On DOY 144 the network's C/Q satellite phase biases drift satellite by satellite, a quarter to two fifths of a narrow-lane cycle over five hours, against the same satellites' X/X biases, which hold within a tenth, while the family's tree is rooted at COCO00AUS and every satellite is tied by several receivers. A user at a C/Q receiver keeps the common part out but follows the per-satellite part with the flags up. The cause is not traced yet. The next read is what the C/Q sub-network's 27 receivers (mostly Septentrio, rooted at COCO00AUS) put into those biases that the X/X receivers do not: their per-receiver wet delay and code-phase terms against each satellite's elevation.
