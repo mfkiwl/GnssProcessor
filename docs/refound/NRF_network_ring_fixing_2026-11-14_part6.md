@@ -109,3 +109,23 @@ The first batch of section 42 ran on exe nrf18. **DOY 145 passes:** the same-sta
 **The fix** (exe nrf20): remedy (a) keeps a re-host only when the new host's carry sits on the held integer to within 1e-4 cycle (a step of 0); a held link whose carry is off its integer is released as before (counter `rehost_off_integer`). The nrf18 runs of the second batch were stopped.
 
 **Re-runs** (exe nrf20; the bars of sections 39, 42 and 43 unchanged): the golden simulator pair `kd_sim` and `kd_sim_r` (section 41.1's arms with (a) on); section 42's arms as `o10_n144`, `o10_n144r`, `o10_n145`, `o10_n145r`, `o10_n145b`; section 43's as `d10_*`. If they pass, the adoption of section 41.6 stands on the fixed code with its notes revised; if not, the remedy's adoption is withdrawn.
+
+## 44. 2026-11-15: the per-epoch decision cap as a key (pre-registered)
+
+**Why** (the requesting session's order): the ring fix decides at most 3 links per epoch, a value set when a wrong decision was still expected; with remedy (a) it passes over 3 379 Galileo and 4 416 GPS link-epochs in 3 h on the golden simulator bed that had passed every test (section 41.1), and none of the decisions since has been wrong on any bed.
+
+**The key** (commit af34831, exe nrf21): `network.ring_fix.max_decisions_per_epoch`, default 3 (the former constant, identical when absent), 0 for no cap; ledger row UNVALIDATED.
+
+**Arms** (exe nrf21; the golden simulator bed with the adopted set, as `kd_sim[_r]` of section 42.1): `kq6_sim[_r]`, `kq12_sim[_r]`, `kq0_sim[_r]` (cap 6, 12 and none, the default receiver and S45000SIM); the cap of 3 is `kd_sim[_r]`; `ki_sim` (`kd_sim` with the key set to 3) against `kf_sim` (`kd_sim` with no key) for keys absent identical. Then the DOY 144 pair of section 42 at the best value that keeps every bar.
+
+**Bars:** 0 wrong against truth; the two-reference audit zero; every epoch emitted; keys absent identical. **Reads:** held share by half hour per family, refusals by the cap, decisions per epoch (p50, p99, largest), alarms (RAIM rows, monitor releases). If the DOY 144 pair passes, the key is adopted under the author's rule with the three-part note.
+
+## 45. 2026-11-15: the stream says which signals are settled (pre-registered)
+
+**Why** (the requesting session's design question and order): a user that starts with the network fixes on the stream's unsettled first hour and keeps what that hour put into it (its note ARNF section 17); the stream should say which satellite signals are settled, so that a user fixes only on them.
+
+**The flags** (exe nrf21; key `network.ring_fix.settled_flags`, default off, ledger row UNVALIDATED; needs `network.ring_fix.pairs`): on every phase-bias record of a held family (a pair of `network.ring_fix.pairs`), `signal_integer` is 1 only while the satellite is reached from its tree's datum receiver through held links and tree edges that entered the tree as held links (rule B of `scripts/nrf_settled_flags.py`), and `wide_lane_integer` is 1; on a record of no held family both are 0. Computed by the ring fix after its decisions each epoch (`ringFixSettledSats`, the components from the arc graph's disjoint sets) and stamped on the records at the solution's preparation. The read of section 43's design question on `o2s1j_n144` (Galileo L1X/L5X): flagged 21 % of satellite-epochs in hour 1, 92 % in hour 2, 97 to 100 % after, 0.05 flips per satellite-hour after the first hour.
+
+**Arms** (exe nrf21): `f10_n144`, the DOY 144 stream of section 42.1 with the step declaration (`d10_n144`) and the flags; `kf_sim` (`kd_sim` with no new key) for keys absent identical.
+
+**Bars:** keys absent identical (`kf_sim` against `kd_sim`, exe nrf20); on `f10_n144` the emitted flags equal `nrf_settled_flags.py`'s rule B at every epoch, for every satellite signal of a held family; the flips counted; the products otherwise identical to `d10_n144`'s (the step declaration's increments unchanged by the flags).
