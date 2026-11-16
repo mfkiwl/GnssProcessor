@@ -245,6 +245,20 @@ class TestBlock(Fixture):
         self.assertNotIn('receiver phase bias', {m['part'] for m in header['missing']})
         self.assertIn('rx_rpb', a)
 
+    def test_config_summary_keeps_every_fixing_key(self):
+        run = make_run(self.root)
+        rf = {'enable': True, 'rule': 'gated', 'pairs': ['E:L1X/L5X'], 'settled_flags': True, 'settled_rule': 'largest'}
+        _write(run / 'arm.json', json.dumps({'processing': {'active_systems': ['E']},
+                                             'network': {'ring_fix': rf, 'phase_datum_eq34': True}}))
+        cfg = B._config_summary(run)
+        self.assertEqual(cfg['file'], 'arm.json')
+        self.assertEqual(list(cfg['ring_fix']), list(rf))              # every key, in the order of the file
+        self.assertEqual(cfg['ring_fix']['settled_rule'], 'largest')
+
+    def test_audit_counts_held_rows(self):
+        header, _a = B.build_block(make_run(self.root), log=lambda *x: None)
+        self.assertEqual(header['audits'], {'unlisted': 1})           # one held row, no audit file
+
     def test_sky_overhead_satellite(self):
         header, a = B.build_block(make_run(self.root), log=lambda *x: None)
         k = header['sats'].index('E01')

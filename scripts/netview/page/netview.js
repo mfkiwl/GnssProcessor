@@ -1313,7 +1313,12 @@ function renderOverview(el) {
       Object.entries(cfg.ring_fix).map(([k, v]) => '<tr><td>' + esc(k) + '</td><td>' + esc(JSON.stringify(v)) + '</td></tr>').join('') +
       '</table>');
   }
-  if (H.audits && H.audits.length) hint(el, 'Held whole numbers carry an audit against the simulator truth: ' + H.audits.map(esc).join(', ') + '.');
+  const au = H.audits || {};
+  if (au.right || au.wrong) {
+    hint(el, 'Held whole numbers checked against the integers of the run\'s audit file: ' + (au.right || 0).toLocaleString() +
+      ' link-epochs right, ' + (au.wrong || 0).toLocaleString() + ' wrong' +
+      (au.unlisted ? ', ' + au.unlisted.toLocaleString() + ' not in the file' : '') + '.');
+  }
 }
 
 function overviewNow() {

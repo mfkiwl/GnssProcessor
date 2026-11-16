@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -282,7 +282,9 @@ def build_links(ix: Index, chords, ring_fix):
     out.update({'link_fam': np.array(link_fam, np.uint8), 'link_sta': np.array(link_sta, np.uint16),
                 'link_sat': np.array(link_sat, np.uint16), 'link_start': np.array(link_start, np.uint32),
                 'link_count': np.array(link_count, np.uint32)})
-    audits = sorted({v[8] for v in rf.values() if v[8]})
+    # The audit column is written on held rows only: right / wrong against the run's audit file, unlisted when the
+    # run has no audit file or the file lists neither band. Counted in held link-epochs.
+    audits = dict(sorted(Counter(v[8] for v in rf.values() if v[8]).items()))
     return out, audits
 
 
@@ -733,7 +735,11 @@ def _state_labels():
 
 
 def _config_summary(run: Path):
-    """A few settings of the run's own config (arm.json or the first *.json in the folder), for the page title."""
+    """Settings of the run's own config (arm.json, else the first *.json in the folder) shown on the page.
+
+    Every key of network.ring_fix is kept, in the order of the file, so the setting that tells two runs apart
+    (for example settled_rule) is on the page whatever its name; plus the systems, the chain switch and its root.
+    """
     import json
     for p in [run / 'arm.json'] + sorted(run.glob('*.json')):
         if not p.exists():
@@ -745,7 +751,6 @@ def _config_summary(run: Path):
         n = j.get('network', {}) if isinstance(j, dict) else {}
         rf = n.get('ring_fix') or {}
         return {'file': p.name, 'active_systems': (j.get('processing') or {}).get('active_systems'),
-                'ring_fix': {k: rf.get(k) for k in ('enable', 'rule', 'order', 'gate', 'pairs', 'sigma_scale',
-                                                     'wl_frac_max', 'held_first', 'rehost_keep_carry') if k in rf},
+                'ring_fix': dict(rf) if isinstance(rf, dict) else {},
                 'chain': n.get('phase_datum_eq34'), 'roots': n.get('chain_root') or n.get('phase_datum_root')}
     return {}
