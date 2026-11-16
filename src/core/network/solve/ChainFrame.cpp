@@ -1184,4 +1184,11 @@ int networkChainFrameRunEnd(const NetworkRunEndView& v) {
     return 0;
 }
 
+std::set<std::pair<std::string, std::string>> chainDeclaredKeys(const ChainEpochObs& obs) {
+    std::set<std::pair<std::string, std::string>> out;
+    for (const ChainReleaseObs& r : obs.releases)
+        for (const std::string& sat : r.sats) out.insert({sat, r.signal});
+    return out;
+}
+
 } // namespace GnssProcessor

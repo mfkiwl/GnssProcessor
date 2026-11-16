@@ -133,6 +133,14 @@ void NetworkProductEmitter::markDatumChange(const std::set<char>& constellations
     else forced_bump_consts_.insert(constellations.begin(), constellations.end());
 }
 
+void NetworkProductEmitter::markReleasedSignals(const std::set<std::pair<std::string, std::string>>& keys) {
+    if (sc_families_.empty()) return;   // the release increments belong to the step declaration
+    for (const auto& [sat, signal] : keys) {
+        sc_release_pending_.insert(sat + "|" + signal);
+        ++sc_release_marks_;
+    }
+}
+
 void NetworkProductEmitter::markSatDiscontinuity(const std::set<std::string>& satellites,
                                                  unsigned channels) {
     forced_bump_sats_.insert(satellites.begin(), satellites.end());
@@ -716,7 +724,17 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                         }
                     }
                 }
-                if (have_baseline && (forced || value_jump)) {
+                // The step declaration's release increment: the chain freed this key's level (a mark
+                // consumed by the first emission that carries the key).
+                const bool released = !sc_release_pending_.empty() && sc_release_pending_.erase(key) != 0;
+                if (released) {
+                    if (!have_baseline) ++sc_release_no_baseline_;
+                    else {
+                        ++sc_release_landed_;
+                        if (!forced && !value_jump) ++sc_release_only_;
+                    }
+                }
+                if (have_baseline && (forced || value_jump || released)) {
                     ++ctr;
                 }
                 last_phase_bias_[key] = npb.bias_m;

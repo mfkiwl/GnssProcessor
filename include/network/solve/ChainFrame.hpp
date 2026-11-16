@@ -676,6 +676,15 @@ bool chainKeptEdgeMoved(const ChainEdgeObs& e, const double* remembered);
 void networkChainFrameObserve(NetworkRun& run, const NetworkEpoch& ep);
 
 /**
+ * @brief The keys the chain declares moved at this epoch: every (satellite, phase signal) of the moved
+ *        side of each cut release, the declared_keys rows of the event trace.
+ *
+ * @param obs The epoch's chain record.
+ * @return (satellite, signal) pairs, e.g. ("E14", "L1C"); empty when nothing was released.
+ */
+std::set<std::pair<std::string, std::string>> chainDeclaredKeys(const ChainEpochObs& obs);
+
+/**
  * @brief Run-end report: the frame census of the eq34 chain datum.
  *
  * Gate: network.trace_chain_datum on an eq34 run.  Prints the events by table row with their

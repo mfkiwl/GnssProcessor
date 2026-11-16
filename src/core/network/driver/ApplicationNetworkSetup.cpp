@@ -1469,7 +1469,8 @@ int Application::networkSetup_(NetworkSetupResult& setup) {
         for (const auto& f : nc.disc_step_class_pairs) fams += (fams.empty() ? "" : ", ") + f;
         log->warn("Network: STEP-CLASS DECLARATION on {} (tolerance {:.3f} cycle): a whole or fraction "
                   "step of a family's level declares its signals on the phase channel in place of the "
-                  "value test; quiet and ionosphere-like steps declare nothing.", fams,
+                  "value test; quiet and ionosphere-like steps declare nothing; every satellite signal the "
+                  "chain releases is declared at its release epoch.", fams,
                   nc.disc_step_class_tol_cyc);
     }
 

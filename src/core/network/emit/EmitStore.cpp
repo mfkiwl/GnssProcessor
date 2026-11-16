@@ -22,6 +22,7 @@
 #include "network/emit/LedgerEmit.hpp"
 #include "network/emit/PbHold.hpp"
 #include "network/emit/PhaseFrameHold.hpp"
+#include "network/solve/ChainFrame.hpp"   // chainDeclaredKeys: the release increments
 #include "network/emit/BrdcWire.hpp"      // native broadcast clock wire stamp
 #include "filter/StateKeySchema.hpp"
 #include "math/Coordinates.hpp"
@@ -433,6 +434,10 @@ void networkEmitStore(NetworkRun& run, const NetworkEpoch& ep, NetworkSolutionEp
             ctx.counters.le.decl_rows = rows;
         }
     }
+    // The step declaration's release increments (network.disc_step_class_pairs): every satellite signal the
+    // chain released at this epoch is declared on the phase channel, in addition to the class rule.
+    if (emitter.stepClassArmed() && chain_obs != nullptr && chain_obs->armed)
+        emitter.markReleasedSignals(chainDeclaredKeys(*chain_obs));
     emitter.emitToStore(sol, network_store);
     // The declaration reaches the in-process consumer here, immediately after this
     // epoch's records and before the closed-loop consumer reads them below, which is
@@ -1168,10 +1173,14 @@ static int networkStepClassRunEnd(const NetworkRunEndView& v) {
                 "the minimum count, not classified); satellite-family-epochs classified {}: quiet {}, "
                 "whole {}, ionosphere-like {}, fraction {}; signals declared {}; phase increments "
                 "raised by the class {}.  On the classified keys the value test alone would have "
-                "declared {} the class did not, and the class declared {} the value test would not.",
+                "declared {} the class did not, and the class declared {} the value test would not.  "
+                "Release increments: {} declared key(s) of the chain, {} landed on an emitted key ({} "
+                "raised by the release alone), {} on a first sighting, {} pending at the end.",
                 em.stepClassTolCyc(), c.families, c.families_below_min, c.sats_tested, c.quiet, c.whole,
                 c.iono_like, c.fraction, c.signals_declared, em.stepClassKeysStepped(),
-                em.stepClassValueOnly(), em.stepClassClassOnly());
+                em.stepClassValueOnly(), em.stepClassClassOnly(), em.stepClassReleaseMarks(),
+                em.stepClassReleaseLanded(), em.stepClassReleaseOnly(), em.stepClassReleaseNoBaseline(),
+                em.stepClassReleasePending());
     return 0;
 }
 

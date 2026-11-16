@@ -192,6 +192,50 @@ TEST(PhaseStepClassEmitter, ASatelliteMissingFromThePreviousEmissionKeepsTheValu
     EXPECT_EQ(ctr(em, "E05", "L5X"), 1);
 }
 
+TEST(PhaseStepClassEmitter, AReleasedSignalStepsItsCounterAtTheNextEmissionThatCarriesIt) {
+    NetworkProductEmitter em = makeEmitter();
+    em.setStepClassTest({ "E:L1X/L5X" }, 0.15);
+    SsrCorrectionStore store;
+    em.emitToStore(epochOf(0.0, five()), store);
+    // The chain releases E01's L1X (its values do not move) and E05's L5X; E05 is absent for one emission.
+    em.markReleasedSignals({ { "E01", "L1X" }, { "E05", "L5X" } });
+    auto m = five();
+    m.erase("E05");
+    em.emitToStore(epochOf(30.0, m), store);
+    EXPECT_EQ(ctr(em, "E01", "L1X"), 1);   // the release mark alone
+    EXPECT_EQ(ctr(em, "E01", "L5X"), 0);
+    EXPECT_EQ(em.stepClassReleasePending(), 1u);   // E05's L5X waits for its next emission
+    em.emitToStore(epochOf(60.0, five()), store);
+    EXPECT_EQ(ctr(em, "E05", "L5X"), 1);
+    EXPECT_EQ(ctr(em, "E05", "L1X"), 0);
+    EXPECT_EQ(ctr(em, "E01", "L1X"), 1);   // a mark is consumed once
+    EXPECT_EQ(em.stepClassReleasePending(), 0u);
+    EXPECT_EQ(em.stepClassReleaseMarks(), 2);
+    EXPECT_EQ(em.stepClassReleaseLanded(), 2);
+    EXPECT_EQ(em.stepClassReleaseOnly(), 2);
+    EXPECT_EQ(em.stepClassReleaseNoBaseline(), 0);
+}
+
+TEST(PhaseStepClassEmitter, AReleaseWithAWholeStepRaisesOneIncrementAndUnarmedAMarkIsIgnored) {
+    NetworkProductEmitter em = makeEmitter();
+    em.setStepClassTest({ "E:L1X/L5X" }, 0.15);
+    SsrCorrectionStore store;
+    em.emitToStore(epochOf(0.0, five()), store);
+    em.markReleasedSignals({ { "E01", "L1X" } });
+    auto m = five();
+    m["E01"] = Biases{ kL1, 0.0 };   // and a whole step on the same key
+    em.emitToStore(epochOf(30.0, m), store);
+    EXPECT_EQ(ctr(em, "E01", "L1X"), 1);
+    EXPECT_EQ(em.stepClassReleaseLanded(), 1);
+    EXPECT_EQ(em.stepClassReleaseOnly(), 0);
+    NetworkProductEmitter off = makeEmitter();
+    off.emitToStore(epochOf(0.0, five()), store);
+    off.markReleasedSignals({ { "E01", "L1X" } });
+    off.emitToStore(epochOf(30.0, five()), store);
+    EXPECT_EQ(ctr(off, "E01", "L1X"), 0);
+    EXPECT_EQ(off.stepClassReleaseMarks(), 0);
+}
+
 TEST(PhaseStepClassEmitter, AMalformedFamilyOrToleranceIsRefused) {
     NetworkProductEmitter em = makeEmitter();
     EXPECT_THROW(em.setStepClassTest({ "E:L1X/L1C" }, 0.15), std::invalid_argument);

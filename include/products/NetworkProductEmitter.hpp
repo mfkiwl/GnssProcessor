@@ -384,6 +384,36 @@ public:
     long long stepClassClassOnly() const { return sc_class_only_; }
 
     /**
+     * @brief Declare satellite signals the chain released at this epoch (the step declaration's release
+     *        increments).
+     *
+     * Under the step-class declaration (@ref setStepClassTest) every key named here steps its phase counter
+     * at the next emission that carries it, in addition to the class rule: the chain freed the key's level,
+     * and the freed level re-converges over the following epochs in steps each under the class tolerance.  A
+     * key absent from that emission stays pending until it is emitted; one emitted without a baseline (a
+     * first sighting) is consumed without an increment.  Ignored while the declaration is not armed.  The
+     * pending marks are not carried across a warm resume (as the class baselines).
+     *
+     * @param keys (satellite, phase signal) pairs, e.g. ("E14", "L1C").
+     */
+    void markReleasedSignals(const std::set<std::pair<std::string, std::string>>& keys);
+    /// @brief Release marks received (the chain's declared keys, every emission so far).
+    /// @return Count over the run.
+    long long stepClassReleaseMarks() const { return sc_release_marks_; }
+    /// @brief Release marks consumed on an emitted key with a baseline (each one an increment).
+    /// @return Count over the run.
+    long long stepClassReleaseLanded() const { return sc_release_landed_; }
+    /// @brief Landed release marks whose key neither a forced mark nor the class or value test stepped.
+    /// @return Count over the run.
+    long long stepClassReleaseOnly() const { return sc_release_only_; }
+    /// @brief Release marks consumed on an emitted key without a baseline (no increment).
+    /// @return Count over the run.
+    long long stepClassReleaseNoBaseline() const { return sc_release_no_baseline_; }
+    /// @brief Release marks waiting for their key's next emission.
+    /// @return Count now.
+    std::size_t stepClassReleasePending() const { return sc_release_pending_.size(); }
+
+    /**
      * @brief Both edges of the phase-visible step test (standing invariant 7), counted over
      *        the emitter's life.  All zero when the test is off.
      */
@@ -795,6 +825,11 @@ private:
     long long sc_keys_stepped_{0};                          ///< Increments the class test raised.
     long long sc_value_only_{0};                            ///< Classified keys only the value test declares.
     long long sc_class_only_{0};                            ///< Classified keys only the class test declares.
+    std::set<std::string> sc_release_pending_;              ///< "sat|signal" keys released, waiting for their next emission.
+    long long sc_release_marks_{0};                         ///< Release marks received.
+    long long sc_release_landed_{0};                        ///< Release marks landed on a key with a baseline.
+    long long sc_release_only_{0};                          ///< Landed marks no other trigger stepped.
+    long long sc_release_no_baseline_{0};                   ///< Release marks consumed on a first sighting.
     /// One key's phase-visible baseline: its clock less phase bias at its last emission
     /// with a clock, and that emission's product time.
     struct PvBaseline {
