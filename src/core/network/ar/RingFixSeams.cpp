@@ -231,6 +231,19 @@ void networkRingFixArm(NetworkRun& run) {
         log->warn("Network (ring fix): PAIRS {} only: a chord of another pair family is never decided, held or "
                   "traced (counted at run end).", list);
     }
+    rf->settled_largest = rf->settled_flags_on && nc.ring_fix.settled_rule == "largest";
+    if (rf->settled_largest)
+        log->warn("Network (ring fix): SETTLED RULE LARGEST: the settled flags flag the largest set of a family's "
+                  "satellites mutually tied through held links and certified tree edges, whatever receiver roots it, "
+                  "once it holds {} satellites; the incumbent set is kept until another holds {} more.",
+                  kRingFixSettledMinSats, kRingFixSettledHysteresis);
+    rf->form_configured_pairs = nc.ring_fix.form_configured_pairs && !rf->pairs.empty();
+    if (rf->form_configured_pairs) {
+        for (const auto& [c, s1, s2] : rf->pairs) rf->configured_pairs[c[0]].emplace_back(s1, s2);
+        log->warn("Network (ring fix): CONFIGURED FAMILIES FORMED: the chord table forms every family of the pairs "
+                  "on an arc that tracks both its signals, beside the rule that pairs band 1 with the lowest other "
+                  "band.");
+    }
     if (rf->wl_frac_max > 0.0)
         log->warn("Network (ring fix): WIDE-LANE BOUND: a link every other test would decide is refused while its wide "
                   "lane's fraction exceeds {:.3f} cycle (refusal wl_fraction).", rf->wl_frac_max);
@@ -521,7 +534,8 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
         for (const auto& [ss, sigs] : prev_of) {
             std::set<std::string> names;
             for (const auto& kv : sigs) names.insert(kv.first);
-            for (const auto& [s1, s2] : chainPairFamilies(names)) {
+            for (const auto& [s1, s2] : chainArcFamilies(ss.second, names,
+                                                         rf.form_configured_pairs ? &rf.configured_pairs : nullptr)) {
                 const int sta = ss.first;
                 const std::string& sat = ss.second;
                 if (facts.tree.count({sta, sat, s1}) || facts.tree.count({sta, sat, s2})) continue;
@@ -676,7 +690,8 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
         const int ii = static_cast<int>(i);
         const StationAssembly& R = asm_res[i];
         const ChainAmbColumns cols = chainAmbColumns(R);
-        std::vector<ChainChordRow> rows = chainStationChordRows(ii, stations[i].name, cols, tree_arcs, chain_signals);
+        std::vector<ChainChordRow> rows = chainStationChordRows(ii, stations[i].name, cols, tree_arcs, chain_signals,
+                                                                rf.form_configured_pairs ? &rf.configured_pairs : nullptr);
         if (rows.empty()) continue;
         std::vector<char> filled;
         Eigen::VectorXd xr;
@@ -920,7 +935,22 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                 const auto r = index_of.find(e.r1);
                 if (r != index_of.end()) root_of_sat[e.sat] = r->second;
             }
-            const std::set<std::string> settled = ringFixSettledSats(certified, root_of_sat);
+            std::set<std::string> settled;
+            if (!rf.settled_largest) {
+                settled = ringFixSettledSats(certified, root_of_sat);
+            } else {
+                std::set<std::string> tree_sats;
+                for (const auto& [sat, root] : root_of_sat) { (void)root; tree_sats.insert(sat); }
+                std::set<std::string>& inc = rf.settled_incumbent[ck + ":" + s1 + "/" + s2];
+                RingFixLargestSet pick = ringFixLargestSettledSet(certified, tree_sats, inc, kRingFixSettledMinSats,
+                                                                  kRingFixSettledHysteresis);
+                if (pick.switched) {
+                    ++rf.counters.settled_identity_changes;
+                    rf.counters.settled_side_changes += pick.side_changes;
+                }
+                inc = pick.sats;
+                settled = std::move(pick.sats);
+            }
             for (const auto& [sat, root] : root_of_sat) {
                 (void)root;
                 const bool f = settled.count(sat) != 0;
@@ -1003,8 +1033,12 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
                   rf.held_first ? " Held first ARMED (network.ring_fix.held_first)." : "");
     if (rf.settled_flags_on)
         log->warn("Network (ring fix, settled flags): {} satellite-signal-epochs of held families flagged settled, "
-                  "{} not; {} flips between consecutive epochs.",
-                  C.settled_signal_epochs, C.unsettled_signal_epochs, C.settled_flips);
+                  "{} not; {} flips between consecutive epochs.{}",
+                  C.settled_signal_epochs, C.unsettled_signal_epochs, C.settled_flips,
+                  rf.settled_largest ? fmt::format("  Rule largest: {} change(s) of identity, {} satellite(s) changed "
+                                                   "side at them.", C.settled_identity_changes,
+                                                   C.settled_side_changes)
+                                     : std::string());
     if (rf.rehost_keep_carry)
         log->warn("Network (ring fix, re-hosts onto held links): {} kept with their carries (the new host's carry on "
                   "the held integer); {} released because that carry was 1e-4 cycle or more off the held integer (a "

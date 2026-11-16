@@ -83,6 +83,10 @@ inline constexpr int kRingFixMonitorEpochs = 4;
 inline constexpr double kRingFixReleaseFloorM2 = 1.0;
 /// Change O: at most this many links are decided per epoch, the most certain first.
 inline constexpr int kRingFixMaxDecisionsPerEpoch = 3;
+/// Rule "largest" of the settled flags (network.ring_fix.settled_rule): the fewest satellites a flagged set holds.
+inline constexpr int kRingFixSettledMinSats = 4;
+/// Rule "largest": another set replaces the incumbent once it holds this many more satellites.
+inline constexpr int kRingFixSettledHysteresis = 2;
 /// Change L: the bound on the log of the likelihood ratio between the nearest and the next integer,
 /// ln(1e6), for N1 and for the wide lane.
 inline constexpr double kRingFixMinLogOdds = 13.815510557964274;
@@ -224,6 +228,34 @@ bool ringFixCodeEventOpen(double code_event_s, double window_s, double now_s);
  */
 std::set<std::string> ringFixSettledSats(const std::vector<std::pair<int, std::string>>& links,
                                          const std::map<std::string, int>& root_of_sat);
+
+/// The choice of rule "largest" of the settled flags at one epoch (@ref ringFixLargestSettledSet).
+struct RingFixLargestSet {
+    std::set<std::string> sats;    ///< The flagged satellites (empty: none flagged).
+    bool      switched{false};     ///< Another component replaced a non-empty incumbent: a change of identity.
+    long long side_changes{0};     ///< At a change of identity, the satellites in one of the two sets only.
+};
+
+/**
+ * @brief Rule "largest" of the settled flags: the largest set of a family's satellites mutually tied through held
+ *        links and certified tree edges, whatever receiver roots it, with a minimum and a hysteresis.
+ *
+ * The links form a graph over receivers and satellites, and the family's tree satellites fall into its components.
+ * The incumbent (last epoch's flagged set) is followed into the component that holds most of it; that component is
+ * flagged, with this epoch's membership, while it holds at least @p min_sats satellites and no other component holds
+ * @p hysteresis more.  Otherwise the largest component is flagged when it holds at least @p min_sats, and none is
+ * flagged below.  Ties go to the component whose lexically smallest satellite comes first.
+ *
+ * @param links      (station index, satellite) of every held link and certified tree edge of the family.
+ * @param tree_sats  The family's satellites in its first band's tree.
+ * @param incumbent  Last epoch's flagged set (empty at the start).
+ * @param min_sats   The fewest satellites a flagged set holds.
+ * @param hysteresis The lead another component needs to replace the incumbent.
+ * @return The flagged set, whether it changed identity, and the satellites that changed side then.
+ */
+RingFixLargestSet ringFixLargestSettledSet(const std::vector<std::pair<int, std::string>>& links,
+                                           const std::set<std::string>& tree_sats,
+                                           const std::set<std::string>& incumbent, int min_sats, int hysteresis);
 
 // ---- Rings and candidates ---------------------------------------------------------------------
 
@@ -410,6 +442,8 @@ struct RingFixCounters {
     long long settled_signal_epochs{0};   ///< Satellite-signal-epochs of held families flagged settled (settled_flags).
     long long unsettled_signal_epochs{0}; ///< Satellite-signal-epochs of held families not flagged settled.
     long long settled_flips{0};           ///< Changes of a satellite signal's settled flag between consecutive epochs.
+    long long settled_identity_changes{0}; ///< Rule "largest": changes of a family's flagged set to another component.
+    long long settled_side_changes{0};    ///< Rule "largest": satellites that changed side at those changes.
     long long reattached{0};              ///< Re-attachments through a held link (one per released edge the walk took first).
     long long held_first_kept{0};         ///< Held links crossing those cuts, kept at their integers (the entry links not counted).
     long long cut_released_usable{0};     ///< Held links released across an unknown step while usable (not latched, monitor not tripped).
@@ -482,6 +516,12 @@ struct NetworkRingFix {
     /// This epoch's settled flag of every satellite signal of a held family present in its tree, (satellite,
     /// signal) -> settled (settled_flags only).
     std::map<std::pair<std::string, std::string>, bool> settled;
+    bool        settled_largest{false};     ///< The settled flags follow rule "largest" (network.ring_fix.settled_rule).
+    /// Rule "largest": each family's flagged set at the last epoch, "<letter>:<signal 1>/<signal 2>" -> satellites.
+    std::map<std::string, std::set<std::string>> settled_incumbent;
+    bool        form_configured_pairs{false};   ///< The chord table forms every configured family (network.ring_fix.form_configured_pairs).
+    /// The configured families by constellation letter, for the chord table (form_configured_pairs only).
+    std::map<char, std::vector<std::pair<std::string, std::string>>> configured_pairs;
     // Simulation only: the slip mask (network.ring_fix.mask_slip_*).
     int         mask_station{-1};           ///< The masked arc's station (roster index; -1: no mask).
     std::string mask_sat;                   ///< The masked arc's satellite.

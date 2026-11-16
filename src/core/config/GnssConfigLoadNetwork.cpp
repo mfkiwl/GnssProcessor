@@ -1546,6 +1546,18 @@ namespace GnssProcessor {
             if (rf.unsettled_steps && !rf.settled_flags)
                 throw std::runtime_error("network.ring_fix.unsettled_steps steps the signals the settled flags leave "
                                          "unsettled: it needs network.ring_fix.settled_flags.");
+            rf.settled_rule = jval<std::string>(json, "network.ring_fix.settled_rule", "network_ring_fix_settled_rule",
+                                                std::string("root"));
+            if (rf.settled_rule != "root" && rf.settled_rule != "largest")
+                throw std::runtime_error("network.ring_fix.settled_rule must be \"root\" or \"largest\".");
+            if (rf.settled_rule != "root" && !rf.settled_flags)
+                throw std::runtime_error("network.ring_fix.settled_rule chooses the settled flags' rule: it needs "
+                                         "network.ring_fix.settled_flags.");
+            rf.form_configured_pairs = jval<bool>(json, "network.ring_fix.form_configured_pairs",
+                                                  "network_ring_fix_form_configured_pairs", false);
+            if (rf.form_configured_pairs && rf.pairs.empty())
+                throw std::runtime_error("network.ring_fix.form_configured_pairs forms the families of "
+                                         "network.ring_fix.pairs: it needs the pairs.");
             rf.max_decisions_per_epoch = jval<int>(json, "network.ring_fix.max_decisions_per_epoch",
                                                    "network_ring_fix_max_decisions_per_epoch", 3);
             if (rf.max_decisions_per_epoch < 0)

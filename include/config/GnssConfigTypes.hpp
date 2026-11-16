@@ -1957,6 +1957,17 @@ namespace GnssProcessor {
         /// that is not tied to the network's integers is not continuous, and the stream then says so; a user that
         /// restarts an ambiguity at an increment needs no change.  Needs settled_flags.  False (default): no such steps.
         bool unsettled_steps{ false };
+        /// @c network.ring_fix.settled_rule: which satellites the settled flags flag.  "root" (default): those
+        /// reached from their tree's datum receiver through held links and tree edges that entered as held links.
+        /// "largest": the largest set of a family's satellites mutually tied through those links, whatever receiver
+        /// roots it, once it holds at least 4 satellites; the incumbent set is kept until another holds 2 more.  Needs
+        /// settled_flags.
+        std::string settled_rule{ "root" };
+        /// @c network.ring_fix.form_configured_pairs: the chord table forms every family of network.ring_fix.pairs on
+        /// an arc that tracks both its signals, beside the rule that pairs every band-1 signal with the arc's
+        /// lowest-digit signal of another band, so that a family of a third band has chords.  Needs the pairs.  False
+        /// (default): that rule alone.
+        bool form_configured_pairs{ false };
         /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
         /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
         /// latch (the residual monitor's path).  Empty (default): no mask.

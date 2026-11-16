@@ -69,6 +69,52 @@ void ringFixStampSettledFlags(NetworkSolutionEpoch& sol, const NetworkRingFix& r
     }
 }
 
+RingFixLargestSet ringFixLargestSettledSet(const std::vector<std::pair<int, std::string>>& links,
+                                           const std::set<std::string>& tree_sats,
+                                           const std::set<std::string>& incumbent, int min_sats, int hysteresis) {
+    // Receivers keep their roster index as id; satellites take ids above every receiver's.
+    std::map<std::string, int> sat_id;
+    int next = 1 << 20;
+    const auto idOf = [&](const std::string& s) {
+        const auto it = sat_id.find(s);
+        return it != sat_id.end() ? it->second : (sat_id[s] = next++);
+    };
+    arcgraph::Dsu dsu;
+    for (const auto& [sta, sat] : links) arcgraph::dsuUnite(dsu, sta, idOf(sat));
+    std::map<int, std::set<std::string>> by_root;   // component -> its tree satellites
+    for (const std::string& s : tree_sats)
+        if (sat_id.count(s) != 0) by_root[arcgraph::dsuFind(dsu, sat_id.at(s))].insert(s);
+    const auto first = [](const std::set<std::string>& a, const std::set<std::string>& b) {   // a ranks before b
+        return a.size() != b.size() ? a.size() > b.size() : *a.begin() < *b.begin();
+    };
+    const std::set<std::string>* big = nullptr;   // the largest component
+    const std::set<std::string>* inc = nullptr;   // the component holding most of the incumbent
+    std::size_t inc_overlap = 0;
+    for (const auto& [root, g] : by_root) {
+        (void)root;
+        if (big == nullptr || first(g, *big)) big = &g;
+        std::size_t ov = 0;
+        for (const std::string& s : g) ov += incumbent.count(s);
+        if (ov > 0 && (inc == nullptr || ov > inc_overlap || (ov == inc_overlap && *g.begin() < *inc->begin()))) {
+            inc = &g;
+            inc_overlap = ov;
+        }
+    }
+    const auto n = [](const std::set<std::string>* g) { return g != nullptr ? static_cast<int>(g->size()) : 0; };
+    RingFixLargestSet out;
+    if (inc != nullptr && n(inc) >= min_sats && !(big != inc && n(big) >= n(inc) + hysteresis)) {
+        out.sats = *inc;
+    } else if (n(big) >= min_sats) {
+        out.sats = *big;
+        if (!incumbent.empty() && big != inc) {
+            out.switched = true;
+            for (const std::string& s : incumbent) out.side_changes += out.sats.count(s) == 0 ? 1 : 0;
+            for (const std::string& s : out.sats) out.side_changes += incumbent.count(s) == 0 ? 1 : 0;
+        }
+    }
+    return out;
+}
+
 bool ringFixCodeEventOpen(double code_event_s, double window_s, double now_s) {
     return window_s > 0.0 && code_event_s >= 0.0 && now_s - code_event_s < window_s;
 }

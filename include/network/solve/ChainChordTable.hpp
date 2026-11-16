@@ -54,6 +54,21 @@ double chainWavelengthM(const std::string& sat, const std::string& signal);
  */
 std::vector<std::pair<std::string, std::string>> chainPairFamilies(const std::set<std::string>& sigs);
 
+/// Configured pair families by constellation letter ('G' -> {("L1C", "L5Q")}), for @ref chainArcFamilies.
+using ChainConfiguredPairs = std::map<char, std::vector<std::pair<std::string, std::string>>>;
+
+/**
+ * @brief The pair families of one arc: @ref chainPairFamilies, and with @p extra every configured family of the
+ *        satellite's constellation whose two signals the arc tracks and that rule does not form.
+ * @param sat   The arc's satellite (its letter selects the configured families).
+ * @param sigs  The arc's phase signals.
+ * @param extra The configured families (network.ring_fix.form_configured_pairs); null: the rule alone.
+ * @return (band-1 signal, band-2 signal) pairs, the rule's first.
+ */
+std::vector<std::pair<std::string, std::string>> chainArcFamilies(const std::string& sat,
+                                                                  const std::set<std::string>& sigs,
+                                                                  const ChainConfiguredPairs* extra);
+
 /**
  * @brief One station's chords of the chord table: every arc of a pair family whose two bands are
  *        chain groups and neither of which is a tree edge.
@@ -65,12 +80,14 @@ std::vector<std::pair<std::string, std::string>> chainPairFamilies(const std::se
  * @param cols          Its ambiguity columns (@ref chainAmbColumns).
  * @param tree_arcs     This epoch's tree edges, (station, satellite, signal).
  * @param chain_signals This epoch's chain groups, "<constellation key>|<signal>".
+ * @param extra         The configured families (network.ring_fix.form_configured_pairs); null: the rule of
+ *                      @ref chainPairFamilies alone.
  * @return The rows with family, sig1, sig2, station, station_name and sat set, in satellite order.
  */
 std::vector<ChainChordRow> chainStationChordRows(
     int station, const std::string& station_name, const ChainAmbColumns& cols,
     const std::set<std::tuple<int, std::string, std::string>>& tree_arcs,
-    const std::set<std::string>& chain_signals);
+    const std::set<std::string>& chain_signals, const ChainConfiguredPairs* extra = nullptr);
 
 /**
  * @brief The integer the producer's lattice of fixed cycles implies for a chord (cycles).

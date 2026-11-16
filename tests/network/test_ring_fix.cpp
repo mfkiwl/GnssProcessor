@@ -996,3 +996,27 @@ TEST(RingFixSettledFlags, TheStampFlagsHeldFamiliesOnlyAndAFilledCopyTakesItsOwn
     EXPECT_EQ(flags(1, "L1W"), std::make_pair(false, 0));   // the copy of no held family's signal
     EXPECT_EQ(flags(2, "L1X"), std::make_pair(false, 1));   // no flag recorded: not settled
 }
+
+TEST(RingFixSettledFlags, TheLargestSetNeedsFourSatellitesAndKeepsTheIncumbentUntilAnotherLeadsByTwo) {
+    // Component A: receivers 0 and 1 with E01 to E04; component B: receivers 2 and 3 with E05 to E09.
+    std::vector<std::pair<int, std::string>> links = {{0, "E01"}, {0, "E02"}, {1, "E02"}, {1, "E03"}, {1, "E04"},
+                                                      {2, "E05"}, {2, "E06"}, {3, "E06"}, {3, "E07"}, {3, "E08"},
+                                                      {3, "E09"}};
+    std::set<std::string> tree;
+    for (int i = 1; i <= 10; ++i) tree.insert(i < 10 ? "E0" + std::to_string(i) : "E10");
+    const std::set<std::string> a = {"E01", "E02", "E03", "E04"};
+    const std::set<std::string> b = {"E05", "E06", "E07", "E08", "E09"};
+    RingFixLargestSet p = ringFixLargestSettledSet(links, tree, {}, 4, 2);
+    EXPECT_EQ(p.sats, b);                    // no incumbent: the largest
+    EXPECT_FALSE(p.switched);
+    p = ringFixLargestSettledSet(links, tree, a, 4, 2);
+    EXPECT_EQ(p.sats, a);                    // B leads by 1: the incumbent A is kept
+    links.push_back({3, "E10"});
+    p = ringFixLargestSettledSet(links, tree, a, 4, 2);
+    std::set<std::string> b6 = b;
+    b6.insert("E10");
+    EXPECT_EQ(p.sats, b6);                   // B leads by 2: a change of identity
+    EXPECT_TRUE(p.switched);
+    EXPECT_EQ(p.side_changes, 10);           // A's 4 leave, B's 6 join
+    EXPECT_TRUE(ringFixLargestSettledSet({{0, "E01"}, {0, "E02"}, {1, "E02"}}, tree, {}, 4, 2).sats.empty());
+}

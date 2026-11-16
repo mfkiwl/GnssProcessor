@@ -8,6 +8,7 @@
 #include "common/GnssIdentity.hpp"      // SatId, SignalId, nominalWavelengthOfDigitM
 #include "network/driver/RunTypes.hpp"  // StationAssembly, PlAmb
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 
@@ -29,6 +30,20 @@ double chainWavelengthM(const std::string& sat, const std::string& signal) {
     return (std::isfinite(lam) && lam > 0.0) ? lam : 0.0;
 }
 
+std::vector<std::pair<std::string, std::string>> chainArcFamilies(const std::string& sat,
+                                                                  const std::set<std::string>& sigs,
+                                                                  const ChainConfiguredPairs* extra) {
+    std::vector<std::pair<std::string, std::string>> out = chainPairFamilies(sigs);
+    if (extra == nullptr || sat.empty()) return out;
+    const auto it = extra->find(sat[0]);
+    if (it == extra->end()) return out;
+    for (const auto& p : it->second)
+        if (sigs.count(p.first) != 0 && sigs.count(p.second) != 0
+            && std::find(out.begin(), out.end(), p) == out.end())
+            out.push_back(p);
+    return out;
+}
+
 std::vector<std::pair<std::string, std::string>> chainPairFamilies(const std::set<std::string>& sigs) {
     std::vector<std::pair<std::string, std::string>> out;
     std::string other;
@@ -43,7 +58,7 @@ std::vector<std::pair<std::string, std::string>> chainPairFamilies(const std::se
 std::vector<ChainChordRow> chainStationChordRows(
     int station, const std::string& station_name, const ChainAmbColumns& cols,
     const std::set<std::tuple<int, std::string, std::string>>& tree_arcs,
-    const std::set<std::string>& chain_signals) {
+    const std::set<std::string>& chain_signals, const ChainConfiguredPairs* extra) {
     std::map<std::string, std::set<std::string>> sigs_of;   // sat -> its phase signals
     for (const auto& [k, v] : cols) {
         (void)v;
@@ -53,7 +68,7 @@ std::vector<ChainChordRow> chainStationChordRows(
     std::vector<ChainChordRow> rows;
     for (const auto& [sat, sigs] : sigs_of) {
         const std::string c = sat.substr(0, 1);
-        for (const auto& [s1, s2] : chainPairFamilies(sigs)) {
+        for (const auto& [s1, s2] : chainArcFamilies(sat, sigs, extra)) {
             if (!chain_signals.count(c + "|" + s1) || !chain_signals.count(c + "|" + s2)) continue;
             if (tree_arcs.count({station, sat, s1}) || tree_arcs.count({station, sat, s2})) continue;
             ChainChordRow r;
