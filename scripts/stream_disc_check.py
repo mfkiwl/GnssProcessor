@@ -120,6 +120,16 @@ def main():
         t0 = eps[0][0]
         lo, hi = t0 + 3600.0 * a.from_h, t0 + 3600.0 * a.to_h
         lv = [{f["name"]: levels(e, f) for f in fams} for e in eps]
+        depth = {}                       # (tow, band, sat) -> depth of the satellite vertex
+        ce = os.path.join(resolve(run), "logs", "network_chain_edges.csv")
+        if os.path.exists(ce):
+            import csv as _csv
+            with open(ce, newline="") as fh:
+                for r in _csv.DictReader(fh):
+                    if r["child"] == r["edge_sat"]:
+                        depth[(round(float(r["tow"])), r["band"], r["edge_sat"])] = int(r["depth"])
+        wl_iono = collections.defaultdict(list)   # (family, depth class) -> wide-lane moves of iono-like steps
+        sat_ep = collections.Counter()            # (family, depth class) -> satellite-epochs classified
         classes = collections.Counter()
         moved = {}                       # (tow, sat, sig) -> (class, family, x1, x2)
         stepinfo = {}                    # (tow, sat, sig) -> class of the signal's step in a family (any)
@@ -149,6 +159,11 @@ def main():
                         cls, st = "iono-like", (False, False)
                     else:
                         cls, st = "fraction", (abs(x1) >= a.tol, abs(x2) >= a.tol)
+                    dd = max(depth.get((round(tb), f["p1"], s), 0), depth.get((round(tb), f["p2"], s), 0))
+                    dcls = "depth %d" % dd if 0 < dd <= 5 else ("depth 7 and more" if dd > 5 else "not in the tree")
+                    sat_ep[(f["name"], dcls)] += 1
+                    if cls == "iono-like":
+                        wl_iono[(f["name"], dcls)].append(abs(x1 - x2))
                     classes[(f["name"], cls)] += 1
                     for sig, m in ((f["p1"], st[0]), (f["p2"], st[1])):
                         key = (tb, s, sig)
@@ -171,6 +186,15 @@ def main():
         for f in fams:
             row = ", ".join("%s %d" % (c, classes[(f["name"], c)]) for c in ("quiet", "whole", "iono-like", "fraction"))
             print("   %s steps: %s" % (f["name"], row))
+        for f in fams:
+            rows = []
+            for dcls in sorted({k[1] for k in sat_ep if k[0] == f["name"]}):
+                hours = sat_ep[(f["name"], dcls)] * 30.0 / 3600.0
+                v = wl_iono.get((f["name"], dcls), [])
+                big = [x for x in v if x > 0.25]
+                rows.append("%s: %.2f per satellite-hour over 0.25 cycle (%d of %d), largest %.3f"
+                            % (dcls, len(big) / hours if hours else 0.0, len(big), len(v), max(v) if v else 0.0))
+            print("   %s ionosphere-like steps moving the wide lane: %s" % (f["name"], "; ".join(rows)))
         inc_set = {(tb, s, sig) for tb, s, sig, _ in incs}
         missing = [(k, v) for k, v in sorted(moved.items()) if k not in inc_set]
         by_cls = collections.Counter(v[0] for v in moved.values())

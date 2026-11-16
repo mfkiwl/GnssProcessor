@@ -5,10 +5,10 @@
 - **id:** NRF-part6
 - **topic:** network-vehicle
 - **status:** open
-- **summary:** Sections 41 onwards of card NRF (2026-11-15), continued from [part 5](NRF_network_ring_fixing_2026-11-14_part5.md). Section 41: the results of section 39, remedy (a) (`network.ring_fix.rehost_keep_carry`: a chain re-host onto a held link keeps the moved side's carries): every bar passes on the golden simulator bed, bed B of section 36 and the DOY 145 holding pair (same-start audit 0 of 147 280, E18's level within 0.015 m between two reference receivers); why Galileo at S45000SIM holds fewer link-epochs (the per-epoch decision cap); the kept steps (micrometres, now a step of 0 under 1e-4 cycle, exe nrf18); what resets a kept receiver phase bias (no field-blocking gap found); the remedy and the formal sigma adopted in the chain posture. Section 42: the adopted set on DOY 144 and DOY 145 with GPS beside Galileo, pre-registered. Section 43: the stream's step declaration on that stream, pre-registered.
+- **summary:** Sections 41 onwards of card NRF (2026-11-15), continued from [part 5](NRF_network_ring_fixing_2026-11-14_part5.md). Section 41: the results of section 39, remedy (a) (`network.ring_fix.rehost_keep_carry`: a chain re-host onto a held link keeps the moved side's carries): every bar passes on the golden simulator bed, bed B of section 36 and the DOY 145 holding pair (same-start audit 0 of 147 280, E18's level within 0.015 m between two reference receivers); why Galileo at S45000SIM holds fewer link-epochs (the per-epoch decision cap); the kept steps (micrometres, now a step of 0 under 1e-4 cycle, exe nrf18); what resets a kept receiver phase bias (no field-blocking gap found); the remedy and the formal sigma adopted in the chain posture. Section 42: the adopted set on DOY 144 and DOY 145 with GPS beside Galileo, pre-registered. Section 43: the stream's step declaration on that stream, pre-registered. Section 42.1: the first batch fails on DOY 144 through a defect of remedy (a) as built (a fractional step carried into the moved side moved held chords off their integers); fixed to keep a re-host only at a step of 0 (exe nrf20). Sections 44 and 45: the per-epoch decision cap as a key and the settled flags, pre-registered. Section 46: the re-runs on the fixed code pass every bar (the simulator pair, DOY 144 and DOY 145 with two reference receivers, DOY 145 with two starts) and the adoption stands. Section 47: the step declaration leaves the estimates unchanged and marks every whole and fraction step; its cause-side check fails (a release does not always raise an increment, and a freed level creeps unsignalled); ionosphere-like steps move a held family's wide lane in the first hour and twice after it on GPS.
 - **source:** [part 5](NRF_network_ring_fixing_2026-11-14_part5.md) sections 35 (the code-reference window of DOY 145), 38 to 40 (the window's results) and 39 (remedy (a), pre-registered); [part 4](NRF_network_ring_fixing_2026-11-14_part4.md) section 24.3 (the remedy proposed); the requesting session's review of 2026-11-15 (four requests for the write-ups).
 
-**Outcome.** Question: does remedy (a), a chain re-host onto a link the ring fix holds keeping the moved side's carries instead of releasing them, cure the DOY 145 departure without harm? Yes on this evidence. On the golden simulator bed it keeps 212 and 154 re-hosts, erases about 72 % fewer carried entries, holds more link-epochs and decides nothing wrong against truth; on DOY 145 the same-start audit reads 0 of 147 280 checks (271 failing without) and E18's level agrees within 0.015 m between the two reference receivers (0.741 m without). A held link's carry sits on its integer to micrometres, now counted as a step of 0. Adopted in the chain posture with network integer fixing: the remedy and the formal sigma (section 41.6).
+**Outcome.** Question: does remedy (a), a chain re-host onto a link the ring fix holds keeping the moved side's carries instead of releasing them, cure the DOY 145 departure without harm? Yes, as fixed. The code first adopted also carried a fractional step into the moved side and broke DOY 144's held chords (762 failing checks); kept only at a step of 0, the re-runs read 0 failing on the simulator pair, on both days with two reference receivers and on DOY 145 with two starts, 0 wrong against truth. The remedy and the formal sigma stay adopted in the chain posture (sections 41.6 and 46). The step declaration's cause-side check fails (section 47).
 
 ## 41. 2026-11-15: results of section 39, remedy (a): every bar passes
 
@@ -129,3 +129,57 @@ The first batch of section 42 ran on exe nrf18. **DOY 145 passes:** the same-sta
 **Arms** (exe nrf21): `f10_n144`, the DOY 144 stream of section 42.1 with the step declaration (`d10_n144`) and the flags; `kf_sim` (`kd_sim` with no new key) for keys absent identical.
 
 **Bars:** keys absent identical (`kf_sim` against `kd_sim`, exe nrf20); on `f10_n144` the emitted flags equal `nrf_settled_flags.py`'s rule B at every epoch, for every satellite signal of a held family; the flips counted; the products otherwise identical to `d10_n144`'s (the step declaration's increments unchanged by the flags).
+
+## 46. 2026-11-15: results of section 42.1, the re-runs on the fixed remedy: every bar passes, the adoption stands
+
+Exe nrf20 (`fa5a0299fa2928cb`, commit af34831), all arms exit 0, every epoch emitted (360 on the simulator, 720 on DOY 144 and DOY 145 from start 0, 600 from the start 1 h later). Grades: `_irdu_grades/nrf_kd_*`, `nrf_o10_*`.
+
+| arms | audit | checks | failing |
+|---|---|---|---|
+| `kd_sim` against `kd_sim_r` (simulator, two reference receivers) | held integers and tree pins | 190 848 | 0 |
+| `o10_n144` against `o10_n144r` (DOY 144, same start) | Galileo L1X 83 287, L5X 83 267; GPS L1C 57 083, L2W 57 374 | 281 011 | 0 (762 on exe nrf18) |
+| `o10_n145` against `o10_n145r` (DOY 145, same start) | Galileo L1X 73 240, L5X 73 433; GPS L1C 46 837, L2W 46 821 | 240 331 | 0 |
+| `o10_n145` against `o10_n145b` (DOY 145, two starts, wind-up branches removed by the trace) | Galileo L1X 55 418, L5X 55 413; GPS L1C 2 872, L2W 2 872 | 116 575 | 0 |
+| the same, arcs born after the later start | | 27 524 | 0 |
+
+- **Truth (simulator):** 0 wrong decisions and 0 wrong held link-epochs in both runs (126 977 and 121 358 held link-epochs).
+- **E18's level on BOGT00COL-E18, DOY 145:** largest difference 0.016 m between the two reference receivers from TOW 94560 to 99270, none over 0.1 m.
+- **RAIM rows:** 0 and 0 on DOY 144, 1, 1 and 0 on DOY 145 (as without the remedy).
+- **`rehost_off_integer`** (re-hosts onto a held link released because the carry was off its integer): simulator 2 and 0, DOY 144 2 and 4, DOY 145 2, 5 and 1, counting band-edges. Each is one link decided the epoch before it became a tree edge, about one per family per run (DOY 144: SYOG00ATA-E02 and NYA200NOR-G21 at the default receiver, SCTB00ATA-E25 and GAMB00PYF-G03 at GOPE00CZE). At one or two a day per family the safe form stays; the other form (the pin takes the held integers, the link's slant ionosphere takes the lag) is not assessed.
+- **Held share by family**, hours 2 to 6: Galileo L1X/L5X 81 to 90 % on both days and receivers; GPS L1C/L2W 51 to 62 % (DOY 144, default), 37 to 53 % (GOPE00CZE), 34 to 44 % (DOY 145). **The run started 1 h later holds almost no GPS** (1.5 to 5 %, 37 links against 332 from start 0), which is why the two-start audit has only 2 872 GPS checks: a read for the GPS held share, the next item.
+
+Every bar of the outcome rule on the remedy passes (the simulator pair, both days with the two-start audit, and the step declaration's twins equal to these streams, section 47). The adoption of section 41.6 stands on the fixed code; both ledger notes are revised (the defect, the fix, DOY 144 and the two-start audit now verified with the remedy, and the GPS wording of DOY 144 corrected: its two-start audit covered Galileo L1X/L5X, and GPS beside Galileo was graded from one start with two reference receivers).
+
+## 47. 2026-11-15: results of section 43, the stream signals its steps
+
+The five step-declaration arms ran on exe nrf20, all exit 0. Grades: `scripts/stream_disc_check.py`, `scripts/stream_cause_check.py` (new), timing and drift reads in `_irdu_grades/scripts_s20/`.
+
+**Bar 4, the estimates:** every `d10` arm's products equal its `o10` twin's line for line once the discontinuity counters are dropped (the five pairs: 389 271, 389 271, 391 680, 391 680 and 326 085 lines, 0 differing).
+
+**Bar 1, steps against increments** (all hours, the four families):
+
+| arm | whole steps moved (without an increment) | fraction steps moved (without) | increments behind a whole or fraction step | not classified | forced |
+|---|---|---|---|---|---|
+| `d10_n144` | 166 (0) | 3 014 (0) | 3 180 | 458 | 214 |
+| `d10_n144r` | 157 (0) | 3 257 (0) | 3 414 | 450 | 214 |
+| `d10_n145` | 151 (0) | 3 345 (0) | 3 496 | 388 | 130 |
+| `d10_n145r` | 154 (0) | 3 285 (0) | 3 439 | 385 | 132 |
+| `d10_n145b` | 176 (0) | 3 580 (0) | 3 756 | 290 | 111 |
+
+Every whole and fraction step carries an increment on each moved signal, and no increment stands behind a quiet or ionosphere-like step. The others are listed by cause: keys the class rule could not classify (a satellite back after a gap, a bias missing at the previous epoch), declared by the value test, and the satellites of the R record (forced marks). As section 43 said, this agreement holds by construction (the rule and the checker share one classification); bar 2 is the independent one.
+
+**Bar 2, the cause side** (all five arms; `scripts/stream_cause_check.py`, the breakdown by time in `_irdu_grades/nrf_d10_cause_breakdown.txt`). No known re-pin with a non-zero step remains on any arm (the fixed remedy keeps a re-host only at a step of 0), so the chain events are the releases (declared keys):
+
+| arm | releases | with an increment at that epoch | without | of these, an increment within 10 min | none within 10 min | increments with nothing in the chain at their epoch |
+|---|---|---|---|---|---|---|
+| `d10_n144` | 733 | 536 | 197 | 80 | 117 | 3 147 |
+| `d10_n144r` | 816 | 592 | 224 | 96 | 128 | 3 317 |
+| `d10_n145` | 825 | 531 | 294 | 84 | 210 | 3 385 |
+| `d10_n145r` | 797 | 549 | 248 | 67 | 181 | 3 307 |
+| `d10_n145b` | 975 | 660 | 315 | 101 | 214 | 3 414 |
+
+**The levels released without an increment still move** (DOY 144, `d10_n144`): over the 10 min after the release the satellite's level, less the family's median, moves by a median 0.198 cycle, 0.458 at the 90th percentile and 1.452 at most (E14 on Galileo L1C/L5Q at TOW 17940), more than 0.15 cycle in 75 of the 113 that can be read, by steps each under the tolerance: creep the class rule does not see. They are on the unheld families mostly (Galileo L1C/L5Q 47, GPS L1W/L2W 52, GPS L1C/L2W 11, Galileo L1X/L5X 3). **The increments with nothing in the chain** follow a release or fall in the first hour: on DOY 144, 960 come within 10 min after a release of the same satellite signal (the freed level re-converging), 189 later after one, and 1 998 with no release of that satellite signal before them, 1 973 of these in the first hour (the cold start's convergence of the floats, every family) and 25 after it; the other arms read alike (with no release before and after the first hour: 31, 61, 66 and 53). **The cause side fails by the letter** on every arm: a release does not always raise an increment, and a freed level can creep unsignalled. **Proposed (not built):** the chain's declared keys raise the phase increment of each released satellite signal at the release epoch, in addition to the class rule, so a user drops its ambiguity there and the creep that follows lands on a float; with the settled flag (section 45) the signal is then unflagged until it is held again, so the user does not fix during the creep. This failure concerns the declaration (UNVALIDATED, off), not remedy (a): the estimates are the same with and without it (bar 4).
+
+**Bar 3, ionosphere-like steps that move the wide lane** (the wide lane d1 - d2 by more than 0.25 cycle, per satellite-hour, `d10_n144`): Galileo L1X/L5X (held) depth 1 none (largest 0.134), depth 3 0.05 (4, largest 0.716), depth 5 0.06 (2, largest 0.410), depth 7 and more none; GPS L1C/L2W (held) none at any depth (largest 0.218); Galileo L1C/L5Q (not held) 0.03, 0.06, 0.32 and 1.01 per satellite-hour from depth 1 to 7 and more (largest 0.606); GPS L1W/L2W (not held) 0.03 at depth 3 (2, largest 0.279). All six on the held Galileo family fall in the first 1.5 hours (TOW 30 to 1800: E05 0.716, E27 0.572, E29 0.410, E14 0.385, E19 0.379 and -0.267 cycle), during the cold start. Over the five arms the held families' such steps fall in the first hour but for two, both on GPS L1C/L2W on DOY 145 (G14 at TOW 102060, -0.326 cycle; G27 at TOW 105360 in the run started 1 h later, -0.308); held Galileo has none after the first hour. **Proposed (not built):** a wide-lane step of its own: when an ionosphere-like step moves a satellite's wide lane by 0.25 cycle or more, a per-signal wide-lane counter on the P record (a self-describing token, for instance `wlstep=<n>`, beside the phase counter) increments, and a user re-floats its wide-lane ambiguity on that satellite while keeping its narrow-lane state; on these two days it would fire in the first hour on the held families, where the settled flag already says not to fix, and twice after it on GPS.
+
+**Section 43's design question, which signals are settled:** answered and built as section 45 (the flags); its read on `o2s1j_n144` stands (21 % of satellite-epochs flagged in hour 1 under rule B, 92 % in hour 2, 97 to 100 % after, 0.05 flips per satellite-hour after the first hour), and the wide lane is integer for a user at a network receiver from the first hour (the requesting session's replays), hence `wide_lane_integer` 1 on every satellite of a held family.

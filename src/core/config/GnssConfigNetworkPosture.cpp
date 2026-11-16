@@ -342,17 +342,19 @@ namespace GnssProcessor {
               "free a band whose return after a gap the gap instrument declares shifted: the drop kept the "
               "pre-gap value at the first-stash sigma (DOY 144: 9 / 11 returns more than 3 sigma off -> 0 / 0, "
               "T4 refloats 15 -> 0, RAIM wet-delay erases 9 -> 0)" },
-            // --- Remedy (a) and the formal sigma of the odds gate (adopted 2026-11-15, card NRF section 41).
+            // --- A re-host onto a held link keeps its carries, and the odds gate at the formal sigma (adopted
+            //     2026-11-15).
             { nc.ring_fix.enable,
               nc.ring_fix.rehost_keep_carry,
               Tier::SCOPED, false, "network.ring_fix.rehost_keep_carry",
-              "a chain re-host onto a held link keeps the moved side's carries at the known step instead of "
-              "releasing them (DOY 145: E18's level no longer parts between two reference receivers)" },
+              "a chain re-host onto a held link whose carry sits on its integer keeps the moved side's carries "
+              "at a step of 0 instead of releasing them (DOY 145: E18's level no longer parts between two "
+              "reference receivers)" },
             { nc.ring_fix.enable,
               nc.ring_fix.sigma_scale == 1.0,
               Tier::SCOPED, false, "network.ring_fix.sigma_scale",
               "the ring fix's odds gate at the formal sigma, with the bad-epoch response and remedy (a) "
-              "(DOY 144 and DOY 145: the same-start audits read zero)" },
+              "(DOY 144 and DOY 145: the same-start audits and DOY 145's two-start audit read zero)" },
             { nc.ring_fix.enable,
               nc.zwd_event_inflate_m > 0.0,
               Tier::SCOPED, false, "network.zwd_event_inflate_m",
