@@ -421,7 +421,8 @@ public:
      * which both are flagged after one at which they were not, they step once more; while both stay flagged only the
      * other rules step them.  A family signal absent from the emission counts as not flagged; a key without a
      * baseline (a first sighting) does not step.  Signals of no family are untouched.  The previous emission's state
-     * is not carried across a warm resume.
+     * is not carried across a warm resume: an unknown previous state counts as not settled, so a family flagged at
+     * the first emission after a restore takes the settling step.
      *
      * @param families "<constellation>:<phase signal>/<phase signal>" ("E:L1X/L5X"), the ring fix's held families.
      * @throws std::invalid_argument on a malformed family.

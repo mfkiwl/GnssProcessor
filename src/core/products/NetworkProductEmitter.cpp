@@ -542,7 +542,9 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                                   && b->second.signal_integer;
                 const std::string k = f.name + "|" + s.sat;
                 const auto prev = us_prev_both_.find(k);
-                const bool settling = both && prev != us_prev_both_.end() && !prev->second;
+                // An unknown previous state (after a warm resume, which does not carry it) counts as not settled;
+                // at a first sighting the key has no baseline, so a cold start is unchanged.
+                const bool settling = both && (prev == us_prev_both_.end() || !prev->second);
                 if (!both || settling) {
                     if (a != s.phase_bias.end()) us_step[s.sat + "|" + f.p1] = { &f.name, settling };
                     if (b != s.phase_bias.end()) us_step[s.sat + "|" + f.p2] = { &f.name, settling };

@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <map>
+#include <sstream>
 #include <string>
 
 using namespace GnssProcessor;
@@ -59,6 +60,25 @@ TEST(UnsettledSteps, AnUnsettledFamilyStepsAtEveryEmissionAndOnceMoreWhenItSettl
     ASSERT_EQ(n.count("E:L1X/L5X"), 1u);
     EXPECT_EQ(n.at("E:L1X/L5X").first, 2);    // E02's two signals at TOW 30
     EXPECT_EQ(n.at("E:L1X/L5X").second, 2);   // and at TOW 60
+}
+
+TEST(UnsettledSteps, AFamilyFlaggedAtTheFirstEmissionAfterARestoreTakesTheSettlingStep) {
+    NetworkProductEmitter a(0.05);
+    a.setUnsettledSteps({ "E:L1X/L5X" });
+    SsrCorrectionStore store;
+    a.emitToStore(emission(0.0, { { "E02", { true, false } } }), store);
+    a.emitToStore(emission(30.0, { { "E02", { true, false } } }), store);   // unsettled: steps
+    ASSERT_EQ(ctr(a, "E02", "L1X"), 1);
+    std::stringstream snap;
+    a.serializeState(snap);
+    NetworkProductEmitter b(0.05);
+    b.setUnsettledSteps({ "E:L1X/L5X" });
+    ASSERT_TRUE(b.restoreState(snap));
+    b.emitToStore(emission(60.0, { { "E02", { true, true } } }), store);    // flagged after the restore
+    EXPECT_EQ(ctr(b, "E02", "L1X"), 2);   // the settling step: the previous state is unknown
+    EXPECT_EQ(ctr(b, "E02", "L5X"), 2);
+    b.emitToStore(emission(90.0, { { "E02", { true, true } } }), store);
+    EXPECT_EQ(ctr(b, "E02", "L1X"), 2);   // and only once
 }
 
 TEST(UnsettledSteps, AFamilySignalMissingCountsAsUnflaggedAndUnarmedNothingSteps) {

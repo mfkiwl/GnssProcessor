@@ -360,6 +360,16 @@ namespace GnssProcessor {
               Tier::SCOPED, false, "network.ring_fix.max_decisions_per_epoch",
               "the ring fix decides up to 12 links per epoch in place of 3 (simulator: held link-epochs "
               "+36 %, 0 wrong; DOY 144: the same-start audit reads zero)" },
+            // --- The stream declares its steps: the class rule and the release increments (adopted 2026-11-16).
+            { nc.ring_fix.enable,
+              !nc.disc_step_class_pairs.empty(),
+              Tier::SCOPED, false, "network.disc_step_class_pairs",
+              "the stream declares a whole or fraction step of a family's level and every signal the chain "
+              "releases (DOY 144: float users gain at 28 network and 11 independent receivers)" },
+            { nc.ring_fix.enable,
+              nc.disc_step_class_tol_cyc == 0.15,
+              Tier::SCOPED, false, "network.disc_step_class_tol_cyc",
+              "the step declaration's class tolerance, 0.15 cycle" },
             { nc.ring_fix.enable,
               nc.zwd_event_inflate_m > 0.0,
               Tier::SCOPED, false, "network.zwd_event_inflate_m",
