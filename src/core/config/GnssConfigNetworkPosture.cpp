@@ -327,8 +327,15 @@ namespace GnssProcessor {
               "a drop clears the arc's border regression and block row even at birth strength "
               "(without it the field level jumps by metres at the first fold under the exact "
               "update); a companion of the exact update" },
-            // --- The bad-epoch response at a return after a gap, in the chain posture with network integer
-            //     fixing (adopted 2026-11-15; the main posture's goldens do not run the ring fix).
+            // --- The bad-epoch response, in the chain posture with network integer fixing (adopted
+            //     2026-11-15; the main posture's goldens do not run the ring fix).
+            { nc.ring_fix.enable,
+              nc.amb_float_drop_jump_k == 1.0,
+              Tier::SCOPED, false, "network.amb_float_drop_jump_k",
+              "a slipped band's drop covers its measured phase-minus-code step: the drop kept the pre-slip "
+              "value at the first-stash sigma, a prior the solve spread into the other band, the slant "
+              "ionosphere and the receiver's states (DOY 144 MRO100AUS: wet-delay step +10.8 cm -> 0.02 cm, "
+              "anchors decoupled 13 -> 0)" },
             { nc.ring_fix.enable,
               nc.amb_float_drop_gap_cover == NetworkAmbGapCover::Free,
               Tier::SCOPED, false, "network.amb_float_drop_gap_cover",
