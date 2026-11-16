@@ -229,6 +229,11 @@ void networkRingFixArm(NetworkRun& run) {
                   "lane's fraction exceeds {:.3f} cycle (refusal wl_fraction).", rf->wl_frac_max);
     // Stage O2: the odds gate's factor on the formal sigmas, named only when set.
     rf->sigma_scale = nc.ring_fix.sigma_scale;
+    rf->code_event_window_s = nc.ring_fix.code_event_window_s;
+    if (rf->code_event_window_s > 0.0)
+        log->warn("Network (ring fix): CODE-EVENT WINDOW {:.0f} s: no decision on a satellite's links within that "
+                  "time after its code reference moves or its code datum re-seeds (refusal code_event); links "
+                  "already held are kept.", rf->code_event_window_s);
     if (rf->sigma_scale != 1.0)
         log->warn("Network (ring fix): SIGMA SCALE {:.2f}: the log-odds of N1 and of the wide lane are computed with "
                   "{:.2f} times their formal sigmas (the trace keeps the formal sigmas).", rf->sigma_scale,
@@ -617,6 +622,7 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
     const ChainEpochObs* obs_rec = ep.events.phase_datum.chain.get();
     const RelevelEpochState& relevel = ep.events.slip.relevel;
     const net::ArcTable& arc_rows = ctx.entities.arcs;
+    const net::SatTable& sat_rows = ctx.entities.sats;
     const arcgraph::CycleLattice& lattice = ctx.carry.ar_lattice.lattice;
     // ---- End of the bindings ----
     if (!ctx.carry.ring_fix || obs_rec == nullptr || !obs_rec->armed) return;
@@ -729,6 +735,8 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
             o.relevel1_s = lc1 != nullptr ? lc1->relevel_s : 0.0;
             o.relevel2_s = lc2 != nullptr ? lc2->relevel_s : 0.0;
             o.latched = latched.count({ii, r.sat, r.sig1}) > 0 || latched.count({ii, r.sat, r.sig2}) > 0;
+            if (const double* ce = net::getSat(sat_rows, r.sat, &net::SatelliteState::code_ref_event_s))
+                o.code_event_s = *ce;
             const auto held_it = rf.links.find(o.id);
             if (held_it != rf.links.end() && held_it->second.held && station_ok
                 && R.A_s.cols() == x_s.size() && xr.size() == R.A_r.cols()) {
@@ -904,6 +912,7 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
         if (c == RingFixRefuse::Odds && rf.gate_rule != RingFixGateRule::Odds) continue;
         if (c == RingFixRefuse::Cap && rf.order != RingFixOrder::Certain) continue;
         if (c == RingFixRefuse::WlFraction && !(rf.wl_frac_max > 0.0)) continue;
+        if (c == RingFixRefuse::CodeEvent && !(rf.code_event_window_s > 0.0)) continue;
         refused += fmt::format("{}{} {}", k ? ", " : "", ringFixRefuseName(c), C.refused[k]);
     }
     long long rel_total = 0;

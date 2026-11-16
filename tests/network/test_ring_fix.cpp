@@ -876,3 +876,37 @@ TEST(RingFixO2, ALinkTheFormalOddsTakeIsRefusedAtThreeTimesTheSigma) {
     EXPECT_EQ(es[0].refuse, RingFixRefuse::Odds);
     EXPECT_NEAR(es[0].gate.sigma_if, 0.08, 1e-9) << "the event keeps the formal sigma";
 }
+
+// ---- The code-event window (network.ring_fix.code_event_window_s) ----
+
+TEST(RingFixCodeEvent, ACodeEventClosesTheSatellitesLinksForTheWindowOnly) {
+    EXPECT_FALSE(ringFixCodeEventOpen(-1.0, 1800.0, 5000.0));    // no event recorded
+    EXPECT_FALSE(ringFixCodeEventOpen(4000.0, 0.0, 5000.0));     // no window
+    EXPECT_TRUE(ringFixCodeEventOpen(4000.0, 1800.0, 5000.0));   // 1000 s after the event
+    EXPECT_FALSE(ringFixCodeEventOpen(3000.0, 1800.0, 5000.0));  // 2000 s after it
+    EXPECT_STREQ(ringFixRefuseName(RingFixRefuse::CodeEvent), "code_event");
+
+    // A clean link that the plain state holds after the persistence count: with the satellite's code reference moved
+    // 600 s before, the window refuses it every epoch; with the move 2000 s before, it is held as without the window.
+    double now = 100000.0;
+    NetworkRingFix guarded = stateWithHistory(kId, now);
+    guarded.code_event_window_s = 1800.0;
+    NetworkRingFix late = stateWithHistory(kId, now);
+    late.code_event_window_s = 1800.0;
+    std::vector<RingFixEvent> eg, el;
+    for (int k = 0; k < kRingFixPersistEpochs; ++k, now += 30.0) {
+        RingFixDecideObs og = obsNear(kId, 10, 7, 0.01, 1e-5);
+        og.code_event_s = now - 600.0;
+        RingFixDecideObs ol = obsNear(kId, 10, 7, 0.01, 1e-5);
+        ol.code_event_s = now - 2000.0;
+        eg = ringFixDecideStep(guarded, {og}, now);
+        el = ringFixDecideStep(late, {ol}, now);
+    }
+    ASSERT_EQ(eg.size(), 1u);
+    EXPECT_EQ(eg[0].refuse, RingFixRefuse::CodeEvent);
+    EXPECT_FALSE(guarded.links.at(kId).held);
+    EXPECT_EQ(guarded.counters.refused[static_cast<std::size_t>(RingFixRefuse::CodeEvent)], kRingFixPersistEpochs);
+    ASSERT_EQ(el.size(), 1u);
+    EXPECT_EQ(el[0].kind, RingFixEvent::Kind::Hold);
+    EXPECT_TRUE(late.links.at(kId).held);
+}

@@ -559,6 +559,8 @@ const std::vector<FieldDecl> kSatelliteFields = {
      &qrFromSnapshot, &satRows<&A::prev_clock_refloat>},
     {"last_if_pin_sel", "last_if_pin_sel", Persist::ColdStart, "", "", nullptr, nullptr,
      &satRows<&A::last_if_pin_sel>},
+    {"code_ref_event_s", "", Persist::ColdStart, "", "network.ring_fix.code_event_window_s", nullptr, nullptr,
+     &satRows<&A::code_ref_event_s>},
     {"last_if_pin_hold", "last_if_pin_holds", Persist::ColdStart, "", "", nullptr, nullptr,
      &satRows<&A::last_if_pin_hold>},
     {"sbc_active", "sbc_active_sats", Persist::ColdStart, "", "", nullptr, nullptr,

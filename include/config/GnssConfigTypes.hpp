@@ -1927,6 +1927,12 @@ namespace GnssProcessor {
         /// @c network.ring_fix.sigma_scale: the odds gate computes the log-odds of N1 and of the wide lane with this
         /// factor times their formal sigmas (in [1, 100]; needs gate "odds").  1 (default): the formal sigmas.
         double sigma_scale{ 1.0 };
+        /// @c network.ring_fix.code_event_window_s: no decision on any link of a satellite within this many seconds
+        /// after its code reference moves (the ionosphere-free pin pair is re-selected) or its code datum re-seeds.  The
+        /// level that only code holds then re-converges, and a wide-lane decision taken on it can land one lane off
+        /// while its float looks clean.  Links already held are kept: they were decided on the level before the move.
+        /// 0 (default): no such window.
+        double code_event_window_s{ 0.0 };
         /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
         /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
         /// latch (the residual monitor's path).  Empty (default): no mask.

@@ -129,9 +129,10 @@ enum class RingFixRefuse : std::uint8_t {
     Odds,          ///< Change L: the log-odds of N1 or of the wide lane below the bound.
     Cap,           ///< Change O: passed every test, passed over by the per-epoch cap (the count is kept).
     WlFraction,    ///< Passed every other test (persistence included); the wide lane's fraction above network.ring_fix.wl_frac_max.
+    CodeEvent,     ///< Its satellite's code reference moved or its code datum re-seeded within network.ring_fix.code_event_window_s.
 };
 /// Number of refusal causes.
-inline constexpr std::size_t kRingFixRefuseCount = 10;
+inline constexpr std::size_t kRingFixRefuseCount = 11;
 
 /**
  * @brief The name of a decision rule ("gated", "plain", "log").
@@ -198,6 +199,16 @@ struct RingFixGate {
  */
 RingFixGate ringFixGate(double f1, double f2, double q11, double q12, double q22,
                         double lambda1, double lambda2, double sigma_scale = 1.0);
+
+/**
+ * @brief Whether a satellite's code event still closes its links to decisions
+ *        (network.ring_fix.code_event_window_s).
+ * @param code_event_s The satellite's last code-reference move or code-datum re-seed (s; negative: none).
+ * @param window_s     The window (s; 0: none).
+ * @param now_s        This epoch (s).
+ * @return true while the event is inside the window.
+ */
+bool ringFixCodeEventOpen(double code_event_s, double window_s, double now_s);
 
 // ---- Rings and candidates ---------------------------------------------------------------------
 
@@ -302,6 +313,7 @@ struct RingFixDecideObs {
     double    relevel1_s{0.0};         ///< Band 1's carried re-level stamp (0: unstamped).
     double    relevel2_s{0.0};         ///< Band 2's carried re-level stamp (0: unstamped).
     bool      latched{false};          ///< Either band in this epoch's free-epoch latch.
+    double    code_event_s{-1.0};      ///< Its satellite's last code-reference move or code-datum re-seed (s; negative: none).
     bool      have_resid{false};       ///< Held links: the post-fit ionosphere-free phase residual was formed.
     double    resid_if_m{0.0};         ///< That residual (m).
     bool      have_truth{false};       ///< Simulation only: the link's true integers in this epoch's frame are known.
@@ -439,6 +451,7 @@ struct NetworkRingFix {
     std::set<std::tuple<std::string, std::string, std::string>> pairs;
     double      wl_frac_max{0.0};           ///< The decision's bound on the wide lane's fraction (cycles; 0: none).
     double      sigma_scale{1.0};           ///< The odds gate's factor on the formal sigmas (network.ring_fix.sigma_scale).
+    double      code_event_window_s{0.0};   ///< No decision on a satellite's links this long after its code event (s; 0: none).
     // Simulation only: the slip mask (network.ring_fix.mask_slip_*).
     int         mask_station{-1};           ///< The masked arc's station (roster index; -1: no mask).
     std::string mask_sat;                   ///< The masked arc's satellite.

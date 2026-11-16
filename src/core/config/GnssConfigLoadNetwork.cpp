@@ -1532,6 +1532,10 @@ namespace GnssProcessor {
             if (rf.sigma_scale != 1.0 && rf.gate != "odds")
                 throw std::runtime_error("network.ring_fix.sigma_scale scales the odds gate's sigmas: it needs "
                                          "network.ring_fix.gate \"odds\".");
+            rf.code_event_window_s = jval<double>(json, "network.ring_fix.code_event_window_s",
+                                                  "network_ring_fix_code_event_window_s", 0.0);
+            if (!(rf.code_event_window_s >= 0.0 && rf.code_event_window_s <= 86400.0))
+                throw std::runtime_error("network.ring_fix.code_event_window_s must be in [0, 86400] s.");
             rf.mask_slip_arc = jval<std::string>(json, "network.ring_fix.mask_slip_arc",
                                                  "network_ring_fix_mask_slip_arc", std::string{});
             rf.mask_slip_tow = jval<double>(json, "network.ring_fix.mask_slip_tow", "network_ring_fix_mask_slip_tow",

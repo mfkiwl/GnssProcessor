@@ -36,6 +36,10 @@ const char* ringFixReleaseName(RingFixRelease c) {
     return "?";
 }
 
+bool ringFixCodeEventOpen(double code_event_s, double window_s, double now_s) {
+    return window_s > 0.0 && code_event_s >= 0.0 && now_s - code_event_s < window_s;
+}
+
 const char* ringFixRefuseName(RingFixRefuse c) {
     switch (c) {
         case RingFixRefuse::NotCandidate: return "not_candidate";
@@ -48,6 +52,7 @@ const char* ringFixRefuseName(RingFixRefuse c) {
         case RingFixRefuse::Odds:         return "odds";
         case RingFixRefuse::Cap:          return "cap";
         case RingFixRefuse::WlFraction:   return "wl_fraction";
+        case RingFixRefuse::CodeEvent:    return "code_event";
     }
     return "?";
 }
@@ -277,6 +282,10 @@ std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
             const double last_tree =
                 lt == rf.last_tree_s.end() ? -std::numeric_limits<double>::infinity() : lt->second;
             if (!windowOk(L, o, last_tree, now_s)) { refuse(RingFixRefuse::Window); continue; }
+            if (ringFixCodeEventOpen(o.code_event_s, rf.code_event_window_s, now_s)) {
+                refuse(RingFixRefuse::CodeEvent);
+                continue;
+            }
             if (rf.gate_rule == RingFixGateRule::Odds) {
                 if (ev.gate.frac_if > kRingFixMaxFracCyc) { refuse(RingFixRefuse::Fraction); continue; }
                 if (!ev.gate.pass_odds) { refuse(RingFixRefuse::Odds); continue; }

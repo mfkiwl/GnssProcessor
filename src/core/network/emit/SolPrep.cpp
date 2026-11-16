@@ -917,6 +917,8 @@ NetworkSolPrepResult networkSolPrep(NetworkRun& run, const NetworkEpoch& ep, Epo
                 } else {
                     mark.insert(sat);
                     if (continued) ++ctx.counters.n_if_pin_continued_declared;
+                    if (nc.ring_fix.code_event_window_s > 0.0)
+                        net::putSat(entities, sat, &net::SatelliteState::code_ref_event_s) = pl_now_s;
                 }
                 if (events_trace.is_open())
                     emitEvent("CLK_BASIS", cont ? "reselect_continued" : "reselect", sat, "",
@@ -983,6 +985,9 @@ NetworkSolPrepResult networkSolPrep(NetworkRun& run, const NetworkEpoch& ep, Epo
                 emitter.markSatDiscontinuity(fresh,
                                              NetworkProductEmitter::kDiscChanCodeBias
                                                  | NetworkProductEmitter::kDiscChanClock);
+            if (nc.ring_fix.code_event_window_s > 0.0)
+                for (const auto& s : mark)
+                    net::putSat(entities, s, &net::SatelliteState::code_ref_event_s) = pl_now_s;
             retro_emit_sats.insert(mark.begin(), mark.end());
             // Count the re-seed discs that land on the first post-resume epoch (RS-3,
             // SPEC_event_harness §21.7): a direct readout of whether the restored
