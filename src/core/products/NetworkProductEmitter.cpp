@@ -552,6 +552,25 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                 us_prev_both_[k] = both;
             }
         }
+        // The signals of no held family (network.ring_fix.unsettled_steps_unheld): never settled, so they step at
+        // every emission, filled copies included.
+        if (us_unheld_) {
+            for (const auto& s : sol.sats) {
+                if (s.sat.empty()) continue;
+                const char c = letterOfSat(s.sat);
+                for (const auto& [sig, pb] : s.phase_bias) {
+                    (void)pb;
+                    bool held = false;
+                    for (const UnsettledFamily& f : us_families_)
+                        held = held || (f.constellation == c && (f.p1 == sig || f.p2 == sig));
+                    if (held) continue;
+                    auto it = us_unheld_names_.find(c);
+                    if (it == us_unheld_names_.end())
+                        it = us_unheld_names_.emplace(c, std::string(1, c) + ":no held family").first;
+                    us_step[s.sat + "|" + sig] = { &it->second, false };
+                }
+            }
+        }
     }
 
     for (const auto& s : sol.sats) {

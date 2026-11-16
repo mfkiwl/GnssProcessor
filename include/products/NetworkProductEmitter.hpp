@@ -428,6 +428,17 @@ public:
      * @throws std::invalid_argument on a malformed family.
      */
     void setUnsettledSteps(const std::vector<std::string>& families);
+    /**
+     * @brief Arms the unsettled steps of the signals of no held family (network.ring_fix.unsettled_steps_unheld).
+     *
+     * With @ref setUnsettledSteps armed, a phase signal that belongs to no family it named (for the satellite's
+     * constellation) is never settled, so its phase counter steps at every emission that finds a baseline, filled
+     * copies included.  Its steps are counted under "<constellation>:no held family" in
+     * @ref unsettledStepCounts.  Without @ref setUnsettledSteps nothing happens.
+     *
+     * @param on True to arm.
+     */
+    void setUnsettledStepsUnheld(bool on) { us_unheld_ = on; }
     /// @brief Whether the unsettled steps are armed.
     /// @return True when @ref setUnsettledSteps named at least one family.
     bool unsettledStepsArmed() const { return !us_families_.empty(); }
@@ -863,6 +874,8 @@ private:
     std::vector<UnsettledFamily> us_families_;                         ///< The families; empty = off.
     std::map<std::string, bool> us_prev_both_;                          ///< "<family>|sat" -> both flagged at its last emission.
     std::map<std::string, std::pair<long long, long long>> us_counts_;  ///< Family -> (unsettled steps, settling steps).
+    bool us_unheld_{false};                                           ///< The signals of no held family step too.
+    std::map<char, std::string> us_unheld_names_;                      ///< Constellation -> "<c>:no held family".
     /// One key's phase-visible baseline: its clock less phase bias at its last emission
     /// with a clock, and that emission's product time.
     struct PvBaseline {

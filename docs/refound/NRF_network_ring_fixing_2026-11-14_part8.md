@@ -5,10 +5,10 @@
 - **id:** NRF-part8
 - **topic:** network-vehicle
 - **status:** open
-- **summary:** Sections 61 onwards of card NRF (2026-11-16), continued from [part 7](NRF_network_ring_fixing_2026-11-14_part7.md). Section 61: rule L of the settled flags built (`network.ring_fix.settled_rule` "largest", default off): the largest set of a family's satellites tied through held links and certified tree edges, whatever receiver roots it, once it holds 4 satellites, the incumbent kept until another holds 2 more; streams `l12_n144` and `l12_n145`; a truth audit of flagged pairs on the simulator through their wide and narrow lanes. Section 62: the chord table forms every configured family (`network.ring_fix.form_configured_pairs`, default off) and the log arm `t3l` of section 60 on four families. Section 63: what separates GPS's held share from Galileo's: the wide lane.
+- **summary:** Sections 61 onwards of card NRF (2026-11-16), continued from [part 7](NRF_network_ring_fixing_2026-11-14_part7.md). Section 61: rule L of the settled flags built (`network.ring_fix.settled_rule` "largest", default off): the largest set of a family's satellites tied through held links and certified tree edges, whatever receiver roots it, once it holds 4 satellites, the incumbent kept until another holds 2 more; 61.1: every exact bar passes (keys absent identical, values unchanged, the flags equal the script at every record; streams `l12_n144` and `l12_n145`), and the truth bar on the simulator fails under rule B as well, rule L adding 3 GPS pair-epochs above 0.25 cycle in the first 90 min. Section 62: the chord table forms every configured family (`network.ring_fix.form_configured_pairs`, default off); 62.1: the log arm `t3l` on four families decides right against truth and the shared signal agrees. Section 63: GPS's held share is short on the wide lane. Sections 64 to 66 pre-registered: GPS L1C/L5Q held on the simulator; GPS band 1 on L1C before L1W; the unsettled steps of the signals of no held family (`network.ring_fix.unsettled_steps_unheld`, built, default off).
 - **source:** [part 7](NRF_network_ring_fixing_2026-11-14_part7.md) sections 58 (rule L proposed) and 60 (the third frequency's plan); the requesting session's orders A, B and C after section 60.
 
-**Outcome.** Pending the runs of sections 61 and 62. Section 63 answers order C: the wide lane (code), not the narrow lane, is what GPS L1C/L2W lacks against Galileo L1X/L5X. Three quarters of GPS refusals come with a wide lane that is not decisive, at every arc age; one GPS arc in eight to fourteen never settles its wide lane. The narrow lane is weaker on GPS as well, a second factor. The test the requesting session named follows: GPS L1C/L5Q as the held pair, the simulator first.
+**Outcome.** Rule L of the settled flags is built and passes every exact bar; its streams `l12_n144` and `l12_n145` equal u12's apart from the flags and the counters. On the simulator the truth bar fails under rule B as well (phase moves of flagged satellites), and rule L adds 3 GPS pair-epochs above 0.25 cycle in the first 90 min. The chord table now forms every configured family, and a third band's second family decides right with the shared signal agreeing: the cascade is next. GPS's held share is short on the wide lane; GPS band 1 on L1C, GPS L1C/L5Q and the steps of signals of no held family are running.
 
 ## 61. 2026-11-16: the settled flags by the largest tied set (pre-registered)
 
@@ -30,6 +30,30 @@
 
 Under rule B the pairs above 0.25 cycle are one satellite's MW excursion of one or two epochs (G30 at TOW 268 740, MW 0.30, NL 0.03; E27 at 263 520), a code transient and not a phase inconsistency: the strict bar fails under rule B as well. Rule L adds 3 GPS pair-epochs, G23-G27 at TOW 263 460 to 263 490 (NL 0.257 to 0.259, about 40 min after the start); its larger count above 0.10 is the first hour, where it flags and rule B does not. `l12_sim` carries the same values as `kq12_sim`, so its audit repeats this table unless the build's flags differ from the stamp.
 
+### 61.1 2026-11-16: rule L: the build's bars pass; the truth bar fails under both rules
+
+Exe nrf26 (`95eea9710201a513`, commit c72f652); every arm exits 0 with every epoch emitted; 10-epoch smokes first. Grades `_irdu_grades/nrf_l12_sim_grade.txt`, `nrf_l12_obs_grade.txt` and `nrf_l12_u13_grade.txt` (script `_irdu_grades/scripts_s20/grade_l12_stage.sh`).
+
+- **Keys absent identical:** `kl_sim` (nrf26) against `kd_sim` (nrf20): the products and the 42 CSV traces identical, wall-clock columns aside. `u13_n144` against `u12_n144` (exe nrf24): identical (61.2).
+- **Only the flags and the counters move:** `l12_n144` and `l12_n145` equal `u12_n144` and `u12_n145` with the flags and the phase counters masked (389 271 and 391 680 lines, 0 differing); the flags move 4 156 and 11 038 lines, the counters 37 445 and 59 764; of the 39 CSV traces 4 differ, the network's solution trace (its counter column) and the run's own closed-loop consumer's three, which read the flags and the counters (the requesting session's re-check agrees). On the simulator, `l12_sim`'s E, C, B and P values equal `kq12_sim`'s (100 965 records, 0 differing): the step declaration, the flags, the unsettled steps and rule L move no value.
+- **The emitted flags equal `flag_root.py`'s rule L** (minimum 4, hysteresis 2) at every record: `l12_sim` 0 of 40 242 family records; `l12_n144` 0 of 87 638 and `l12_n145` 0 of 88 446.
+- **Run-end lines:** `l12_sim` 31 688 satellite-signal-epochs flagged, 8 554 not, 120 flips; rule L 0 changes of identity, 0 satellites changed side (`flag_root.py` counts 0 as well); unsettled steps Galileo L1C/L5Q 3 412 while unsettled and 52 at the settling, GPS L1C/L2W 5 028 and 68. `l12_n144` 65 128 flagged, 22 510 not, 150 flips; `l12_n145` 61 148, 27 298 and 174; rule L 0 changes of identity on both days. Unsettled steps with rule L (with rule B, `u12`): DOY 144 Galileo 6 962 and 66 (7 314 and 66), GPS 15 424 and 70 (19 228 and 66); DOY 145 Galileo 6 986 and 72 (14 894 and 68), GPS 20 188 and 72 (23 318 and 72). Flagged share in half hours 1 to 4, rule L (rule B): DOY 144 Galileo 2 43 89 91 % (0 36 89 91), GPS 3 54 64 67 % (0 0 22 67); DOY 145 Galileo 1 39 84 96 % (0 0 0 0), GPS 3 45 59 52 % (0 0 25 52); the same afterwards.
+- **Flagged pairs against truth** (`flag_truth.py`, MW and NL wrapped; rule B stamped from the run's own traces): pairs, above 0.10 and above 0.25 cycle, by half hour:
+
+| half hour | GPS rule B | GPS rule L | Galileo rule B | Galileo rule L |
+|---|---|---|---|---|
+| 1 | none flagged | 232; 28; 0 | none flagged | 415; 55; 0 |
+| 2 | none flagged | 14 600; 616; 3 | 11 139; 146; 16 | 11 249; 167; 16 |
+| 3 | 14 175; 60; 0 | 25 475; 112; 0 | 16 776; 31; 0 | 16 776; 31; 0 |
+| 4 to 6 | 82 804; 138; 10 | the same pairs | 51 216; 3; 0 | the same pairs |
+
+  The bar as written (every flagged pair integer-consistent at every epoch) fails under rule B as well as rule L. From the fourth half hour both rules flag the same pairs. Rule L's additions all fall in the first 90 min: on GPS 26 132 pairs, 696 above 0.10 cycle (2.7 %, against 0.4 % of rule B's own pairs in the third half hour) and 3 above 0.25 (G23-G27 at TOW 263 460 and 263 490, NL 0.257 and 0.259); on Galileo 525 pairs, 76 above 0.10 and none above 0.25. Against rule B, rule L is worse by those 3 GPS pair-epochs above 0.25 cycle and by 772 above 0.10, all where rule B flags fewer satellites or none.
+- **Section 61's reading of rule B's pairs above 0.25 cycle is corrected:** they are not a code transient. The satellites' code biases do not move there (every B record steps 0.000 m); the phase biases do. G30's step at TOW 268 740 (-0.181 m on L1C, -0.293 m on L2W, ratio 1.62, ionosphere-like) is declared by the producer's counter (82 to 83); its next move at 268 830 (+0.075 and +0.119 m, ionosphere-like, about 0.11 wide-lane cycle) is not, under the class rule's 0.15 tolerance. E27's phase biases move by 1 to 10 cm per epoch from TOW 263 520, the epoch at which both rules flag it, under a constant counter (82), its MW 0.2 to 0.3 cycle off for a few minutes: the simulator's own case of a flagged level that moves under constant counters, in the first hour, under rule B as under rule L.
+
+### 61.2 2026-11-16: keys absent identical on observed data
+
+`u13_n144` (exe nrf26, `u12_n144`'s configuration: the flags on, the rule key absent) against `u12_n144` (exe nrf24): the products and the 39 CSV traces identical, wall-clock columns aside (grade `_irdu_grades/nrf_l12_u13_grade.txt`). Every bar of section 61 that the build answers passes; the truth bar on the simulator fails under both rules (61.1).
+
 ## 62. 2026-11-16: the chord table forms every configured family; the log arm `t3l` (pre-registered in section 60)
 
 **The build** (exe nrf26; key `network.ring_fix.form_configured_pairs`, default false, needs `network.ring_fix.pairs`; ledger row UNVALIDATED). `chainArcFamilies` (`network/solve/ChainChordTable`) gives an arc's pair families: the rule of `chainPairFamilies` (every band-1 signal with the arc's lowest-digit signal of another band) and, with the key, every configured family of the satellite's constellation whose two signals the arc tracks and that the rule does not form. The ring fix's chord rows and its inheritance of old hosts' carries use it. Unit test `ChainArcFamilies.AConfiguredFamilyOfAThirdBandIsFormedBesideTheRule` (a file of its own, `tests/network/test_chain_arc_families.cpp`). The 10-epoch smoke of the log arm (`t3l26smoke`) shows the families formed: Galileo L1C/L7Q 1 521 chord rows (8 in `t3lsmoke` without the key), GPS L1C/L5Q 2 067 (none), Galileo L1C/L5Q and GPS L1C/L2W unchanged (1 513 and 2 067).
@@ -37,6 +61,18 @@ Under rule B the pairs above 0.25 cycle are one satellite's MW excursion of one 
 **Arms** (exe nrf26): `t3l_sim` and `t3l_sim_r`, section 60's log arms with the key: the three bands of the simulator (card L5B section 11's four keys), the ring fix in log mode on GPS L1C/L2W and L1C/L5Q and Galileo L1C/L5Q and L1C/L7Q, the adopted set at the cap of 12 (`kq12_sim[_r]`), 3 h from 00:30:15, the default receiver and S45000SIM. The results of `t3c` are section 60.1 (part 7).
 
 **Bars** (section 60's): every family's would-be decisions right against truth at 99.9 % or more; on every arc decided by two families the shared signal's integers equal; within a constellation, each band's tree on the same datum receiver. The would-be decisions are graded offline (`_irdu_grades/scripts_s20/t3l_truth.py`): each row in state would_hold against the true integer of its arc in the frame of its epoch (`scripts/ird_frame_census.py`, `frame_integer`, with the producer's wind-up branch per arc), since the producer's truth audit counts held links only. The grader reproduces that audit on `kq12_sim`'s held rows: 79 135 and 94 203 link-epochs right, 0 wrong (the audit: 0 wrong).
+
+### 62.1 2026-11-16: `t3l`: every bar passes
+
+Exe nrf26; both runs exit 0 with every epoch emitted and RAIM rows 0; a 10-epoch smoke first (`t3l26smoke`). Grade `_irdu_grades/nrf_l12_t3l_grade.txt` (script `_irdu_grades/scripts_s20/grade_l12_stage.sh t3l`: `t3l_truth.py`, `scripts/nrf_log_reads.py`, `scripts/nrf_two_run_audit.py`).
+
+- **Every family's would-be decisions right against truth** (bar 99.9 %): `t3l_sim` Galileo L1C/L5Q 30 627 link-epochs and 322 links right, L1C/L7Q 29 603 and 309, GPS L1C/L2W 32 229 and 391, L1C/L5Q 34 235 and 401; `t3l_sim_r` 31 079 and 340, 30 097 and 331, 27 405 and 405, 29 988 and 432; none wrong, none ungradeable.
+- **The shared signal's integers equal** wherever two families decide one arc: 61 050 and 56 614 (epoch, station, satellite) rows, none differing.
+- **Each band's tree on the same datum receiver** within a constellation at every epoch: `t3l_sim` GPS S13000SIM and Galileo S03000SIM, `t3l_sim_r` S45000SIM for all six bands.
+- **The two runs agree:** the same-start audit of the would-be integers fails 0 of 60 045 checks (Galileo L1C 10 558, L5Q 10 295, L7Q 9 465; GPS L1C 10 498, L2W 9 180, L5Q 10 049).
+- Reads (`t3l_sim`): 1 423 of 2 502 links reach a would-be decision, the first at p50 48 min (p90 89) after their first chord row; refused link-epochs by cause: window 177 462, odds 92 882, fraction 72 978, persistence 31 382, wide-lane bound 77.
+
+On the simulator a third band's second family decides right and agrees with the first on the shared signal. By section 60's plan the next step is the cascade, built default off and held on the simulator.
 
 ## 63. 2026-11-16: what separates GPS's held share from Galileo's: the wide lane
 
@@ -71,3 +107,43 @@ By receiver type on GPS, the wide lane's scatter is largest on Trimble Alloy (0.
 **Arms** (exe nrf26): `g5_sim` and `g5_sim_r`, `t3c_sim[_r]` (the three bands, the adopted set at the cap of 12, 3 h from 00:30:15, the default receiver and S45000SIM) with the held pairs GPS L1C/L5Q and Galileo L1C/L5Q and the configured families formed; a 10-epoch smoke first (`g5smoke`).
 
 **Bars.** Every epoch emitted; 0 wrong against truth (the producer's audit) and the same-start audit zero; Galileo L1C/L5Q's held link-epochs within 5 % of `t3c_sim[_r]`'s; RAIM rows not above `t3c_sim[_r]`'s by more than a tenth. Reads: GPS L1C/L5Q's held share by half hour against GPS L1C/L2W's in `t3c_sim[_r]`, and its refusals by cause. If the bars pass, observed data follows (DOY 144 and 145, the u12 configuration with the GPS pair replaced), graded as section 63 grades GPS L1C/L2W.
+
+## 65. 2026-11-16: GPS band 1 on L1C before L1W (pre-registered)
+
+**Why** (the requesting session's order D after its review of section 61): `processing.signal_priorities.GPS` lists C1W and L1W before C1C and L1C, so the 17 roster stations that report both on band 1 (15 JAVAD, 2 Septentrio PolaRx5; every one carries C1C and L1C), and the held-out consumer WTZZ00DEU, are processed on L1W/L2W, outside the GPS L1C/L2W family: their L1W is never flagged nor stepped, and its level moves under constant counters (the requesting session's read: segments of constant counters p50 0.6 and up to 5.8 narrow-lane cycles). Section 63's GPS arcs are the other receivers'.
+
+**The datum without C1W** (read in the code before the run). The ionosphere-free code pin pair of each satellite is chosen by `NetworkSbasis::selectIfPinPair` in band-digit, then name order, C1C before C1W, and no bias product's reference pair is armed (`network.n3c_bia_pin_pair` absent): the pair is (C1C, C2W) now (the S record's `cbpin=G:C1C-C2W`) and stays so. The broadcast T_GD target (`NetworkSbasis::satGfBroadcastTarget`) is applied to that pair's GF combination (bands 1 and 2), as now: a P(Y) group delay already applied to C1C-C2W, each satellite's C1C-C1W difference left in its code biases. The code datum is C1C at all 55 roster stations already (the run-start table 'signals as planned' of `l12_n144`: datum code C1C 55, pinned by C1C on 32 satellites), and every station carries C1C on both days. C1W does not leave: the smoke's table shows it as band 1's companion code at the 38 stations that report it (17 had it as their primary code, 21 already as companion), its satellite code biases estimated and emitted as before. What leaves is the L1W phase (17 stations move to L1C). No second key is needed. Two side effects to read: GPS then tracks exactly two phase signals, so the chain's pair-family mode (`phase_datum_eq34_family` "pair") should grow one forest over GPS L1C and L2W in place of three per-band trees; and the per-signal wire fill (`network.n3c_wire_per_signal`) writes an L1W record only while the roster models L1W.
+
+**Arms** (exe nrf26): `p12_n144` and `p12_n145`, `l12_n144` and `l12_n145` with C1C, L1C, D1C and S1C ahead of their W entries in `processing.signal_priorities.GPS` (one knob); a 10-epoch smoke first (`p12smoke`).
+
+**Bars** (against `l12_n144` and `l12_n145`): every epoch emitted; Galileo's held link-epochs not below l12's by more than 2 %; the truth-free check of an observed arm, the segment drift of the flagged runs not above l12's by more than a tenth. **Reads:** the GPS receivers and arcs in the family, the GPS held and flagged shares by half hour, the refusals by cause as in section 63, the run-end ring line, RAIM rows and withheld epochs, whether L1W leaves the stream. The streams are for the requesting session's user replays.
+
+## 66. 2026-11-16: the unsettled steps of the signals of no held family (built, pre-registered)
+
+**Why** (the requesting session's order E): a phase signal that belongs to no held family is never settled, so with the unsettled steps its counter should step at every emission (GPS L1W at the receivers processed on it; Galileo L1C and L5Q where only L1X/L5X is held).
+
+**The build** (exe nrf27; key `network.ring_fix.unsettled_steps_unheld`, default off, needs `network.ring_fix.unsettled_steps`; ledger row UNVALIDATED). A second key, so that section 54's rule and the streams built on it stay as they are. The emitter adds every phase signal of an emission that belongs to no family of `network.ring_fix.pairs` of its constellation, filled copies included, to the signals that step at every emission with a baseline, counted per constellation under "no held family" on the run-end line. Unit test `UnsettledSteps.WithTheUnheldKeyASignalOfNoHeldFamilyStepsAtEveryEmission`.
+
+**Arms** (exe nrf27): `e12_n144`, `l12_n144` with the key; `km_sim` (`kd_sim`'s configuration) for keys absent identical. **Bars:** keys absent identical; against `l12_n144`, the values unchanged, the family signals' counters unchanged, and every other phase signal's counter changing at every emission that has a baseline.
+
+## 67. 2026-11-16: a wait on the flag's raise (read H)
+
+**Why** (the requesting session's read H): section 61.1 puts rule L's added pairs above 0.10 cycle in the first 90 min, where flagged levels still move (E27's phase biases moving 1 to 10 cm per epoch after its flag rose), and the requesting session's DOY 144 hour-2 cost at the user has the same address. A wait: a satellite is flagged only from the (N+1)-th consecutive emission at which rule L puts it in the set (the unsettled steps go on during the wait, the settling step comes at the delayed raise). A stamp and the truth audit; no run, no build.
+
+**How.** `_irdu_grades/scripts_s20/flag_root.py --wait N` stamps rule L with the wait from the run's own traces (the count restarts when the satellite leaves the set or the family's tree is absent; `--wait 0` reproduces the emitted flags exactly, 0 of 40 242 records differ) on `l12_sim`, whose values equal `kq12_sim`'s, for N = 10, 20 and 40 epochs (5, 10 and 20 min at 30 s); `flag_truth.py` grades each stamp's flagged pairs through their MW and NL against truth, as in section 61. Grade `_irdu_grades/nrf_readH.txt`.
+
+**Results** (3 h from 00:30:15; flagged pair-epochs; of them above 0.10 cycle; above 0.25 cycle):
+
+| flagged set | GPS L1C/L2W | Galileo L1C/L5Q |
+|---|---|---|
+| rule B | 96 979; 198; 10 | 79 131; 180; 16 |
+| rule L | 123 111; 894; 13 | 79 656; 256; 16 |
+| rule L, wait 10 | 117 777; 203; 8 | 76 417; 35; 0 |
+| rule L, wait 20 | 112 567; 138; 8 | 73 187; 28; 0 |
+| rule L, wait 40 | 102 204; 103; 8 | 66 736; 19; 0 |
+
+- **By half hour,** the pairs above 0.10 cycle (GPS; Galileo): rule L 28 616 112 0 138 0; 55 167 31 0 0 3. Wait 10: 0 98 2 0 103 0; 2 16 14 0 0 3. Wait 20: 0 34 2 0 102 0; 0 11 14 0 0 3. Wait 40: 0 0 1 0 102 0; 0 2 14 0 0 3.
+- **Above 0.25 cycle,** every wait keeps only G30's declared step at TOW 268 740 (section 61.1: the producer's counter steps there), which a wait on the raise cannot touch. E27's moving level at TOW 263 520 (16 pairs above 0.25 under both rules) falls out at every wait.
+- **Flagged pair-epochs lost against rule L:** GPS 5 334, 10 544 and 20 907 (4.3, 8.6 and 17.0 %), Galileo 3 239, 6 469 and 12 920 (4.1, 8.1 and 16.2 %), most in the second and third half hours. Against rule B, GPS keeps 21, 16 and 5 % more flagged pairs and Galileo 3.4, 7.5 and 15.7 % fewer (rule B's Galileo flags rise in the second half hour and are not delayed).
+
+**Reading.** On the simulator a wait of 10 removes most of rule L's early inconsistency (GPS pairs above 0.10 cycle 894 to 203, about rule B's 198 with 21 % more flagged pairs; Galileo 256 to 35, against rule B's 180) for about 4 % of the flagged pairs; 20 brings them to 138 and 28 for twice that cost; 40 costs a sixth of the pairs for little more. Every wait is better than rule B above 0.25 cycle. The requesting session's N = 20 at the users on both observed days completes the read.

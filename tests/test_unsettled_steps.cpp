@@ -97,3 +97,22 @@ TEST(UnsettledSteps, AFamilySignalMissingCountsAsUnflaggedAndUnarmedNothingSteps
     EXPECT_EQ(ctr(off, "E01", "L1X"), 0);
     EXPECT_THROW(off.setUnsettledSteps({ "E-L1X/L5X" }), std::invalid_argument);
 }
+
+TEST(UnsettledSteps, WithTheUnheldKeyASignalOfNoHeldFamilyStepsAtEveryEmission) {
+    NetworkProductEmitter em(0.05);
+    em.setUnsettledSteps({ "E:L1X/L5X" });
+    em.setUnsettledStepsUnheld(true);
+    SsrCorrectionStore store;
+    em.emitToStore(emission(0.0, { { "E01", { true, true } } }), store);   // baselines: no step
+    EXPECT_EQ(ctr(em, "E01", "L1C"), 0);
+    em.emitToStore(emission(30.0, { { "E01", { true, true } } }), store);
+    em.emitToStore(emission(60.0, { { "E01", { true, true } } }), store);
+    EXPECT_EQ(ctr(em, "E01", "L1C"), 2);   // of no held family: every emission with a baseline
+    EXPECT_EQ(ctr(em, "E01", "L1X"), 0);   // the family's signals as without the key
+    EXPECT_EQ(ctr(em, "E01", "L5X"), 0);
+    const auto& n = em.unsettledStepCounts();
+    ASSERT_EQ(n.count("E:no held family"), 1u);
+    EXPECT_EQ(n.at("E:no held family").first, 2);
+    EXPECT_EQ(n.at("E:no held family").second, 0);
+    EXPECT_EQ(n.count("E:L1X/L5X"), 0u);   // E01's family stayed flagged
+}

@@ -1546,6 +1546,11 @@ namespace GnssProcessor {
             if (rf.unsettled_steps && !rf.settled_flags)
                 throw std::runtime_error("network.ring_fix.unsettled_steps steps the signals the settled flags leave "
                                          "unsettled: it needs network.ring_fix.settled_flags.");
+            rf.unsettled_steps_unheld = jval<bool>(json, "network.ring_fix.unsettled_steps_unheld",
+                                                   "network_ring_fix_unsettled_steps_unheld", false);
+            if (rf.unsettled_steps_unheld && !rf.unsettled_steps)
+                throw std::runtime_error("network.ring_fix.unsettled_steps_unheld extends the unsettled steps to the "
+                                         "signals of no held family: it needs network.ring_fix.unsettled_steps.");
             rf.settled_rule = jval<std::string>(json, "network.ring_fix.settled_rule", "network_ring_fix_settled_rule",
                                                 std::string("root"));
             if (rf.settled_rule != "root" && rf.settled_rule != "largest")

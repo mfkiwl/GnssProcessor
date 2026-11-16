@@ -1480,6 +1480,11 @@ int Application::networkSetup_(NetworkSetupResult& setup) {
         log->warn("Network (ring fix): UNSETTLED STEPS on {}: while a held family's two signals are not both flagged "
                   "settled, both step their phase counters at every emission, and once more when both become "
                   "flagged.", fams);
+        if (nc.ring_fix.unsettled_steps_unheld) {
+            emitter.setUnsettledStepsUnheld(true);
+            log->warn("Network (ring fix): UNSETTLED STEPS OF THE SIGNALS OF NO HELD FAMILY: a phase signal that belongs "
+                      "to none of {} is never settled, so its phase counter steps at every emission.", fams);
+        }
     }
 
     // --- Optional on-disk product serialization -----------------------------

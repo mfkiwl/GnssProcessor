@@ -1957,6 +1957,11 @@ namespace GnssProcessor {
         /// that is not tied to the network's integers is not continuous, and the stream then says so; a user that
         /// restarts an ambiguity at an increment needs no change.  Needs settled_flags.  False (default): no such steps.
         bool unsettled_steps{ false };
+        /// @c network.ring_fix.unsettled_steps_unheld: the unsettled steps of the signals of no held family.  A phase
+        /// signal that belongs to no family of network.ring_fix.pairs is never settled, so its phase discontinuity
+        /// counter steps at every emission (with a baseline), as a held family's unsettled signals do.  Needs
+        /// unsettled_steps.  False (default): such signals are stepped by the other rules only.
+        bool unsettled_steps_unheld{ false };
         /// @c network.ring_fix.settled_rule: which satellites the settled flags flag.  "root" (default): those
         /// reached from their tree's datum receiver through held links and tree edges that entered as held links.
         /// "largest": the largest set of a family's satellites mutually tied through those links, whatever receiver
