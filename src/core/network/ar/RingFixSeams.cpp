@@ -239,9 +239,10 @@ void networkRingFixArm(NetworkRun& run) {
     rf->code_event_window_s = nc.ring_fix.code_event_window_s;
     rf->rehost_keep_carry = nc.ring_fix.rehost_keep_carry;
     if (rf->rehost_keep_carry)
-        log->warn("Network (ring fix): RE-HOST KEEPS THE CARRY: a chain re-host onto a held link takes the held "
-                  "integer, and the moved side's carried entries, receiver and satellite phase biases are carried "
-                  "by the known step instead of released.");
+        log->warn("Network (ring fix): RE-HOST KEEPS THE CARRY: a chain re-host onto a held link whose carry sits "
+                  "on the held integer (within 1e-4 cycle) takes it at a step of 0 and keeps the moved side's "
+                  "carried entries, receiver and satellite phase biases instead of releasing them; a held link "
+                  "whose carry is off its integer is released as before.");
     if (rf->code_event_window_s > 0.0)
         log->warn("Network (ring fix): CODE-EVENT WINDOW {:.0f} s: no decision on a satellite's links within that "
                   "time after its code reference moves or its code datum re-seeds (refusal code_event); links "
@@ -894,7 +895,11 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
 
     // The settled flags (network.ring_fix.settled_flags), after this epoch's decisions: per held family, the
     // satellites reached from their datum receiver through held links and tree edges that entered as held links.
+    // A held link counts only when it is a chord this epoch (one of the links considered above): a held link in a
+    // tracking gap carries no observation and settles nothing.
     if (rf.settled_flags_on) {
+        std::set<RingFixLinkId> considered;
+        for (const RingFixDecideObs& o : links) considered.insert(o.id);
         for (auto it = rf.certified_edges.begin(); it != rf.certified_edges.end();)
             it = tree_arcs.count({std::get<0>(*it), std::get<1>(*it), std::get<2>(*it)}) ? std::next(it)
                                                                                     : rf.certified_edges.erase(it);
@@ -904,7 +909,8 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
         for (const auto& [ck, s1, s2] : rf.pairs) {
             std::vector<std::pair<int, std::string>> certified;
             for (const auto& [id, L] : rf.links)
-                if (L.held && id.sig1 == s1 && id.sig2 == s2 && constellationKey(systemOfSat(id.sat)) == ck)
+                if (L.held && considered.count(id) != 0 && id.sig1 == s1 && id.sig2 == s2
+                    && constellationKey(systemOfSat(id.sat)) == ck)
                     certified.emplace_back(id.station, id.sat);
             for (const auto& [sta, sat, sig] : rf.certified_edges)
                 if (sig == s1 && constellationKey(systemOfSat(sat)) == ck) certified.emplace_back(sta, sat);

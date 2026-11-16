@@ -149,22 +149,6 @@ NetworkSolPrepResult networkSolPrep(NetworkRun& run, const NetworkEpoch& ep, Epo
     // --- Emit -----------------------------------------------------------
     NetworkSolutionEpoch sol = est.toSolutionEpoch(x_s, se.time, iod++,
                                                    /*provider_id=*/0, /*solution_id=*/0);
-    // The settled flags (network.ring_fix.settled_flags): on a record of a held family signal_integer is the ring
-    // fix's settled flag of this epoch and wide_lane_integer 1; on a record of no held family both are 0.
-    if (ctx.carry.ring_fix && ctx.carry.ring_fix->settled_flags_on) {
-        const NetworkRingFix& rf = *ctx.carry.ring_fix;
-        for (auto& s : sol.sats) {
-            for (auto& [signal, npb] : s.phase_bias) {
-                bool held_family = false;
-                const std::string ck_sat = constellationKey(systemOfSat(s.sat));
-                for (const auto& [ck, s1, s2] : rf.pairs)
-                    if (ck == ck_sat && (signal == s1 || signal == s2)) held_family = true;
-                const auto f = rf.settled.find({s.sat, signal});
-                npb.signal_integer    = held_family && f != rf.settled.end() && f->second;
-                npb.wide_lane_integer = held_family ? 1 : 0;
-            }
-        }
-    }
     // Stamp, per emitted satellite, the broadcast-ephemeris version (IODE) that the
     // producer's clock-C0 baseline used, so the consumer applies C0 against the same
     // broadcast clock (getSatelliteClockCorrection pinned to clock_iode) and
@@ -1371,6 +1355,11 @@ NetworkSolPrepResult networkSolPrep(NetworkRun& run, const NetworkEpoch& ep, Epo
         ctx.counters.wire_fill.code  += f.code;
         ++ctx.counters.wire_fill_epochs;
     }
+
+    // --- The settled flags (network.ring_fix.settled_flags) ---------------------------------
+    // After the wire fill, so a filled record carries the flags of its own signal.
+    if (ctx.carry.ring_fix && ctx.carry.ring_fix->settled_flags_on)
+        ringFixStampSettledFlags(sol, *ctx.carry.ring_fix);
 
     return { std::move(sol), std::move(epoch_withheld_consts), global_bump,
              std::move(serialized_consts), std::move(retro_emit_sats) };

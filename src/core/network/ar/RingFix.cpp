@@ -7,6 +7,7 @@
 #include "network/ar/RingFix.hpp"
 #include "network/ar/ArcGraph.hpp"   // arcgraph::Dsu, the components of the settled flags
 #include "common/GnssIdentity.hpp"   // systemOfSat, constellationKey
+#include "products/NetworkProductEmitter.hpp"   // NetworkSolutionEpoch, the settled flags' records
 
 #include <algorithm>
 #include <cmath>
@@ -52,6 +53,20 @@ std::set<std::string> ringFixSettledSats(const std::vector<std::pair<int, std::s
     for (const auto& [sat, root] : root_of_sat)
         if (sat_id.count(sat) != 0 && arcgraph::dsuFind(dsu, idOf(sat)) == arcgraph::dsuFind(dsu, root)) out.insert(sat);
     return out;
+}
+
+void ringFixStampSettledFlags(NetworkSolutionEpoch& sol, const NetworkRingFix& rf) {
+    for (NetworkSatSolution& s : sol.sats) {
+        const std::string ck = constellationKey(systemOfSat(s.sat));
+        for (auto& [signal, npb] : s.phase_bias) {
+            bool held_family = false;
+            for (const auto& [pc, s1, s2] : rf.pairs)
+                if (pc == ck && (signal == s1 || signal == s2)) held_family = true;
+            const auto f = rf.settled.find({s.sat, signal});
+            npb.signal_integer    = held_family && f != rf.settled.end() && f->second;
+            npb.wide_lane_integer = held_family ? 1 : 0;
+        }
+    }
 }
 
 bool ringFixCodeEventOpen(double code_event_s, double window_s, double now_s) {

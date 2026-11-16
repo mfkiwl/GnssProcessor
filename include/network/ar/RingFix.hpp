@@ -785,6 +785,7 @@ struct NetworkRunEndView;   // network/runend/RunEnd.hpp
 struct NetworkRunContext;   // network/state/RunContext.hpp
 struct StationAssembly;     // network/driver/RunTypes.hpp
 struct StationCarryFrame;   // network/assembly/StationBuild.hpp
+struct NetworkSolutionEpoch;   // products/NetworkProductEmitter.hpp
 
 /**
  * @brief Setup builder: builds the run state when @c network.ring_fix.enable is set and reads
@@ -847,6 +848,21 @@ void networkRingFixStationTally(NetworkRunContext& ctx,
  *            est_index_of), ep.events (the chain record, the latch), ep.se.time, ep.clock.
  */
 void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep);
+
+/**
+ * @brief Stamps the settled flags on an epoch's phase-bias records (network.ring_fix.settled_flags).
+ *
+ * On a record of a held family (a pair of @p rf's pairs, matched by constellation and signal)
+ * signal_integer is the satellite signal's settled flag of this epoch (false when the satellite has
+ * none) and wide_lane_integer is 1; on every other record both are 0.  Called last in the solution's
+ * preparation, after every record exists: the wire fill copies a record of the same band and channel
+ * family into a missing modelled signal, and the copy carries the flags of its own signal, not those
+ * of its source.
+ *
+ * @param sol The epoch's solution; every phase-bias record is stamped in place.
+ * @param rf  The ring fix after this epoch's decisions (its pairs and its settled flags).
+ */
+void ringFixStampSettledFlags(NetworkSolutionEpoch& sol, const NetworkRingFix& rf);
 
 /**
  * @brief Run-end report: the ring fix's decisions, holds, releases, refusals and audit.

@@ -3,6 +3,7 @@
 // release cause and the audit.
 
 #include "network/ar/RingFix.hpp"
+#include "products/NetworkProductEmitter.hpp"   // NetworkSolutionEpoch (the settled flags' records)
 
 #include <gtest/gtest.h>
 
@@ -955,4 +956,43 @@ TEST(RingFixSettledFlags, ASatelliteIsSettledOnlyInItsRootsComponentOfHeldAndCer
     EXPECT_TRUE(ringFixSettledSats({}, roots).empty());
     // A satellite whose tree has another datum receiver is settled against that one.
     EXPECT_EQ(ringFixSettledSats({{2, "E03"}}, {{"E03", 2}}), (std::set<std::string>{"E03"}));
+}
+
+TEST(RingFixSettledFlags, TheStampFlagsHeldFamiliesOnlyAndAFilledCopyTakesItsOwnSignalsFlags) {
+    NetworkRingFix rf;
+    rf.pairs.insert({"E", "L1X", "L5X"});
+    rf.pairs.insert({"G", "L1C", "L2W"});
+    rf.settled[{"E07", "L1X"}] = true;
+    rf.settled[{"E07", "L5X"}] = true;
+    rf.settled[{"G04", "L1C"}] = false;
+    rf.settled[{"G04", "L2W"}] = false;
+    NetworkSolutionEpoch sol;
+    NetworkSatSolution e07;
+    e07.sat = "E07";
+    for (const char* sig : {"L1C", "L1X", "L5Q", "L5X"}) e07.phase_bias[sig] = NetworkPhaseBias{};
+    NetworkSatSolution g04;
+    g04.sat = "G04";
+    NetworkPhaseBias l1c;
+    l1c.signal_integer = true;
+    l1c.wide_lane_integer = 1;
+    g04.phase_bias["L1C"] = l1c;
+    g04.phase_bias["L1W"] = l1c;   // the wire fill's copy of L1C, flags included
+    g04.phase_bias["L2W"] = NetworkPhaseBias{};
+    NetworkSatSolution e09;          // a satellite of a held family with no settled flag this epoch
+    e09.sat = "E09";
+    e09.phase_bias["L1X"] = l1c;
+    sol.sats = {e07, g04, e09};
+    ringFixStampSettledFlags(sol, rf);
+    const auto flags = [&](std::size_t i, const char* sig) {
+        const NetworkPhaseBias& b = sol.sats[i].phase_bias.at(sig);
+        return std::make_pair(b.signal_integer, b.wide_lane_integer);
+    };
+    EXPECT_EQ(flags(0, "L1X"), std::make_pair(true, 1));
+    EXPECT_EQ(flags(0, "L5X"), std::make_pair(true, 1));
+    EXPECT_EQ(flags(0, "L1C"), std::make_pair(false, 0));   // Galileo L1C/L5Q is not held
+    EXPECT_EQ(flags(0, "L5Q"), std::make_pair(false, 0));
+    EXPECT_EQ(flags(1, "L1C"), std::make_pair(false, 1));   // held family, not settled this epoch
+    EXPECT_EQ(flags(1, "L2W"), std::make_pair(false, 1));
+    EXPECT_EQ(flags(1, "L1W"), std::make_pair(false, 0));   // the copy of no held family's signal
+    EXPECT_EQ(flags(2, "L1X"), std::make_pair(false, 1));   // no flag recorded: not settled
 }
