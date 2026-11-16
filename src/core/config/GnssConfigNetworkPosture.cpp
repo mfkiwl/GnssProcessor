@@ -356,6 +356,11 @@ namespace GnssProcessor {
               "the ring fix's odds gate at the formal sigma, with the bad-epoch response and remedy (a) "
               "(DOY 144 and DOY 145: the same-start audits and DOY 145's two-start audit read zero)" },
             { nc.ring_fix.enable,
+              nc.ring_fix.max_decisions_per_epoch == 12,
+              Tier::SCOPED, false, "network.ring_fix.max_decisions_per_epoch",
+              "the ring fix decides up to 12 links per epoch in place of 3 (simulator: held link-epochs "
+              "+36 %, 0 wrong; DOY 144: the same-start audit reads zero)" },
+            { nc.ring_fix.enable,
               nc.zwd_event_inflate_m > 0.0,
               Tier::SCOPED, false, "network.zwd_event_inflate_m",
               "keep a receiver's wet delay with 2 cm of sigma added at a slip latch or a RAIM flag instead of "
