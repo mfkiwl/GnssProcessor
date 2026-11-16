@@ -278,6 +278,17 @@ namespace GnssProcessor {
         const double      spacing_s    = r.spacing_s;
         const bool        gps_only     = r.gps_only;
         const bool        gps_gal_only = r.gps_gal_only;
+        // GPS band 1 on L1C before L1W (C1C before C1W and L1C before L1W in the GPS priority list; an absent W entry
+        // counts as after).
+        const auto gpsBand1OnL1C = [this]() {
+            const auto it = signal_priorities_.find("GPS");
+            if (it == signal_priorities_.end()) return false;
+            const std::vector<std::string>& v = it->second;
+            const auto pos = [&v](const char* s) {
+                return static_cast<std::size_t>(std::find(v.begin(), v.end(), s) - v.begin());
+            };
+            return pos("C1C") < pos("C1W") && pos("L1C") < pos("L1W");
+        };
 
         const std::vector<Item> rows = {
             // --- SCOPED tier: the carry couplings ---------------------------------------
@@ -370,6 +381,37 @@ namespace GnssProcessor {
               nc.disc_step_class_tol_cyc == 0.15,
               Tier::SCOPED, false, "network.disc_step_class_tol_cyc",
               "the step declaration's class tolerance, 0.15 cycle" },
+            // --- The flags and the steps of the stream, Galileo C/Q held, GPS on L1C (adopted 2026-11-16, the
+            //     package of card NRF section 70: user replays on DOY 144 and 145 at 46 receivers, none wrong).
+            { nc.ring_fix.enable,
+              nc.ring_fix.settled_flags,
+              Tier::SCOPED, false, "network.ring_fix.settled_flags",
+              "the stream flags the satellite signals tied to the network's integers" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.settled_rule == "largest",
+              Tier::SCOPED, false, "network.ring_fix.settled_rule",
+              "the flags follow the largest set tied by held links (rule L)" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.settled_wait_emissions == 10,
+              Tier::SCOPED, false, "network.ring_fix.settled_wait_emissions",
+              "a satellite's flag rises at its 11th consecutive emission in the set" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.unsettled_steps,
+              Tier::SCOPED, false, "network.ring_fix.unsettled_steps",
+              "an unsettled signal of a held family declares itself at every emission" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.unsettled_steps_unheld,
+              Tier::SCOPED, false, "network.ring_fix.unsettled_steps_unheld",
+              "a signal of no held family declares itself at every emission" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.pairs == std::vector<std::string>{ "E:L1X/L5X", "E:L1C/L5Q", "G:L1C/L2W" },
+              Tier::SCOPED, false, "network.ring_fix.pairs",
+              "Galileo L1X/L5X and L1C/L5Q and GPS L1C/L2W held" },
+            { nc.ring_fix.enable,
+              gpsBand1OnL1C(),
+              Tier::SCOPED, false, "processing.signal_priorities.GPS",
+              "GPS band 1 on L1C before L1W, so that the GPS family spans every receiver; the users take the "
+              "same order" },
             { nc.ring_fix.enable,
               nc.zwd_event_inflate_m > 0.0,
               Tier::SCOPED, false, "network.zwd_event_inflate_m",
