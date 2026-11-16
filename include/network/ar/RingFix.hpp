@@ -87,6 +87,8 @@ inline constexpr int kRingFixMaxDecisionsPerEpoch = 3;
 inline constexpr int kRingFixSettledMinSats = 4;
 /// Rule "largest": another set replaces the incumbent once it holds this many more satellites.
 inline constexpr int kRingFixSettledHysteresis = 2;
+/// The cascade (network.ring_fix.cascade): the largest fraction of the reference-less-third float difference decided.
+inline constexpr double kRingFixCascadeMaxFracCyc = 0.10;
 /// Change L: the bound on the log of the likelihood ratio between the nearest and the next integer,
 /// ln(1e6), for N1 and for the wide lane.
 inline constexpr double kRingFixMinLogOdds = 13.815510557964274;
@@ -253,6 +255,84 @@ struct RingFixLargestSet {
  * @param hysteresis The lead another component needs to replace the incumbent.
  * @return The flagged set, whether it changed identity, and the satellites that changed side then.
  */
+/// One cascade of network.ring_fix.cascade: a held pair and the third signal it carries to.
+struct RingFixCascade {
+    char        letter{0};   ///< The constellation's RINEX letter.
+    std::string ck;          ///< Its constellation key, as the pairs name it ("G").
+    std::string s1, s2;      ///< The held pair's two signals.
+    std::string s3;          ///< The third signal.
+    std::string ref;         ///< The pair's signal the third is decided against (@ref ringFixCascadeReference).
+    std::string name;        ///< "<c>:<s1>/<s2>><s3>".
+};
+
+/// The cascade's decision reading of one link (@ref ringFixCascadeGate).
+struct RingFixCascadeGate {
+    bool      valid{false};    ///< The inputs were finite and the variance not negative.
+    long long d{0};            ///< The reference less the third, rounded (cycles).
+    double    frac{0.0};       ///< |difference - d| (cycles).
+    double    sigma{0.0};      ///< The difference's formal sigma (cycles), unscaled.
+    double    log_odds{0.0};   ///< ln of the likelihood ratio of d and the next integer at the scaled sigma.
+    bool      pass{false};     ///< frac within kRingFixCascadeMaxFracCyc and the odds at kRingFixMinLogOdds or more.
+};
+
+/**
+ * @brief The cascade's gate: the float difference of the reference and the third signal, f_ref - f_3, whose rounding
+ *        is the difference of their integers in the chain's frame (each band's potentials are its root's plus whole
+ *        numbers).  The reference's float sits at its held integer, so the difference carries the third band's
+ *        post-hold float and its extra-wide-lane (or same-frequency) precision.
+ * @param f_ref       The reference's float (cycles).
+ * @param f3          The third signal's float (cycles).
+ * @param q11         The reference's conditional variance (cycles^2).
+ * @param q12         Their conditional covariance (cycles^2).
+ * @param q22         The third's conditional variance (cycles^2).
+ * @param sigma_scale The factor on the formal sigma of the odds (network.ring_fix.sigma_scale).
+ * @return The reading; @c pass decides.
+ */
+RingFixCascadeGate ringFixCascadeGate(double f_ref, double f3, double q11, double q12, double q22, double sigma_scale);
+
+/**
+ * @brief The pair's signal a cascade decides its third signal against: the one on the third's band (a same-frequency
+ *        sibling, GPS L1W from L1C), else the one nearest in frequency (GPS L5 from L2, Galileo E5b from E5a).
+ * @param sat A satellite of the constellation (its letter selects the frequencies).
+ * @param s1  The pair's first signal.
+ * @param s2  The pair's second signal.
+ * @param s3  The third signal.
+ * @return @p s1 or @p s2; empty when a wavelength is unknown.
+ */
+std::string ringFixCascadeReference(const std::string& sat, const std::string& s1, const std::string& s2,
+                                    const std::string& s3);
+
+/// One link of a cascade: the third signal of a link the pair holds.
+struct RingFixCascadeLink {
+    bool      held{false};          ///< Held now.
+    long long n3{0};                ///< The held third-signal integer (cycles).
+    long long n_ref{0};             ///< The reference's held integer at the decision.
+    double    lambda3{0.0};         ///< The third signal's wavelength (m).
+    int       streak{0};            ///< Consecutive epochs that passed with the same integer.
+    long long streak_n3{0};         ///< The streak's integer.
+    double    decided_s{-1.0};      ///< When it was decided (continuous GPS seconds; -1: never).
+    double    stamp3{0.0};          ///< The third signal's carried re-level stamp at the decision.
+    double    absent_since_s{-1.0}; ///< Held and absent since (-1: present).
+    int       monitor_bad{0};       ///< Consecutive epochs with the third signal's residual above the monitor's bound.
+    bool      monitor_trip{false};  ///< The monitor asks for a release at the next epoch.
+    double    released_s{-1.0};     ///< Its last release (-1: never).
+};
+
+/// A cascade's run counters.
+struct RingFixCascadeCounters {
+    long long decided{0};              ///< Decisions.
+    long long held_link_epochs{0};     ///< Link-epochs held in the solve.
+    long long to_tree{0};              ///< Held links that became tree edges of the third band.
+    long long refused_fraction{0};     ///< Link-epochs refused for the fraction.
+    long long refused_odds{0};         ///< Link-epochs refused for the odds.
+    long long refused_persist{0};      ///< Link-epochs that passed and wait for the persistence.
+    long long refused_no_float{0};     ///< Link-epochs without a float.
+    long long truth_right{0};          ///< Simulation: held link-epochs right against truth in the epoch's frame.
+    long long truth_wrong{0};          ///< Simulation: held link-epochs wrong.
+    long long decided_truth_wrong{0};  ///< Simulation: decisions wrong.
+    std::map<std::string, long long> released;   ///< Releases by cause (pair, slip, cut, monitor, gap).
+};
+
 /**
  * @brief The wait on the settled flag's raise (network.ring_fix.settled_wait_emissions): a satellite in this epoch's
  *        set is flagged only from its (wait + 1)-th consecutive emission in the set.
@@ -534,6 +614,23 @@ struct NetworkRingFix {
     int         settled_wait{0};            ///< The wait on the raise, emissions (network.ring_fix.settled_wait_emissions).
     /// The wait: each family's satellites and their consecutive emissions in the set.
     std::map<std::string, std::map<std::string, int>> settled_run;
+    /// The cascades (network.ring_fix.cascade); empty: none.
+    std::vector<RingFixCascade> cascades;
+    /// Each cascade link, keyed as (station, satellite, reference, third signal).
+    std::map<RingFixLinkId, RingFixCascadeLink> cascade_links;
+    /// Each cascade's run counters, by its name.
+    std::map<std::string, RingFixCascadeCounters> cascade_counters;
+    bool        flags_per_family{false};    ///< The settled flags are kept per family (armed with a cascade).
+    /**
+     * @brief The cascade a cascade link belongs to.
+     * @param id The link (station, satellite, reference, third signal).
+     * @return The cascade; null when none.
+     */
+    const RingFixCascade* cascadeOf(const RingFixLinkId& id) const {
+        for (const RingFixCascade& c : cascades)
+            if (!id.sat.empty() && c.letter == id.sat[0] && c.ref == id.sig1 && c.s3 == id.sig2) return &c;
+        return nullptr;
+    }
     bool        form_configured_pairs{false};   ///< The chord table forms every configured family (network.ring_fix.form_configured_pairs).
     /// The configured families by constellation letter, for the chord table (form_configured_pairs only).
     std::map<char, std::vector<std::pair<std::string, std::string>>> configured_pairs;

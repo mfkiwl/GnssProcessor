@@ -249,6 +249,27 @@ void networkRingFixArm(NetworkRun& run) {
                   "on an arc that tracks both its signals, beside the rule that pairs band 1 with the lowest other "
                   "band.");
     }
+    for (const std::string& e : nc.ring_fix.cascade) {
+        RingFixCascade c;
+        c.letter = e[0];
+        c.ck = e.substr(0, 1);
+        c.s1 = e.substr(2, 3);
+        c.s2 = e.substr(6, 3);
+        c.s3 = e.substr(10, 3);
+        c.ref = ringFixCascadeReference(std::string(1, c.letter) + "01", c.s1, c.s2, c.s3);
+        c.name = e;
+        if (c.ref.empty())
+            throw std::runtime_error("network.ring_fix.cascade: '" + e + "' has a signal of unknown wavelength.");
+        log->warn("Network (ring fix): CASCADE {}: on every link the pair holds, {}'s integer is decided against "
+                  "{}'s held integer from their float difference (fraction within {:.2f} cycle, the odds gate, {} "
+                  "epochs), then held; released with the pair, at a slip of {}, across a cut of its band, by the "
+                  "monitor or after a gap.", e, c.s3, c.ref, kRingFixCascadeMaxFracCyc, kRingFixPersistEpochs, c.s3);
+        rf->cascades.push_back(c);
+    }
+    rf->flags_per_family = rf->settled_flags_on && !rf->cascades.empty();
+    if (rf->flags_per_family)
+        log->warn("Network (ring fix): SETTLED FLAGS PER FAMILY: a satellite signal is flagged only while every family "
+                  "it belongs to flags the satellite; a cascade's third signal has the cascade's own family.");
     if (rf->wl_frac_max > 0.0)
         log->warn("Network (ring fix): WIDE-LANE BOUND: a link every other test would decide is refused while its wide "
                   "lane's fraction exceeds {:.3f} cycle (refusal wl_fraction).", rf->wl_frac_max);
@@ -531,6 +552,38 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
         }
     }
 
+    // 5b. The cascade's releases (network.ring_fix.cascade): with its pair, at a slip of its third signal, across a
+    //     cut of the third band, by its monitor, after a gap.  Each re-opens the third signal's carried entry.
+    for (auto& [id, CL] : rf.cascade_links) {
+        if (!CL.held) continue;
+        const RingFixCascade* c = rf.cascadeOf(id);
+        if (c == nullptr) continue;
+        std::string cause;
+        const auto P = rf.links.find(RingFixLinkId{id.station, id.sat, c->s1, c->s2});
+        if (P == rf.links.end() || !P->second.held) cause = "pair";
+        else if (latched.count({id.station, id.sat, c->s3}) != 0) cause = "slip";
+        else if (CL.monitor_trip) cause = "monitor";
+        else if (CL.absent_since_s >= 0.0 && now_s - CL.absent_since_s > rf.max_gap_s) cause = "gap";
+        else
+            for (const RingFixCut& cut : cuts)
+                if (cut.signal == c->s3 && cut.sys == c->ck
+                    && (cut.stations.count(id.station) != 0) != (cut.sats.count(id.sat) != 0)) {
+                    cause = "cut";
+                    break;
+                }
+        if (cause.empty()) continue;
+        CL.held = false;
+        CL.released_s = now_s;
+        CL.monitor_bad = 0;
+        CL.monitor_trip = false;
+        CL.absent_since_s = -1.0;
+        reopen(id, c->s3, CL.stamp3);
+        ++rf.cascade_counters[c->name].released[cause];
+        traces.emitEvent(t, "RINGFIX", "cascade_release", id.sat, nameOf(id.station), std::nullopt, std::nullopt,
+                         cause.c_str(), fmt::format("cascade={} ref={} n_ref={} n3={} held_s={:.0f}", c->name, c->ref,
+                                            CL.n_ref, CL.n3, now_s - CL.decided_s));
+    }
+
     // 6. The old hosts: last epoch's tree edges that are chords of their pair family now.
     if (!rf.prev_targets.empty() && obs_rec != nullptr && obs_rec->armed) {
         std::map<std::pair<int, std::string>, std::map<std::string, double>> prev_of;   // (sta, sat) -> sig -> k
@@ -581,6 +634,8 @@ void networkRingFixHoldEpoch(NetworkRun& run, const NetworkEpoch& ep) {
         rf.table[{id.station, id.sat, id.sig1}] = L.lambda1 * static_cast<double>(L.n1);
         rf.table[{id.station, id.sat, id.sig2}] = L.lambda2 * static_cast<double>(L.n2);
     }
+    for (const auto& [id, CL] : rf.cascade_links)
+        if (CL.held) rf.table[{id.station, id.sat, id.sig2}] = CL.lambda3 * static_cast<double>(CL.n3);
 }
 
 // ---- PASS B: the hold rows ----
@@ -870,6 +925,175 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                              + truth_tok);
     }
 
+    // The cascade (network.ring_fix.cascade): on every link the pair held in this epoch's solve, the third signal's
+    // integer from the reference's held integer and their float difference; the held links' monitor and audit.
+    struct CascadeTraceRow {
+        RingFixLinkId id;
+        std::string state, cause, audit;
+        bool have_float{false};
+        double f_ref{0.0}, f3{0.0};
+        RingFixCascadeGate gate;
+        long long n_ref{0}, n3{0};
+        bool have_n3{false}, have_resid{false};
+        double resid_m{0.0};
+        int streak{0};
+    };
+    std::vector<CascadeTraceRow> cascade_trace;
+    std::set<RingFixLinkId> cascade_seen;
+    if (!rf.cascades.empty()) {
+        const auto trueOf3 = [&](int sta, const std::string& sat, const std::string& sig, long long& n) {
+            const auto cy = cyc_of.find({sta, sat, sig});
+            if (!rf.truth || cy == cyc_of.end()) return false;
+            std::vector<std::tuple<int, std::string, std::string, int>> terms;
+            for (const arcgraph::CycleTerm& term : cy->second->cycle.terms)
+                terms.emplace_back(term.arc.station.index, term.arc.sat.str(), sig, term.coeff);
+            return ringFixTruthFrameInteger(*rf.truth, terms, cy->second->pin_sum_cyc, cy->second->pins_integer,
+                                            now_s, t.tow, n);
+        };
+        for (std::size_t i = 0; i < stations.size() && i < asm_res.size() && i < est_index_of.size(); ++i) {
+            if (est_index_of[i] < 0) continue;
+            const int ii = static_cast<int>(i);
+            const StationAssembly& R = asm_res[i];
+            const ChainAmbColumns cols = chainAmbColumns(R);
+            std::vector<ChainChordRow> rows;
+            std::vector<std::pair<const RingFixCascade*, RingFixLinkId>> meta;
+            for (const RingFixCascade& c : rf.cascades)
+                for (const auto& [pid, P] : rf.links) {
+                    if (pid.station != ii || pid.sig1 != c.s1 || pid.sig2 != c.s2 || !P.held) continue;
+                    if (pid.sat.empty() || pid.sat[0] != c.letter) continue;
+                    const auto hb = held_before.find(pid);
+                    if (hb == held_before.end() || !hb->second) continue;   // held in this epoch's solve
+                    if (cols.count({pid.sat, c.s3}) == 0 || cols.count({pid.sat, c.ref}) == 0) continue;
+                    if (tree_arcs.count({ii, pid.sat, c.s3}) != 0) continue;   // a tree edge: the chain pins it
+                    ChainChordRow r;
+                    r.family = c.name;
+                    r.sig1 = c.ref;
+                    r.sig2 = c.s3;
+                    r.station = ii;
+                    r.station_name = stations[i].name;
+                    r.sat = pid.sat;
+                    rows.push_back(r);
+                    meta.emplace_back(&c, RingFixLinkId{ii, pid.sat, c.ref, c.s3});
+                }
+            if (rows.empty()) continue;
+            std::vector<char> filled;
+            Eigen::VectorXd xr;
+            const bool ok = chainChordFloats(est, static_cast<std::size_t>(est_index_of[i]), x_s, plan.shared_datum,
+                                             cols, rows, filled, &xr);
+            Eigen::VectorXd resid;
+            bool resid_formed = false;
+            for (std::size_t k = 0; k < rows.size(); ++k) {
+                const RingFixCascade& c = *meta[k].first;
+                const RingFixLinkId& id = meta[k].second;
+                cascade_seen.insert(id);
+                RingFixCascadeLink& CL = rf.cascade_links[id];
+                RingFixCascadeCounters& CC = rf.cascade_counters[c.name];
+                const RingFixLink& P = rf.links.at(RingFixLinkId{ii, id.sat, c.s1, c.s2});
+                CascadeTraceRow tr;
+                tr.id = id;
+                tr.n_ref = c.ref == c.s1 ? P.n1 : P.n2;
+                CL.absent_since_s = -1.0;
+                long long truth3 = 0;
+                const bool have_truth = trueOf3(ii, id.sat, c.s3, truth3);
+                tr.have_float = ok && filled[k] != 0;
+                if (tr.have_float) {
+                    tr.f_ref = rows[k].float_cyc_1;
+                    tr.f3 = rows[k].float_cyc_2;
+                    tr.gate = ringFixCascadeGate(tr.f_ref, tr.f3, rows[k].q11, rows[k].q12, rows[k].q22, rf.sigma_scale);
+                }
+                if (CL.held) {
+                    ++CC.held_link_epochs;
+                    tr.state = "held";
+                    tr.n3 = CL.n3;
+                    tr.have_n3 = true;
+                    if (ok && R.A_s.cols() == x_s.size() && xr.size() == R.A_r.cols()) {
+                        if (!resid_formed) {
+                            resid = R.y - R.A_s * x_s - R.A_r * xr;   // post-fit O - C
+                            resid_formed = true;
+                        }
+                        const std::optional<double> r3 = phaseResidual(R, resid, cols.at({id.sat, c.s3}).first);
+                        if (r3) {
+                            tr.have_resid = true;
+                            tr.resid_m = *r3;
+                            if (std::abs(*r3) > kRingFixMonitorBoundM) {
+                                if (++CL.monitor_bad >= kRingFixMonitorEpochs) CL.monitor_trip = true;
+                            } else {
+                                CL.monitor_bad = 0;
+                            }
+                        }
+                    }
+                    if (have_truth) {
+                        ++(truth3 == CL.n3 ? CC.truth_right : CC.truth_wrong);
+                        tr.audit = truth3 == CL.n3 ? "right" : "WRONG";
+                    }
+                } else if (!tr.have_float || !tr.gate.valid) {
+                    CL.streak = 0;
+                    ++CC.refused_no_float;
+                    tr.state = "refused";
+                    tr.cause = "no_float";
+                } else if (!tr.gate.pass) {
+                    CL.streak = 0;
+                    const bool frac_out = tr.gate.frac > kRingFixCascadeMaxFracCyc;
+                    ++(frac_out ? CC.refused_fraction : CC.refused_odds);
+                    tr.state = "refused";
+                    tr.cause = frac_out ? "fraction" : "odds";
+                } else {
+                    const long long n3 = tr.n_ref - tr.gate.d;
+                    if (CL.streak > 0 && CL.streak_n3 == n3) ++CL.streak;
+                    else { CL.streak = 1; CL.streak_n3 = n3; }
+                    tr.n3 = n3;
+                    tr.have_n3 = true;
+                    if (CL.streak >= kRingFixPersistEpochs) {
+                        CL.held = true;
+                        CL.n3 = n3;
+                        CL.n_ref = tr.n_ref;
+                        CL.lambda3 = chainWavelengthM(id.sat, c.s3);
+                        CL.decided_s = now_s;
+                        CL.streak = 0;
+                        CL.monitor_bad = 0;
+                        CL.monitor_trip = false;
+                        const LocalCarry* lc3 = net::getArc(arc_rows, net::ArcTuple{ii, id.sat, c.s3}, &net::ArcState::amb);
+                        CL.stamp3 = lc3 != nullptr ? lc3->relevel_s : 0.0;
+                        ++CC.decided;
+                        if (have_truth && truth3 != n3) ++CC.decided_truth_wrong;
+                        tr.state = "decided";
+                        if (have_truth) tr.audit = truth3 == n3 ? "right" : "WRONG";
+                        traces.emitEvent(t, "RINGFIX", "cascade_hold", id.sat, stations[i].name, tr.gate.sigma,
+                                         kRingFixMaxSigmaCyc, "cascade",
+                                         fmt::format("cascade={} ref={} n_ref={} n3={} d={} frac={:.3f} sigma={:.3f} "
+                                                     "log_odds={:.2f}{}", c.name, c.ref, tr.n_ref, n3, tr.gate.d,
+                                                     tr.gate.frac, tr.gate.sigma, tr.gate.log_odds,
+                                                     have_truth ? (truth3 == n3 ? " truth=right" : " truth=WRONG")
+                                                                : std::string()));
+                    } else {
+                        ++CC.refused_persist;
+                        tr.state = "refused";
+                        tr.cause = "persist";
+                    }
+                }
+                tr.streak = CL.streak;
+                cascade_trace.push_back(std::move(tr));
+            }
+        }
+        // Held cascade links not read this epoch: a tree edge of the third band leaves the held set (the chain pins it),
+        // any other is absent (its gap runs).
+        for (auto& [id, CL] : rf.cascade_links) {
+            if (!CL.held || cascade_seen.count(id) != 0) continue;
+            const RingFixCascade* c = rf.cascadeOf(id);
+            if (c == nullptr) continue;
+            if (tree_arcs.count({id.station, id.sat, id.sig2}) != 0) {
+                CL.held = false;
+                ++rf.cascade_counters[c->name].to_tree;
+                if (rf.settled_flags_on) rf.certified_edges.insert({id.station, id.sat, id.sig2});
+                traces.emitEvent(t, "RINGFIX", "cascade_to_tree", id.sat, stations[static_cast<std::size_t>(id.station)].name,
+                                 std::nullopt, std::nullopt, "chain",
+                                 fmt::format("cascade={} n3={}", c->name, CL.n3));
+                continue;
+            }
+            if (CL.absent_since_s < 0.0) CL.absent_since_s = now_s;
+        }
+    }
+
     // network_ring_fix.csv: one row per pair-family chord.
     if (traces.ring_fix_trace.is_open()) {
         for (const RingFixDecideObs& o : links) {
@@ -910,6 +1134,21 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                 << (o.have_lat2 ? std::to_string(o.lat2) : std::string()) << ','
                 << (o.have_resid ? cellOf(o.resid_if_m, 5) : std::string()) << ',' << L.streak << ','
                 << audit << '\n';
+        }
+        for (const CascadeTraceRow& tr : cascade_trace) {
+            traces.ring_fix_trace
+                << t.week << ',' << fmt::format("{:.3f}", t.tow) << ','
+                << stations[static_cast<std::size_t>(tr.id.station)].name << ',' << tr.id.sat << ',' << tr.id.sig1
+                << ',' << tr.id.sig2 << ",-1,1," << tr.state << ',' << tr.cause << ','
+                << (tr.have_float ? cellOf(tr.f_ref, 4) : std::string()) << ','
+                << (tr.have_float ? cellOf(tr.f3, 4) : std::string()) << ",,"
+                << (tr.gate.valid ? cellOf(tr.gate.sigma, 4) : std::string()) << ",,"
+                << (tr.gate.valid ? std::to_string(tr.gate.d) : std::string()) << ','
+                << (tr.gate.valid ? cellOf(tr.gate.frac, 4) : std::string()) << ','
+                << std::to_string(tr.n_ref) << ','
+                << (tr.have_n3 ? std::to_string(tr.n3) : std::string()) << ",,,"
+                << (tr.have_resid ? cellOf(tr.resid_m, 5) : std::string()) << ',' << tr.streak << ','
+                << tr.audit << '\n';
         }
     }
 
@@ -965,11 +1204,55 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                 (void)root;
                 const bool f = settled.count(sat) != 0;
                 for (const std::string& sig : {s1, s2}) {
-                    now[{sat, sig}] = f;
+                    if (rf.flags_per_family) {
+                        const auto nw = now.find({sat, sig});
+                        if (nw == now.end()) now[{sat, sig}] = f;
+                        else nw->second = nw->second && f;   // flagged only while every family flags it
+                    } else {
+                        now[{sat, sig}] = f;
+                    }
                     ++(f ? rf.counters.settled_signal_epochs : rf.counters.unsettled_signal_epochs);
                     const auto p0 = rf.settled.find({sat, sig});
                     if (p0 != rf.settled.end() && p0->second != f) ++rf.counters.settled_flips;
                 }
+            }
+        }
+        // The cascade families: the third signal's set from its held cascade links and the tree edges of its band that
+        // entered as held cascade links, by the same rule and wait as the pairs'.
+        for (const RingFixCascade& c : rf.cascades) {
+            std::vector<std::pair<int, std::string>> certified;
+            for (const auto& [id, CL] : rf.cascade_links)
+                if (CL.held && cascade_seen.count(id) != 0 && id.sig1 == c.ref && id.sig2 == c.s3
+                    && !id.sat.empty() && id.sat[0] == c.letter)
+                    certified.emplace_back(id.station, id.sat);
+            for (const auto& [sta, sat, sig] : rf.certified_edges)
+                if (sig == c.s3 && !sat.empty() && sat[0] == c.letter) certified.emplace_back(sta, sat);
+            std::map<std::string, int> root_of_sat;
+            for (const ChainEdgeObs& e : obs.edges) {
+                if (e.signal != c.s3 || e.sat.empty() || e.sat[0] != c.letter) continue;
+                const auto r = index_of.find(e.r1);
+                if (r != index_of.end()) root_of_sat[e.sat] = r->second;
+            }
+            std::set<std::string> settled;
+            if (!rf.settled_largest) {
+                settled = ringFixSettledSats(certified, root_of_sat);
+            } else {
+                std::set<std::string> tree_sats;
+                for (const auto& [sat, root] : root_of_sat) { (void)root; tree_sats.insert(sat); }
+                std::set<std::string>& inc = rf.settled_incumbent[c.name];
+                RingFixLargestSet pick = ringFixLargestSettledSet(certified, tree_sats, inc, kRingFixSettledMinSats,
+                                                                  kRingFixSettledHysteresis);
+                inc = pick.sats;
+                settled = std::move(pick.sats);
+            }
+            if (rf.settled_wait > 0) settled = ringFixSettledWait(settled, rf.settled_run[c.name], rf.settled_wait);
+            for (const auto& [sat, root] : root_of_sat) {
+                (void)root;
+                const bool f = settled.count(sat) != 0;
+                const auto nw = now.find({sat, c.s3});
+                if (nw == now.end()) now[{sat, c.s3}] = f;
+                else nw->second = nw->second && f;
+                ++(f ? rf.counters.settled_signal_epochs : rf.counters.unsettled_signal_epochs);
             }
         }
         rf.settled = std::move(now);
@@ -1053,6 +1336,23 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
                                                            "the set held back before the raise.", rf.settled_wait,
                                                            C.settled_wait_held)
                                              : std::string()));
+    for (const RingFixCascade& c : rf.cascades) {
+        const auto it = rf.cascade_counters.find(c.name);
+        const RingFixCascadeCounters CC = it != rf.cascade_counters.end() ? it->second : RingFixCascadeCounters{};
+        std::string rel;
+        long long rel_n = 0;
+        for (const auto& [cause, n] : CC.released) {
+            rel += fmt::format("{}{} {}", rel.empty() ? "" : ", ", cause, n);
+            rel_n += n;
+        }
+        log->warn("Network (ring fix, cascade {} against {}): decided {}; held link-epochs {}; released {}{}; to the "
+                  "tree {}; refused link-epochs: fraction {}, odds {}, persistence {}, no float {}.{}",
+                  c.name, c.ref, CC.decided, CC.held_link_epochs, rel_n, rel.empty() ? std::string() : " (" + rel + ")",
+                  CC.to_tree, CC.refused_fraction, CC.refused_odds, CC.refused_persist, CC.refused_no_float,
+                  rf.truth ? fmt::format("  Truth: held link-epochs right {}, WRONG {}; decisions WRONG {}.",
+                                         CC.truth_right, CC.truth_wrong, CC.decided_truth_wrong)
+                           : std::string());
+    }
     if (rf.rehost_keep_carry)
         log->warn("Network (ring fix, re-hosts onto held links): {} kept with their carries (the new host's carry on "
                   "the held integer); {} released because that carry was 1e-4 cycle or more off the held integer (a "

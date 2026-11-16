@@ -7,6 +7,7 @@
 #include "network/ar/RingFix.hpp"
 #include "network/ar/ArcGraph.hpp"   // arcgraph::Dsu, the components of the settled flags
 #include "common/GnssIdentity.hpp"   // systemOfSat, constellationKey
+#include "network/solve/ChainChordTable.hpp"   // chainWavelengthM (the cascade's reference)
 #include "products/NetworkProductEmitter.hpp"   // NetworkSolutionEpoch, the settled flags' records
 
 #include <algorithm>
@@ -62,6 +63,8 @@ void ringFixStampSettledFlags(NetworkSolutionEpoch& sol, const NetworkRingFix& r
             bool held_family = false;
             for (const auto& [pc, s1, s2] : rf.pairs)
                 if (pc == ck && (signal == s1 || signal == s2)) held_family = true;
+            for (const RingFixCascade& c : rf.cascades)
+                if (c.ck == ck && signal == c.s3) held_family = true;
             const auto f = rf.settled.find({s.sat, signal});
             npb.signal_integer    = held_family && f != rf.settled.end() && f->second;
             npb.wide_lane_integer = held_family ? 1 : 0;
@@ -77,6 +80,33 @@ std::set<std::string> ringFixSettledWait(const std::set<std::string>& in_set, st
     for (const std::string& s : in_set)
         if (++run[s] >= wait + 1) out.insert(s);
     return out;
+}
+
+RingFixCascadeGate ringFixCascadeGate(double f_ref, double f3, double q11, double q12, double q22, double sigma_scale) {
+    RingFixCascadeGate g;
+    if (!(std::isfinite(f_ref) && std::isfinite(f3) && std::isfinite(q11) && std::isfinite(q12) && std::isfinite(q22)))
+        return g;
+    const double var = q11 + q22 - 2.0 * q12;
+    if (!(var >= 0.0)) return g;
+    const double w = f_ref - f3;
+    g.d = std::llround(w);
+    g.frac = std::abs(w - static_cast<double>(g.d));
+    g.sigma = std::sqrt(var);
+    const double s = g.sigma * sigma_scale;
+    g.log_odds = s > 0.0 ? (1.0 - 2.0 * g.frac) / (2.0 * s * s)
+                         : (g.frac < 0.5 ? std::numeric_limits<double>::infinity() : 0.0);
+    g.valid = true;
+    g.pass = g.frac <= kRingFixCascadeMaxFracCyc && g.log_odds >= kRingFixMinLogOdds;
+    return g;
+}
+
+std::string ringFixCascadeReference(const std::string& sat, const std::string& s1, const std::string& s2,
+                                    const std::string& s3) {
+    if (s1.size() >= 2 && s3.size() >= 2 && s1[1] == s3[1]) return s1;
+    if (s2.size() >= 2 && s3.size() >= 2 && s2[1] == s3[1]) return s2;
+    const double l1 = chainWavelengthM(sat, s1), l2 = chainWavelengthM(sat, s2), l3 = chainWavelengthM(sat, s3);
+    if (!(l1 > 0.0 && l2 > 0.0 && l3 > 0.0)) return {};
+    return std::abs(1.0 / l1 - 1.0 / l3) <= std::abs(1.0 / l2 - 1.0 / l3) ? s1 : s2;
 }
 
 RingFixLargestSet ringFixLargestSettledSet(const std::vector<std::pair<int, std::string>>& links,

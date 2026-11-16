@@ -1979,6 +1979,14 @@ namespace GnssProcessor {
         /// lowest-digit signal of another band, so that a family of a third band has chords.  Needs the pairs.  False
         /// (default): that rule alone.
         bool form_configured_pairs{ false };
+        /// @c network.ring_fix.cascade: a third signal's integer from a held pair, as "<constellation>:<signal 1>/
+        /// <signal 2>><signal 3>" ("G:L1C/L2W>L5Q", "E:L1C/L5Q>L7Q", "G:L1C/L2W>L1W").  On every link the pair
+        /// holds, the third signal's integer is decided from the pair's integer of its reference (the pair's signal on
+        /// the third's band, else the one nearest in frequency) and their float difference, then held as the pair's
+        /// are; the third signal is decided by its cascade only, never by a pair.  With it the settled flags are kept
+        /// per family.  Each entry's pair must be one of network.ring_fix.pairs, and its third signal in none of them.
+        /// Empty (default): no cascade.
+        std::vector<std::string> cascade{};
         /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
         /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
         /// latch (the residual monitor's path).  Empty (default): no mask.

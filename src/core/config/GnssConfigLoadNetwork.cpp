@@ -1570,6 +1570,30 @@ namespace GnssProcessor {
             if (rf.form_configured_pairs && rf.pairs.empty())
                 throw std::runtime_error("network.ring_fix.form_configured_pairs forms the families of "
                                          "network.ring_fix.pairs: it needs the pairs.");
+            rf.cascade.clear();
+            if (jhas(json, "network.ring_fix.cascade", "network_ring_fix_cascade")) {
+                const nlohmann::json& arr = jsection(json, "network.ring_fix.cascade", "network_ring_fix_cascade");
+                if (!arr.is_array())
+                    throw std::runtime_error("network.ring_fix.cascade must be an array of \"<constellation>:<signal>/"
+                                             "<signal>><signal>\" entries (\"G:L1C/L2W>L5Q\").");
+                for (const auto& v : arr) {
+                    const std::string e = v.is_string() ? v.get<std::string>() : std::string{};
+                    if (e.size() != 13 || e[1] != ':' || e[5] != '/' || e[9] != '>' || e[2] != 'L' || e[6] != 'L'
+                        || e[10] != 'L')
+                        throw std::runtime_error("network.ring_fix.cascade: '" + e + "' is not of the form "
+                                                 "\"<constellation>:<signal>/<signal>><signal>\" (\"G:L1C/L2W>L5Q\").");
+                    const std::string pair = e.substr(0, 9), s3 = e.substr(10, 3);
+                    if (std::find(rf.pairs.begin(), rf.pairs.end(), pair) == rf.pairs.end())
+                        throw std::runtime_error("network.ring_fix.cascade: '" + e + "' names the pair '" + pair +
+                                                 "', which is not one of network.ring_fix.pairs.");
+                    for (const std::string& p : rf.pairs)
+                        if (p[0] == e[0] && (p.substr(2, 3) == s3 || p.substr(6, 3) == s3))
+                            throw std::runtime_error("network.ring_fix.cascade: '" + e + "' carries to " + s3 +
+                                                     ", a signal of the pair '" + p + "': a third signal is decided "
+                                                     "by its cascade only.");
+                    rf.cascade.push_back(e);
+                }
+            }
             rf.max_decisions_per_epoch = jval<int>(json, "network.ring_fix.max_decisions_per_epoch",
                                                    "network_ring_fix_max_decisions_per_epoch", 3);
             if (rf.max_decisions_per_epoch < 0)

@@ -858,6 +858,7 @@ add_executable(gnss_tests
     tests/network/test_oracle_pin_frame.cpp
     tests/network/test_chain_arc_families.cpp
     tests/network/test_ring_fix.cpp
+    tests/network/test_ring_fix_cascade.cpp
     tests/test_warm_resume_require.cpp
     tests/test_anchor_slip_handover.cpp
     tests/network/test_phase_gate_drop_edge.cpp
