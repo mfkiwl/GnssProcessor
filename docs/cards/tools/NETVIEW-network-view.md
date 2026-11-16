@@ -160,3 +160,39 @@ No C++ was changed. Each item names the smallest default-off export that would c
 3. Lanes of the timeline as in section 4; `PRIORRES` rows dropped (26 501 of 49 888 rows on `_rap_o2s1j_n144`).
 4. One display substitution in raw trace text (a word of the author's list, in three rows of one tier).
 5. Colours: viridis for the share of whole links; a fixed colour per link kind and per event lane.
+
+## 10. 2026-11-15: further choices made without the author, and the open questions
+
+Recorded at the end of the build, for the author to read later; no answer was waited for.
+
+**Choices.**
+
+1. "Tied to the reference only through held links" is read as: every link of the node to a node of fewer hops on
+   the drawn signal's tree is a tree link or a held link. The satellite and receiver panels say yes or no with the
+   count; the node colour is the same share.
+2. The held share is the held rows over all rows of the family in `network_ring_fix.csv` at the epoch, which are
+   the links that are not tree links (the definition of `nrf_reads_mine.py`).
+3. While a link is held, the float in `network_chain_frame.csv` is the solve's value under the hold's tight prior,
+   so its distance from the whole number and its sigma read near zero; the panel marks it "pinned by the hold".
+   The informative part of the narrow-lane chart is the stretch before each decision.
+4. Jumps keep the tolerance (0.15 cycle) and the hops classes (1, 3, 5, 7 and more) of `stream_jumps.py`.
+5. Satellite positions come from the lines of sight and nominal orbit radii; the world map draws straight lines in
+   longitude and latitude (a link across the date line crosses the map).
+6. Event lists hide the lane "other checks" (outlier tests, bookkeeping, the wet-delay carry) behind a link that
+   shows them.
+7. The page draws with its own short script on canvas; no library is vendored. The data block is binary, gzip in
+   base64, opened by the browser's `DecompressionStream` (Chrome, Edge, Firefox and Safari of the last three years).
+8. The timing pair used the config without fixing: the loader refuses the fixing without the tree trace, so the
+   trace cannot be switched off on a fixing run.
+
+**Open questions.**
+
+1. Node colour: the share of whole links towards the reference (as built), or another quantity (the time since the
+   node last moved, alarms, wet delay)?
+2. Build one of the exports of section 7 (floats of a link that is a tree link of one signal only; residuals of
+   links that are not held), or read `network_amb_state.csv` for one link or receiver on request?
+3. Should `arm` stay limited to trace keys? It never switches on the chain datum or the fixing, which change the
+   estimate.
+4. Default output path: `<run folder>/netview.html` (as built) or a separate folder?
+5. BeiDou: the frequency table includes it, but no sample run has a BeiDou tree, so a BeiDou page is untested.
+6. Merging the branch to `main` (no C++, the tool and its documentation only) is the author's call.
