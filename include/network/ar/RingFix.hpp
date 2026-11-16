@@ -390,7 +390,7 @@ struct RingFixCounters {
     long long cuts_held_first{0};         ///< Cuts whose moved side re-attached through a held link the walk took first.
     long long cuts_held_first_zero{0};    ///< Of them, with a known step of 0.
     long long rehost_kept{0};             ///< Chain re-hosts onto a held link kept, not released (rehost_keep_carry).
-    long long rehost_kept_step{0};        ///< Of them, with a non-zero step carried by the shift walk.
+    long long rehost_kept_step{0};        ///< Of them, with a step of 1e-4 cycle or more carried by the shift walk.
     long long rehost_kept_retarget{0};    ///< Of them, whose held integer differs from the rounded carry the draft took.
     long long rehost_not_kept{0};         ///< Re-hosts onto a held link released all the same (no carry, or a step the walk cannot carry).
     long long reattached{0};              ///< Re-attachments through a held link (one per released edge the walk took first).

@@ -1349,6 +1349,10 @@ std::optional<long long> chainHeldInteger(const ChainElection& el, const ChainBa
     return std::nullopt;
 }
 
+/// Remedy (a): a kept re-host's displacement under this many cycles is a step of 0 (the hold's own residual,
+/// micrometres on the simulator and on DOY 145; card NRF section 41).
+constexpr double kRehostKeepZeroStepCyc = 1e-4;
+
 /// The rehost row of the chain's event table, applied to a pin after the as-built draft, the kept row
 /// and the returning row.  A tree edge is released (the cut release of its moved side) when all of
 /// these hold:
@@ -1367,9 +1371,11 @@ std::optional<long long> chainHeldInteger(const ChainElection& el, const ChainBa
 ///
 /// One exception (network.ring_fix.rehost_keep_carry): when the new edge's arc is a link the ring fix holds,
 /// its integer is certified, so the edge takes the held integer and the step is known: the displacement from
-/// the new host's carry, which the shift walk carries into the moved side (a step of 0 moves nothing).  Kept
-/// only where the host's carry exists, the draft's step was known otherwise (no unpinned root handover), and
-/// the walk can carry the step (0, or the carry shift armed); else the edge is released as above.
+/// the new host's carry, which the shift walk carries into the moved side.  A displacement under
+/// kRehostKeepZeroStepCyc is the hold's own residual (the held link's carry sits on its integer to within
+/// micrometres) and is a step of 0: nothing moves, whether or not the carry shift is armed.  Kept only where
+/// the host's carry exists, the draft's step was known otherwise (no unpinned root handover), and the walk can
+/// carry the step (0, or the carry shift armed); else the edge is released as above.
 ///
 /// @param d The draft; replaced in place when the edge is released or kept on a held integer.
 void applyRehostRow(ChainElection& el, const ChainBand& band, std::size_t ri, const std::string& sat,
@@ -1387,7 +1393,8 @@ void applyRehostRow(ChainElection& el, const ChainBand& band, std::size_t ri, co
     if (const std::optional<long long> held = chainHeldInteger(el, band, ri, sat); held.has_value()) {
         NetworkRingFix& rf = *el.ctx.carry.ring_fix;
         const double target = static_cast<double>(*held) * band.lambda_m;
-        const double move   = std::isfinite(d.carry_val) ? target - d.carry_val : 0.0;
+        double move = std::isfinite(d.carry_val) ? target - d.carry_val : 0.0;
+        if (std::abs(move) < kRehostKeepZeroStepCyc * band.lambda_m) move = 0.0;   // the hold's residual: no step
         if (band.lambda_m > 0.0 && std::isfinite(d.carry_val) && d.known && (el.shift_on || move == 0.0)) {
             ++rf.counters.rehost_kept;
             if (move != 0.0) ++rf.counters.rehost_kept_step;

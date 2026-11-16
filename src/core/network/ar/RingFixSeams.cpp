@@ -951,8 +951,9 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
                   C.release_floored, kRingFixReleaseFloorM2,
                   rf.held_first ? " Held first ARMED (network.ring_fix.held_first)." : "");
     if (rf.rehost_keep_carry)
-        log->warn("Network (ring fix, re-hosts onto held links): {} kept with their carries ({} with a non-zero "
-                  "step carried by the shift walk, {} whose held integer differs from the rounded carry); {} "
+        log->warn("Network (ring fix, re-hosts onto held links): {} kept with their carries ({} with a step of "
+                  "1e-4 cycle or more carried by the shift walk, {} whose held integer differs from the rounded "
+                  "carry); {} "
                   "released all the same (no carry at the new host, or a step the walk cannot carry).",
                   C.rehost_kept, C.rehost_kept_step, C.rehost_kept_retarget, C.rehost_not_kept);
     if (!rf.pairs.empty())
