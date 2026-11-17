@@ -6,6 +6,7 @@
 
 #include "network/ar/RingFix.hpp"
 #include "network/ar/ArcGraph.hpp"   // arcgraph::Dsu, the components of the settled flags
+#include "common/Constants.hpp"   // Constants::PI, the re-attachment's circular statistics
 #include "common/GnssIdentity.hpp"   // systemOfSat, constellationKey
 #include "network/solve/ChainChordTable.hpp"   // chainWavelengthM (the cascade's reference)
 #include "products/NetworkProductEmitter.hpp"   // NetworkSolutionEpoch, the settled flags' records
@@ -270,10 +271,7 @@ ringFixRings(const RingFixTree& tree, const std::set<std::pair<std::string, std:
     return out;
 }
 
-namespace {
-
-/// The window test of the damage gate (the header of ringFixDecideStep).
-bool windowOk(const RingFixLink& L, const RingFixDecideObs& o, double last_tree_s, double now_s) {
+bool ringFixWindowOk(const RingFixLink& L, const RingFixDecideObs& o, double last_tree_s, double now_s) {
     if (!o.carry_ok || o.latched) return false;
     if (o.relevel1_s > 0.0 && now_s - o.relevel1_s < kRingFixWindowS) return false;
     if (o.relevel2_s > 0.0 && now_s - o.relevel2_s < kRingFixWindowS) return false;
@@ -283,7 +281,65 @@ bool windowOk(const RingFixLink& L, const RingFixDecideObs& o, double last_tree_
     return true;
 }
 
+namespace {
+
+/// A fraction of a cycle wrapped into [-0.5, 0.5).
+double wrapCycle(double x) { return x - std::floor(x + 0.5); }
+
+/// The circular mean and standard deviation of fractions of a cycle (cycles).
+std::pair<double, double> circularMeanSd(const std::vector<double>& v) {
+    double s = 0.0, c = 0.0;
+    for (double x : v) {
+        s += std::sin(2.0 * Constants::PI * x);
+        c += std::cos(2.0 * Constants::PI * x);
+    }
+    s /= static_cast<double>(v.size());
+    c /= static_cast<double>(v.size());
+    const double r = std::hypot(s, c);
+    return {std::atan2(s, c) / (2.0 * Constants::PI), std::sqrt(std::max(0.0, -2.0 * std::log(std::max(r, 1e-12)))) / (2.0 * Constants::PI)};
+}
+
+/// The median of fractions unwrapped about their circular mean, wrapped back (cycles).
+double circularMedian(const std::vector<double>& v, double mean) {
+    std::vector<double> u;
+    u.reserve(v.size());
+    for (double x : v) u.push_back(wrapCycle(x - mean));
+    std::sort(u.begin(), u.end());
+    const std::size_t n = u.size();
+    const double med = n % 2 == 1 ? u[n / 2] : 0.5 * (u[n / 2 - 1] + u[n / 2]);
+    return wrapCycle(med + mean);
+}
+
 }  // namespace
+
+RingFixReattachPick ringFixReattachChoice(const std::vector<RingFixReattachCand>& cands) {
+    RingFixReattachPick p;
+    p.n = static_cast<int>(cands.size());
+    if (cands.empty()) return p;
+    std::vector<double> fi, fw;
+    for (const RingFixReattachCand& c : cands) {
+        fi.push_back(c.frac_if);
+        fw.push_back(c.frac_wl);
+    }
+    const auto [mi, si] = circularMeanSd(fi);
+    const auto [mw, sw] = circularMeanSd(fw);
+    p.sd_if  = si;
+    p.sd_wl  = sw;
+    p.med_if = circularMedian(fi, mi);
+    p.med_wl = circularMedian(fw, mw);
+    if (p.n < kRingFixReattachMinLinks || si > kRingFixReattachMaxSdIfCyc || sw > kRingFixReattachMaxSdWlCyc) return p;
+    double best = std::numeric_limits<double>::infinity();
+    for (std::size_t i = 0; i < cands.size(); ++i) {
+        const double d = std::abs(wrapCycle(cands[i].frac_if - p.med_if)) / kRingFixReattachMaxSdIfCyc
+                       + std::abs(wrapCycle(cands[i].frac_wl - p.med_wl)) / kRingFixReattachMaxSdWlCyc;
+        if (d < best) {
+            best    = d;
+            p.index = static_cast<int>(i);
+        }
+    }
+    p.ok = p.index >= 0;
+    return p;
+}
 
 std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
                                             const std::vector<RingFixDecideObs>& links,
@@ -416,7 +472,7 @@ std::vector<RingFixEvent> ringFixDecideStep(NetworkRingFix& rf,
             const auto lt = rf.last_tree_s.find({o.id.station, o.id.sat});
             const double last_tree =
                 lt == rf.last_tree_s.end() ? -std::numeric_limits<double>::infinity() : lt->second;
-            if (!windowOk(L, o, last_tree, now_s)) { refuse(RingFixRefuse::Window); continue; }
+            if (!ringFixWindowOk(L, o, last_tree, now_s)) { refuse(RingFixRefuse::Window); continue; }
             if (ringFixCodeEventOpen(o.code_event_s, rf.code_event_window_s, now_s)) {
                 refuse(RingFixRefuse::CodeEvent);
                 continue;

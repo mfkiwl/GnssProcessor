@@ -562,6 +562,23 @@ struct ChainSeeds {
 /// by the topology.  In a pair family an arc is slipped when either band's integer may have
 /// changed, an arc named by both bands' maps is seeded and counted once, and a de-seeded arc
 /// counts once however many maps named it.  In a one-band family every map entry counts.
+/// The arc of a move of the re-attachment of untied satellites (network.ring_fix.reattach) for one satellite on one
+/// band of a family: the chosen station's arc in this election's graph, when it exists and is not slipped on the
+/// family's bands; -1 otherwise (no move, or nothing to take: the incumbent then stays).
+int untiedMoveArc(const ChainElection& el, const ChainGraph& cg, const ChainFamily& fam, const std::string& signal,
+                  const std::string& sat) {
+    const NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->reattach) return -1;
+    const auto m = rf->untied_moves.find({signal, sat});
+    if (m == rf->untied_moves.end() || m->second.station < 0) return -1;
+    const auto ni = cg.slot_of_name.find(el.stations[static_cast<std::size_t>(m->second.station)].name);
+    const auto ki = cg.slot_of_sat.find(sat);
+    if (ni == cg.slot_of_name.end() || ki == cg.slot_of_sat.end()) return -1;
+    const int arc = arcgraph::arcIndex(cg.graph, ni->second, ki->second);
+    if (arc < 0 || arcgraph::slippedIn(cg.graph, arc, fam.mask())) return -1;
+    return arc;
+}
+
 ChainSeeds seedIncumbents(ChainElection& el, const ChainFamily& fam, const ChainGraph& cg) {
     ChainSeeds seeds;
     seeds.band.resize(fam.bands.size());
@@ -590,6 +607,8 @@ ChainSeeds seedIncumbents(ChainElection& el, const ChainFamily& fam, const Chain
             const std::string& sta = *srow.anchor_incumbent;
             if (sid.sat == SatId{} || sid.signal == SignalId{}) continue;   // a row that names no arc
             if (sid.sat.sys != fam.sys || net::signalKey(sid.signal) != band.signal) continue;
+            // The re-attachment (network.ring_fix.reattach): a move's chosen arc replaces the satellite's incumbent.
+            if (untiedMoveArc(el, cg, fam, band.signal, net::satKey(sid.sat)) >= 0) continue;
             seedEdge(sta, net::satKey(sid.sat), true);
         }
         // The receiver-side parents of this band, in station-name order (O3: the order of the
@@ -2363,6 +2382,70 @@ void noteDeseats(ChainElection& el, const ChainFamily& fam, const ChainGraph& cg
 /// family, the band's extension), and the band's remembered datum receiver.  The band loop is
 /// outside the component loop, so a family whose bands' graphs coincide records its rows and
 /// counts band by band, each in the order a one-band family has.
+/// One move of the re-attachment the walk is asked to take on one band (network.ring_fix.reattach).
+struct UntiedLead {
+    std::string       signal;   ///< The band's signal.
+    std::string       sat;      ///< The satellite.
+    int               arc{-1};  ///< The chosen arc in this election's graph.
+    RingFixUntiedMove move;     ///< The move (chosen station, family).
+};
+
+/// The moves of the re-attachment on this family's bands (network.ring_fix.reattach): each chosen arc becomes a lead
+/// arc of rank 1, so the walk takes it as soon as its station is attached, before any incumbent, held or new edge
+/// (the satellite's incumbent was not seeded, seedIncumbents).  A move whose arc is absent or slipped is missed at once,
+/// its incumbent seeded as usual.
+std::vector<UntiedLead> untiedLeads(ChainElection& el, const ChainFamily& fam, const ChainGraph& cg,
+                                    std::vector<char>& lead_rank) {
+    std::vector<UntiedLead> out;
+    NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->reattach || rf->untied_moves.empty()) return out;
+    const std::string ck = constellationKey(fam.sys);
+    for (const ChainBand& band : fam.bands) {
+        for (auto it = rf->untied_moves.begin(); it != rf->untied_moves.end();) {
+            const std::string signal = it->first.first;
+            const std::string sat = it->first.second;
+            if (signal != band.signal || constellationKey(systemOfSat(sat)) != ck) {
+                ++it;
+                continue;
+            }
+            const int arc = untiedMoveArc(el, cg, fam, signal, sat);
+            if (arc < 0) {
+                ++rf->counters.untied_missed;
+                rf->untied_outcomes.push_back({it->second.family, signal, sat, it->second.station, -1, false});
+                it = rf->untied_moves.erase(it);
+                continue;
+            }
+            if (lead_rank.empty()) lead_rank.assign(cg.graph.rows.size(), 0);
+            lead_rank[static_cast<std::size_t>(arc)] = 1;
+            out.push_back({signal, sat, arc, it->second});
+            ++it;
+        }
+    }
+    return out;
+}
+
+/// What the walk did with this family's moves (network.ring_fix.reattach): applied when the satellite's tree edge is
+/// the chosen arc, missed otherwise (it was reached another way first).  The outcomes go to the ring fix's events and
+/// the moves are consumed.
+void tallyUntiedMoves(ChainElection& el, const ChainGraph& cg, const ChainFamilyPlan& plan,
+                      const std::vector<UntiedLead>& leads) {
+    NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    std::map<std::string, int> edge_of;   // satellite -> the arc that attaches it at this election
+    for (const ChainComponentPlan& cp : plan.comps)
+        for (const arcgraph::TreeEdge& e : cp.forest.edges)
+            if (e.attaches_sat) edge_of[cg.satName(cg.graph.row_sat[static_cast<std::size_t>(e.arc)])] = e.arc;
+    for (const UntiedLead& l : leads) {
+        const auto e = edge_of.find(l.sat);
+        const int taken = e == edge_of.end()
+                              ? -1
+                              : static_cast<int>(cg.staIdx(cg.graph.row_station[static_cast<std::size_t>(e->second)]));
+        const bool applied = e != edge_of.end() && e->second == l.arc;
+        ++(applied ? rf->counters.untied_applied : rf->counters.untied_missed);
+        rf->untied_outcomes.push_back({l.move.family, l.signal, l.sat, l.move.station, taken, applied});
+        rf->untied_moves.erase({l.signal, l.sat});
+    }
+}
+
 void electFamily(ChainElection& el, const ChainGroups& groups, const ChainFamily& fam) {
     const ChainGraph cg = buildChainGraph(el, groups, fam);
     const ChainSeeds seeds = seedIncumbents(el, fam, cg);
@@ -2371,8 +2454,11 @@ void electFamily(ChainElection& el, const ChainGroups& groups, const ChainFamily
     for (int s = 0; s < static_cast<int>(cg.graph.stations.size()); ++s)
         station_rank.push_back(chainCoverage(el, fam.sys, cg.staIdx(s)));
     const ChainCascadeLead lead = chainCascadeLead(el, fam, cg, seeds);   // empty unless a cascade's third band
-    const ChainFamilyPlan plan = planChainFamily(el, fam, cg, seeds, chain_rank, station_rank, lead.rank);
+    std::vector<char> lead_rank = lead.rank;
+    const std::vector<UntiedLead> untied = untiedLeads(el, fam, cg, lead_rank);   // network.ring_fix.reattach
+    const ChainFamilyPlan plan = planChainFamily(el, fam, cg, seeds, chain_rank, station_rank, lead_rank);
     if (lead.cascade != nullptr) tallyCascadeTree(el, *lead.cascade, plan);
+    if (!untied.empty()) tallyUntiedMoves(el, cg, plan, untied);
     for (std::size_t b = 0; b < fam.bands.size(); ++b) {
         BandWalk walk(cg);
         if (el.root_row) buildRootKeepers(el, fam.bands[b], plan.comps);

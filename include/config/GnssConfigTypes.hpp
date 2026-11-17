@@ -1989,6 +1989,16 @@ namespace GnssProcessor {
         /// every emission of the wait and take the settling step at the delayed raise.  The rule's own set (rule L's
         /// incumbent and hysteresis) is not changed.  Needs settled_flags when above 0.  0 (default): no wait.
         int settled_wait_emissions{ 0 };
+        /// @c network.ring_fix.reattach: the re-attachment of untied satellites (card NRF part 12, section 102).
+        /// After each epoch's settled flags, a satellite of a held family's tree that is not settled and holds no tie
+        /// (no held chord, no certified tree edge) for 600 s, with at least 3 candidate links whose receivers are in
+        /// the flagged piece (and not below the satellite in its tree), whose floats passed the decision's window with
+        /// an ionosphere-free sigma of at most 0.10 cycle, and whose fractions agree (circular standard deviations at
+        /// most 0.08 cycle ionosphere-free and 0.10 cycle wide lane), has its tree edge moved at the next election
+        /// onto the candidate nearest their medians, in every band of the family: an ordinary re-host (the new host
+        /// link's rounded float, an unknown step); no integer is decided.  Events and run-end counters at both edges.
+        /// Needs settled_flags.  False (default): off, byte-identical.
+        bool reattach{ false };
         /// @c network.ring_fix.form_configured_pairs: the chord table forms every family of network.ring_fix.pairs on
         /// an arc that tracks both its signals, beside the rule that pairs every band-1 signal with the arc's
         /// lowest-digit signal of another band, so that a family of a third band has chords.  Needs the pairs.  False

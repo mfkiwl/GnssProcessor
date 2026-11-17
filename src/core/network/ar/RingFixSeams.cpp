@@ -132,6 +132,154 @@ std::string cellOf(double v, int digits) {
     return fmt::format("{:.{}f}", v, digits);
 }
 
+// ---- The re-attachment of untied satellites (network.ring_fix.reattach) ----
+
+/// The parents in one band's trees this epoch, for the test that a station hangs below a satellite.
+struct BandParents {
+    std::map<std::string, int> sat_parent;       ///< Satellite -> the station its tree edge hangs it under.
+    std::map<int, std::string> station_parent;   ///< Station (roster index) -> the satellite its tree edge hangs it under.
+};
+
+BandParents bandParents(const ChainEpochObs& obs, const std::string& ck, const std::string& signal) {
+    BandParents p;
+    for (const ChainEdgeObs& e : obs.edges) {
+        if (e.signal != signal || constellationKey(systemOfSat(e.sat)) != ck) continue;
+        if (e.sat_is_child) p.sat_parent[e.sat] = e.station;
+        else                p.station_parent[e.station] = e.sat;
+    }
+    return p;
+}
+
+/// Whether a station hangs below a satellite in one band's trees: its chain of parents reaches the satellite.
+bool hangsBelow(const BandParents& p, int station, const std::string& sat) {
+    int cur = station;
+    for (int step = 0; step < 1024; ++step) {
+        const auto ps = p.station_parent.find(cur);
+        if (ps == p.station_parent.end()) return false;
+        if (ps->second == sat) return true;
+        const auto pp = p.sat_parent.find(ps->second);
+        if (pp == p.sat_parent.end()) return false;
+        cur = pp->second;
+    }
+    return false;
+}
+
+/// The election's outcomes of this epoch's moves as events, the applied moves into the watch, and every move the
+/// election did not reach (its family not elected, or the satellite gone) counted as missed.
+void reportUntiedOutcomes(NetworkRingFix& rf, const std::vector<NetStation>& stations, double now_s,
+                          const GnssTime& t, NetworkRunTraces& traces) {
+    const auto name = [&](int s) {
+        return s >= 0 && static_cast<std::size_t>(s) < stations.size() ? stations[static_cast<std::size_t>(s)].name
+                                                                       : std::string("none");
+    };
+    for (const RingFixUntiedOutcome& o : rf.untied_outcomes) {
+        traces.emitEvent(t, "RINGFIX", o.applied ? "reattach_applied" : "reattach_missed", o.sat, name(o.station),
+                         std::nullopt, std::nullopt, "chain",
+                         fmt::format("family={} sig={} taken={}", o.family, o.signal, name(o.taken)));
+        if (o.applied) rf.untied_moved_s[{o.family, o.sat}] = now_s;
+    }
+    rf.untied_outcomes.clear();
+    for (const auto& [key, m] : rf.untied_moves) {
+        ++rf.counters.untied_missed;
+        traces.emitEvent(t, "RINGFIX", "reattach_missed", key.second, name(m.station), std::nullopt, std::nullopt,
+                         "chain", fmt::format("family={} sig={} taken=none (not elected)", m.family, key.first));
+    }
+    rf.untied_moves.clear();
+}
+
+/// One held family's re-attachment at one epoch, after its settled set: the watch on the moved satellites, the
+/// dwell of the untied ones, and a move for every untied satellite past the dwell whose candidates agree.
+/// @p rule_set is the settled rule's set before the wait (its components are the flagged piece), @p flagged the
+/// set after the wait (the stream's flags).
+void requestUntiedMoves(NetworkRingFix& rf, const std::string& ck, const std::string& s1, const std::string& s2,
+                        const std::vector<std::pair<int, std::string>>& certified,
+                        const std::map<std::string, int>& root_of_sat, const std::set<std::string>& rule_set,
+                        const std::set<std::string>& flagged, const std::vector<RingFixDecideObs>& links,
+                        const ChainEpochObs& obs, const std::vector<NetStation>& stations, double now_s,
+                        const GnssTime& t, NetworkRunTraces& traces) {
+    const std::string fam = ck + ":" + s1 + "/" + s2;
+    for (auto it = rf.untied_moved_s.begin(); it != rf.untied_moved_s.end();) {
+        if (it->first.first != fam) {
+            ++it;
+        } else if (flagged.count(it->first.second) != 0) {
+            ++rf.counters.untied_flagged_after;
+            it = rf.untied_moved_s.erase(it);
+        } else if (now_s - it->second >= kRingFixReattachWatchS) {
+            ++rf.counters.untied_unflagged_after;
+            it = rf.untied_moved_s.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    // The ties and the flagged piece over the settled rule's graph (stations keep their roster index as id).
+    arcgraph::Dsu dsu;
+    std::map<std::string, int> sat_id;
+    std::set<int> tied_stations;
+    int next_id = 1 << 20;
+    for (const auto& [sta, sat] : certified) {
+        auto f = sat_id.find(sat);
+        if (f == sat_id.end()) f = sat_id.emplace(sat, next_id++).first;
+        arcgraph::dsuUnite(dsu, sta, f->second);
+        tied_stations.insert(sta);
+    }
+    std::set<int> piece;
+    for (const std::string& s : rule_set)
+        if (const auto f = sat_id.find(s); f != sat_id.end()) piece.insert(arcgraph::dsuFind(dsu, f->second));
+    const auto inPiece = [&](int sta) {
+        return tied_stations.count(sta) != 0 && piece.count(arcgraph::dsuFind(dsu, sta)) != 0;
+    };
+    const BandParents p1 = bandParents(obs, ck, s1);
+    const BandParents p2 = bandParents(obs, ck, s2);
+    for (auto it = rf.untied_since_s.begin(); it != rf.untied_since_s.end();)
+        it = it->first.first == fam && root_of_sat.count(it->first.second) == 0 ? rf.untied_since_s.erase(it)
+                                                                                 : std::next(it);
+    for (const auto& [sat, root] : root_of_sat) {
+        (void)root;
+        const std::pair<std::string, std::string> key{fam, sat};
+        if (rule_set.count(sat) != 0 || sat_id.count(sat) != 0) {   // settled, or tied
+            rf.untied_since_s.erase(key);
+            continue;
+        }
+        auto since = rf.untied_since_s.emplace(key, now_s).first;
+        if (now_s - since->second < kRingFixReattachDwellS) continue;
+        std::vector<RingFixReattachCand> cands;
+        for (const RingFixDecideObs& o : links) {
+            if (o.id.sat != sat || o.id.sig1 != s1 || o.id.sig2 != s2 || !o.have_float) continue;
+            if (!inPiece(o.id.station) || hangsBelow(p1, o.id.station, sat) || hangsBelow(p2, o.id.station, sat))
+                continue;
+            const auto L = rf.links.find(o.id);
+            if (L == rf.links.end()) continue;
+            const auto lt = rf.last_tree_s.find({o.id.station, o.id.sat});
+            const double last_tree =
+                lt == rf.last_tree_s.end() ? -std::numeric_limits<double>::infinity() : lt->second;
+            if (!ringFixWindowOk(L->second, o, last_tree, now_s)) continue;
+            const RingFixGate g = ringFixGate(o.f1, o.f2, o.q11, o.q12, o.q22, o.lambda1, o.lambda2);
+            if (!g.valid || g.sigma_if > kRingFixMaxSigmaCyc) continue;
+            cands.push_back({o.id.station, g.n_if - static_cast<double>(g.n1),
+                             (o.f1 - o.f2) - static_cast<double>(g.wl)});
+        }
+        const RingFixReattachPick pk = ringFixReattachChoice(cands);
+        if (!pk.ok) {
+            ++(pk.n < kRingFixReattachMinLinks ? rf.counters.untied_few : rf.counters.untied_spread);
+            continue;
+        }
+        const int station = cands[static_cast<std::size_t>(pk.index)].station;
+        rf.untied_moves[{s1, sat}] = RingFixUntiedMove{station, fam};
+        rf.untied_moves[{s2, sat}] = RingFixUntiedMove{station, fam};
+        since->second = now_s;   // the dwell restarts after a move
+        ++rf.counters.untied_requests;
+        const auto host = [&](const BandParents& p) {
+            const auto h = p.sat_parent.find(sat);
+            return h == p.sat_parent.end() ? std::string("-") : stations[static_cast<std::size_t>(h->second)].name;
+        };
+        traces.emitEvent(t, "RINGFIX", "reattach", sat, stations[static_cast<std::size_t>(station)].name, std::nullopt,
+                         std::nullopt, "chain",
+                         fmt::format("family={} from={}/{} n={} med_if={:+.3f} med_wl={:+.3f} sd_if={:.3f} "
+                                     "sd_wl={:.3f}",
+                                     fam, host(p1), host(p2), pk.n, pk.med_if, pk.med_wl, pk.sd_if, pk.sd_wl));
+    }
+}
+
 }  // namespace
 
 // ---- Setup ----
@@ -242,6 +390,15 @@ void networkRingFixArm(NetworkRun& run) {
                   "satellites mutually tied through held links and certified tree edges, whatever receiver roots it, "
                   "once it holds {} satellites; the incumbent set is kept until another holds {} more.",
                   kRingFixSettledMinSats, kRingFixSettledHysteresis);
+    rf->reattach = rf->settled_flags_on && nc.ring_fix.reattach;
+    if (rf->reattach)
+        log->warn("Network (ring fix): RE-ATTACHMENT OF UNTIED SATELLITES: a satellite of a family's tree unsettled "
+                  "and without a tie for {:.0f} s, with at least {} candidate links in the flagged piece (window "
+                  "passed, ionosphere-free sigma at most {:.2f} cycle) whose fractions agree (circular spreads at most "
+                  "{:.2f} cycle ionosphere-free, {:.2f} wide lane), has its tree edge moved at the next election onto "
+                  "the candidate nearest their medians, in every band of its family (an ordinary re-host).",
+                  kRingFixReattachDwellS, kRingFixReattachMinLinks, kRingFixMaxSigmaCyc, kRingFixReattachMaxSdIfCyc,
+                  kRingFixReattachMaxSdWlCyc);
     rf->form_configured_pairs = nc.ring_fix.form_configured_pairs && !rf->pairs.empty();
     if (rf->form_configured_pairs) {
         for (const auto& [c, s1, s2] : rf->pairs) rf->configured_pairs[c[0]].emplace_back(s1, s2);
@@ -731,6 +888,7 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
     if (!ctx.carry.ring_fix || obs_rec == nullptr || !obs_rec->armed) return;
     NetworkRingFix& rf = *ctx.carry.ring_fix;
     const ChainEpochObs& obs = *obs_rec;
+    if (rf.reattach) reportUntiedOutcomes(rf, stations, now_s, t, traces);
 
     // The chain this epoch: tree arcs, groups, each group's tree and chords, the roots.
     std::set<net::ArcTuple> tree_arcs;
@@ -1216,11 +1374,15 @@ void networkRingFixDecide(NetworkRun& run, const NetworkEpoch& ep) {
                 inc = pick.sats;
                 settled = std::move(pick.sats);
             }
+            const std::set<std::string> rule_set = rf.reattach ? settled : std::set<std::string>{};
             if (rf.settled_wait > 0) {
                 const std::size_t in_set = settled.size();
                 settled = ringFixSettledWait(settled, rf.settled_run[ck + ":" + s1 + "/" + s2], rf.settled_wait);
                 rf.counters.settled_wait_held += 2 * static_cast<long long>(in_set - settled.size());
             }
+            if (rf.reattach)
+                requestUntiedMoves(rf, ck, s1, s2, certified, root_of_sat, rule_set, settled, links, obs, stations,
+                                   now_s, t, traces);
             for (const auto& [sat, root] : root_of_sat) {
                 (void)root;
                 const bool f = settled.count(sat) != 0;
@@ -1357,6 +1519,13 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
                                                            "the set held back before the raise.", rf.settled_wait,
                                                            C.settled_wait_held)
                                              : std::string()));
+    if (rf.reattach)
+        log->warn("Network (ring fix, re-attachment of untied satellites): {} move(s) requested; {} band-move(s) "
+                  "applied, {} missed; past the {:.0f} s dwell without a move: {} satellite-epoch(s) with fewer than "
+                  "{} candidates, {} whose candidates disagree; moved satellites flagged within {:.0f} s: {}, not: {}.",
+                  C.untied_requests, C.untied_applied, C.untied_missed, kRingFixReattachDwellS, C.untied_few,
+                  kRingFixReattachMinLinks, C.untied_spread, kRingFixReattachWatchS, C.untied_flagged_after,
+                  C.untied_unflagged_after);
     for (const RingFixCascade& c : rf.cascades) {
         const auto it = rf.cascade_counters.find(c.name);
         const RingFixCascadeCounters CC = it != rf.cascade_counters.end() ? it->second : RingFixCascadeCounters{};

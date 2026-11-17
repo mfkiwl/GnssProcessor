@@ -88,6 +88,17 @@ inline constexpr int kRingFixMaxDecisionsPerEpoch = 3;
 inline constexpr int kRingFixSettledMinSats = 4;
 /// Rule "largest": another set replaces the incumbent once it holds this many more satellites.
 inline constexpr int kRingFixSettledHysteresis = 2;
+/// The re-attachment of untied satellites (network.ring_fix.reattach): how long a satellite of a family's tree stays
+/// unsettled and without a tie before its tree edge may move (s).
+inline constexpr double kRingFixReattachDwellS = 600.0;
+/// The re-attachment: the fewest agreeing candidate links of the flagged piece.
+inline constexpr int kRingFixReattachMinLinks = 3;
+/// The re-attachment: the candidates' largest circular standard deviation of the ionosphere-free fraction (cycles).
+inline constexpr double kRingFixReattachMaxSdIfCyc = 0.08;
+/// The re-attachment: the candidates' largest circular standard deviation of the wide-lane fraction (cycles).
+inline constexpr double kRingFixReattachMaxSdWlCyc = 0.10;
+/// The re-attachment: how long after a move its satellite is watched for its flag (s).
+inline constexpr double kRingFixReattachWatchS = 1800.0;
 /// The cascade (network.ring_fix.cascade): the largest fraction of the reference-less-third float difference decided.
 inline constexpr double kRingFixCascadeMaxFracCyc = 0.10;
 /// Change L: the bound on the log of the likelihood ratio between the nearest and the next integer,
@@ -231,6 +242,41 @@ bool ringFixCodeEventOpen(double code_event_s, double window_s, double now_s);
  */
 std::set<std::string> ringFixSettledSats(const std::vector<std::pair<int, std::string>>& links,
                                          const std::map<std::string, int>& root_of_sat);
+
+/// One candidate link of an untied satellite for the re-attachment (network.ring_fix.reattach).
+struct RingFixReattachCand {
+    int    station{-1};   ///< The link's station (roster index).
+    double frac_if{0.0};  ///< Its ionosphere-free fraction in the chain frame, n_if - n1 (cycles of band 1), in [-0.5, 0.5].
+    double frac_wl{0.0};  ///< Its wide-lane fraction, (f1 - f2) - round(f1 - f2) (cycles), in [-0.5, 0.5].
+};
+
+/// The re-attachment's reading of one untied satellite's candidates (@ref ringFixReattachChoice).
+struct RingFixReattachPick {
+    bool   ok{false};      ///< At least kRingFixReattachMinLinks candidates whose fractions agree: a move is chosen.
+    int    index{-1};      ///< The chosen candidate, an index into the candidates (-1 unless @ref ok).
+    int    n{0};           ///< The candidates read.
+    double med_if{0.0};    ///< Their circular median of the ionosphere-free fraction (cycles).
+    double med_wl{0.0};    ///< Their circular median of the wide-lane fraction (cycles).
+    double sd_if{0.0};     ///< Their circular standard deviation of the ionosphere-free fraction (cycles).
+    double sd_wl{0.0};     ///< Their circular standard deviation of the wide-lane fraction (cycles).
+};
+
+/**
+ * @brief The re-attachment's choice for one untied satellite (network.ring_fix.reattach): whether its candidate links
+ *        agree, and which of them carries the satellite.
+ *
+ * The fractions are angles on the circle of one cycle.  For each direction the circular mean m and the circular
+ * standard deviation sqrt(-2 ln R) / (2 pi) are formed (R the mean resultant length); the median is the median of
+ * the fractions unwrapped about m, plus m.  The candidates agree when there are at least
+ * @ref kRingFixReattachMinLinks of them and both spreads are within @ref kRingFixReattachMaxSdIfCyc and
+ * @ref kRingFixReattachMaxSdWlCyc; the chosen candidate is the one with the smallest
+ * |d_if| / kRingFixReattachMaxSdIfCyc + |d_wl| / kRingFixReattachMaxSdWlCyc, d its wrapped distance to the medians,
+ * ties by the lower index.  The median, so that one receiver's code does not set the wide lane for all.
+ *
+ * @param cands The candidates (their order breaks ties).
+ * @return The reading; @c ok false with the spreads filled when the candidates are too few or disagree.
+ */
+RingFixReattachPick ringFixReattachChoice(const std::vector<RingFixReattachCand>& cands);
 
 /// The choice of rule "largest" of the settled flags at one epoch (@ref ringFixLargestSettledSet).
 struct RingFixLargestSet {
@@ -594,6 +640,30 @@ struct RingFixCounters {
     long long mask_epochs{0};             ///< Simulation only: epochs at which the slip mask removed the masked arc's flags.
     long long mask_keys_removed{0};       ///< Of them, the latch, funnel and bridge-pend entries removed.
     long long mask_carries_restored{0};   ///< Of them, carried entries the epoch's drains had changed, restored.
+    // The re-attachment of untied satellites (network.ring_fix.reattach).
+    long long untied_requests{0};         ///< Moves requested (one per satellite and family).
+    long long untied_applied{0};          ///< Band-moves the election applied: the walk took the chosen arc.
+    long long untied_missed{0};           ///< Band-moves not applied: the arc absent, or the satellite reached another way.
+    long long untied_few{0};              ///< Satellite-epochs past the dwell with too few candidates (no move).
+    long long untied_spread{0};           ///< Satellite-epochs past the dwell whose candidates disagree (no move).
+    long long untied_flagged_after{0};    ///< Moved satellites flagged within kRingFixReattachWatchS of the move.
+    long long untied_unflagged_after{0};  ///< Moved satellites not flagged within it.
+};
+
+/// A move of the re-attachment waiting for the next election (network.ring_fix.reattach).
+struct RingFixUntiedMove {
+    int         station{-1};   ///< The chosen station (roster index).
+    std::string family;        ///< Its family, "<constellation key>:<signal 1>/<signal 2>".
+};
+
+/// What one election did with a move of the re-attachment, per band (network.ring_fix.reattach).
+struct RingFixUntiedOutcome {
+    std::string family;        ///< The family, "<constellation key>:<signal 1>/<signal 2>".
+    std::string signal;        ///< The band's signal.
+    std::string sat;           ///< The satellite.
+    int         station{-1};   ///< The chosen station (roster index).
+    int         taken{-1};     ///< The station of the edge the walk took for the satellite (-1: none).
+    bool        applied{false};   ///< The walk took the chosen arc.
 };
 
 struct RingFixTruth;   // below: the fixture's truth (simulation only)
@@ -693,9 +763,34 @@ struct NetworkRingFix {
     double      t0_s{-1.0};                 ///< The first epoch the ring fix saw (continuous GPS seconds).
     /// The previous epoch's tree edges with their targets: (station, satellite, signal) -> target (cycles).
     std::map<std::tuple<int, std::string, std::string>, double> prev_targets;
+    // The re-attachment of untied satellites (network.ring_fix.reattach).
+    bool        reattach{false};            ///< The re-attachment is armed (network.ring_fix.reattach).
+    /// (family, satellite) -> when the satellite became unsettled and untied (continuous GPS seconds).
+    std::map<std::pair<std::string, std::string>, double> untied_since_s;
+    /// The moves for the next election, (signal, satellite) -> the move (both signals of the family carry it).
+    std::map<std::pair<std::string, std::string>, RingFixUntiedMove> untied_moves;
+    /// (family, satellite) -> the epoch of its last applied move, watched for its flag.
+    std::map<std::pair<std::string, std::string>, double> untied_moved_s;
+    /// This epoch's election outcomes of the moves, for the decision seam's events (cleared there).
+    std::vector<RingFixUntiedOutcome> untied_outcomes;
 };
 
 // ---- The steps (pure: unit-tested on hand-built epochs) ---------------------------------------
+
+/**
+ * @brief The window test of the decision (@ref ringFixDecideStep), shared with the re-attachment's candidates.
+ *
+ * Holds when both carried entries exist, neither band is latched, their re-level stamps (when stamped) are at least
+ * @ref kRingFixWindowS old, the link has been a chord with a float for at least the window, was no tree link within
+ * it and was not released within it.
+ *
+ * @param L           The link's state.
+ * @param o           The link's reading this epoch.
+ * @param last_tree_s The last epoch it was a tree link in either band (continuous GPS seconds).
+ * @param now_s       This epoch (continuous GPS seconds).
+ * @return true when the window holds.
+ */
+bool ringFixWindowOk(const RingFixLink& L, const RingFixDecideObs& o, double last_tree_s, double now_s);
 
 /**
  * @brief The decision of one epoch, after the solve.
