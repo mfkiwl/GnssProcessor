@@ -88,8 +88,10 @@ namespace GnssProcessor {
     }
 
     bool MwSlipDetector::hasAnyPhaseLockLoss(const PppObservation& obs) const {
+        // Only the bits of estimation.cycle_slip.lli_slip_mask count (7 by default: any bit).
+        const int mask = config_.getCycleSlipConfig().lli_slip_mask;
         for (const auto& [type, lli] : obs.lli_flags)
-            if (obsTypeOf(type) == ObsType::Phase && lli != 0) return true;
+            if (obsTypeOf(type) == ObsType::Phase && (lli & mask) != 0) return true;
         return false;
     }
 

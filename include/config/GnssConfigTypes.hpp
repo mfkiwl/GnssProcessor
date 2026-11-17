@@ -4268,6 +4268,31 @@ namespace GnssProcessor {
     };
 
     /**
+     * @brief The default primary bands of ambiguity resolution, per constellation
+     *        (@c estimation.ambiguity_resolution.primary_bands).
+     *
+     * The two bands whose signals carry the wide-lane and N_1 step of the resolver,
+     * as two RINEX band digits: the bands the phase-bias products give biases for.
+     * The key is the constellation name as @c systemName spells it.
+     *
+     * @return GPS "12" (L1, L2), Galileo "15" (E1, E5a), BeiDou "26" (B1I, B3I).
+     */
+    inline std::map<std::string, std::string> defaultArPrimaryBands() {
+        return { { "GPS", "12" }, { "Galileo", "15" }, { "BeiDou", "26" } };
+    }
+
+    /**
+     * @brief True when a @c primary_bands entry is two distinct RINEX band digits.
+     *
+     * @param bands The entry's value, for example "12".
+     * @return True for exactly two characters, both ASCII digits, not equal.
+     */
+    inline bool isValidArPrimaryBandPair(const std::string& bands) {
+        return bands.size() == 2 && bands[0] >= '0' && bands[0] <= '9'
+            && bands[1] >= '0' && bands[1] <= '9' && bands[0] != bands[1];
+    }
+
+    /**
      * @brief Enumeration for satellite velocity interpolation.
      *
      * Specifies the type of interpolation used for satellite velocity computation.
@@ -4732,6 +4757,13 @@ namespace GnssProcessor {
         /// unchanged).  Via @c estimation.cycle_slip.turbo_edit_bridge_lli.  See
         /// docs/record/turbo_edit_lli_bridge_design.md.
         bool turbo_edit_bridge_lli = false;
+        /// @c estimation.cycle_slip.lli_slip_mask: which bits of a phase observation's loss-of-lock indicator the
+        /// Melbourne-Wubbena slip detector reads as a loss of lock.  7 (default, the detector as built): any bit.
+        /// 3: bit 0 (lock lost) and bit 1 (half-cycle ambiguity) only.  RINEX 3 defines bit 2 for Galileo as BOC
+        /// tracking of an MBOC-modulated signal, not a loss of lock; a receiver that raises it at every epoch (a
+        /// Leica GR50 on E1) has every Galileo ambiguity reset at every epoch under the default, and its
+        /// between-satellite reference changes at every epoch with it.  The network's slip scan reads bit 0 only.
+        int lli_slip_mask = 7;
         /// WL-settle deferral cap (s) for the gap-bridge joint solve (effective only
         /// with @c turbo_edit, @c turbo_edit_bridge_lli and a non-zero
         /// @c turbo_edit_max_gap_s): when the across-gap GF jump is solid but the MW
@@ -5042,6 +5074,15 @@ namespace GnssProcessor {
         /// constant over hours; 1e-10 allows ~0.05 mm of drift per 30 s.
         double sat_bias{ 1e-10 };
 
+        /// Receiver-satellite code bias (m*m/s): the random-walk spectral density of the
+        /// receiver's deviation from the published satellite code bias, one state per
+        /// (satellite, raw code signal), applied on every predict to every state of the
+        /// family whether or not its satellite is in view.  Single-receiver filter only,
+        /// when @c estimation.estimate_rx_sat_code_bias is on.  The deviation is a hardware
+        /// property of the receiver and satellite pair that is constant over days; 1e-10
+        /// allows about 3 mm in a day.  Config key: @c rx_sat_code_bias_q.
+        double rx_sat_code_bias{ 1e-10 };
+
         /// Per-satellite signal code bias (m*m/s).  Network producer
         /// (PPP_RTK_Network) only: the estimable satellite code-bias (OSB) state
         /// when @c network.estimate_sat_code_bias is on.  Satellite code hardware
@@ -5100,6 +5141,7 @@ namespace GnssProcessor {
         double tropo_gradient{ 1e-3 };     ///< Initial tropo gradient standard deviation (m).
         double phase_clock{ 1e3 };          ///< Initial phase clock offset standard deviation (m).
         double sat_bias{ 10.0 };              ///< Initial per-satellite signal bias standard deviation (m).
+        double rx_sat_code_bias{ 0.15 };      ///< Initial receiver-satellite code-bias standard deviation (m) per signal: the measured per-satellite spread of the float wide lane (0.095 to 0.138 cycle) over 0.773 cycle per metre.  Single-receiver filter only.
         double sat_phase_bias{ 10.0 };        ///< Initial per-satellite signal phase bias standard deviation (m); PPP_RTK_Network only.
         double sat_clock{ 1000.0 };           ///< Initial per-satellite clock standard deviation (m); PPP_RTK_Network only (loose; Δδtˢ against the a-priori product clock).
         double clock_rate{ 1.0 };             ///< Initial receiver clock-rate standard deviation (m/s).

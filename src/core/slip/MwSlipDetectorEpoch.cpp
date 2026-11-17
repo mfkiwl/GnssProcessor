@@ -145,8 +145,9 @@ namespace GnssProcessor {
         // string, not because this path needs it.
         {
             auto& bands = cur_lli_bands_[obs.satellite];
+            const int mask = config_.getCycleSlipConfig().lli_slip_mask;
             for (const auto& [code, lli] : obs.lli_flags)
-                if (obsTypeOf(code) == ObsType::Phase && lli != 0)
+                if (obsTypeOf(code) == ObsType::Phase && (lli & mask) != 0)
                     bands.insert(code);
         }
         for (auto it = mw_stats_.begin(); it != mw_stats_.end(); )
@@ -174,9 +175,10 @@ namespace GnssProcessor {
         // keeps the correct late narrowings available.
         {
             auto& bands = cur_lli_bands_[obs.satellite];
+            const int mask = config_.getCycleSlipConfig().lli_slip_mask;
             for (const auto& [code, lli] : obs.lli_flags)
                 if (obsTypeOf(code) == ObsType::Phase
-                    && !isIonoFreePairLabel(code) && lli != 0)
+                    && !isIonoFreePairLabel(code) && (lli & mask) != 0)
                     bands.insert(code);
             // Readout (§14.10): the LLI epoch has no MWDEC line of its
             // own, so log it explicitly; otherwise the gap reads as
