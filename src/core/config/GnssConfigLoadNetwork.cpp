@@ -1551,6 +1551,24 @@ namespace GnssProcessor {
             if (rf.unsettled_steps_unheld && !rf.unsettled_steps)
                 throw std::runtime_error("network.ring_fix.unsettled_steps_unheld extends the unsettled steps to the "
                                          "signals of no held family: it needs network.ring_fix.unsettled_steps.");
+            // The stream's continuity guard (card NRF part 10, section 89): a flagged level that moves within a run of
+            // constant counters lowers its satellite's flags for a hold; the unsettled steps then step the counters.
+            rf.continuity_guard_cyc = jval<double>(json, "network.ring_fix.continuity_guard_cyc",
+                                                   "network_ring_fix_continuity_guard_cyc", 0.0);
+            if (!(rf.continuity_guard_cyc >= 0.0 && rf.continuity_guard_cyc <= 1.0))
+                throw std::runtime_error("network.ring_fix.continuity_guard_cyc must be in [0, 1] narrow-lane cycles "
+                                         "(0 is off).");
+            if (rf.continuity_guard_cyc > 0.0 && !rf.unsettled_steps)
+                throw std::runtime_error("network.ring_fix.continuity_guard_cyc lowers flags and leaves the counter "
+                                         "steps to the unsettled steps: it needs network.ring_fix.unsettled_steps.");
+            rf.continuity_guard_hold = jval<int>(json, "network.ring_fix.continuity_guard_hold",
+                                                 "network_ring_fix_continuity_guard_hold", 20);
+            if (rf.continuity_guard_hold < 1 || rf.continuity_guard_hold > 1000)
+                throw std::runtime_error("network.ring_fix.continuity_guard_hold must be in [1, 1000] emissions.");
+            rf.continuity_guard_min_run = jval<int>(json, "network.ring_fix.continuity_guard_min_run",
+                                                    "network_ring_fix_continuity_guard_min_run", 4);
+            if (rf.continuity_guard_min_run < 1 || rf.continuity_guard_min_run > 100)
+                throw std::runtime_error("network.ring_fix.continuity_guard_min_run must be in [1, 100] emissions.");
             rf.settled_rule = jval<std::string>(json, "network.ring_fix.settled_rule", "network_ring_fix_settled_rule",
                                                 std::string("root"));
             if (rf.settled_rule != "root" && rf.settled_rule != "largest")

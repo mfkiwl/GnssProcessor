@@ -117,6 +117,63 @@ void NetworkProductEmitter::setUnsettledSteps(const std::vector<std::string>& fa
     us_prev_both_.clear();
 }
 
+bool NetworkProductEmitter::continuityGuardLowered_(const std::string& key) const {
+    if (!(cg_thr_cyc_ > 0.0)) return false;
+    const auto it = cg_hold_left_.find(key);
+    return it != cg_hold_left_.end() && it->second > 0;
+}
+
+void NetworkProductEmitter::continuityGuardRun_(const NetworkSatSolution& s, SsrPhaseBias& rec,
+                                                const std::map<std::string, double>& level,
+                                                const std::set<std::string>& stepped) {
+    for (const UnsettledFamily& f : us_families_) {
+        if (s.sat.empty() || letterOfSat(s.sat) != f.constellation) continue;
+        const auto e1 = rec.bias_per_signal.find(f.p1);
+        const auto e2 = rec.bias_per_signal.find(f.p2);
+        if (e1 == rec.bias_per_signal.end() || e2 == rec.bias_per_signal.end()) continue;
+        const std::string k1 = s.sat + "|" + f.p1, k2 = s.sat + "|" + f.p2;
+        GuardRun& run = cg_run_[f.name + "|" + s.sat];
+        const auto lv = level.find(f.name + "|" + s.sat);
+        // Both flags up as emitted (a held key was lowered in the phase records), a level, and no step of any rule:
+        // the run goes on; otherwise a flagged emission with a level starts a run and any other ends it.
+        const bool flagged = e1->second.signal_integer && e2->second.signal_integer;
+        if (!flagged || lv == level.end()) { run = GuardRun{}; continue; }
+        if (run.n == 0 || stepped.count(k1) != 0 || stepped.count(k2) != 0) { run = GuardRun{ lv->second, 1 }; continue; }
+        ++run.n;
+        if (run.n <= cg_min_run_ || std::abs(lv->second - run.ref) <= cg_thr_cyc_) continue;
+        // The trip: both flags lowered from this emission for the hold, both counters stepped now (the unsettled
+        // steps step them at the lowered emissions after this one, and once more when the flags rise).
+        ++cg_trips_[f.name];
+        for (auto* e : { &e1->second, &e2->second }) {
+            e->signal_integer = false;
+            e->discontinuity_counter = ++disc_counter_[s.sat + "|" + (e == &e1->second ? f.p1 : f.p2)];
+        }
+        cg_lowered_keys_ += 2;
+        cg_lowered_last_.insert(k1);
+        cg_lowered_last_.insert(k2);
+        cg_hold_left_[k1] = cg_hold_;
+        cg_hold_left_[k2] = cg_hold_;
+        run = GuardRun{};
+    }
+}
+
+void NetworkProductEmitter::applyContinuityGuardFlags(NetworkSolutionEpoch& sol) const {
+    if (cg_lowered_last_.empty()) return;
+    for (NetworkSatSolution& s : sol.sats)
+        for (auto& [signal, npb] : s.phase_bias)
+            if (cg_lowered_last_.count(s.sat + "|" + signal) != 0) npb.signal_integer = false;
+}
+
+void NetworkProductEmitter::setContinuityGuard(double thr_cyc, int hold, int min_run) {
+    if (us_families_.empty())
+        throw std::invalid_argument("the continuity guard needs the unsettled steps (setUnsettledSteps first)");
+    if (!(thr_cyc > 0.0) || hold < 1 || min_run < 1)
+        throw std::invalid_argument("the continuity guard needs a threshold > 0, a hold >= 1 and a minimum run >= 1");
+    cg_thr_cyc_ = thr_cyc;
+    cg_hold_    = hold;
+    cg_min_run_ = min_run;
+}
+
 const char* NetworkProductEmitter::discChannelName(DiscChannel c) {
     switch (c) {
         case kDiscChanClock:     return "clk";
@@ -526,6 +583,72 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
         sc_prev_epoch_s_ = epoch_s;
     }
 
+    // --- The continuity guard (network.ring_fix.continuity_guard_cyc), its pre-pass -------------------------------
+    // A key the guard lowered at an earlier emission is lowered at this one while its hold lasts; the unsettled steps
+    // below then see it as not flagged.  The pre-pass forms each family satellite's level (narrow-lane cycles, less
+    // the family's running datum) for the run test after the phase records.  Off (threshold 0), nothing here runs.
+    const bool cg_on = cg_thr_cyc_ > 0.0;
+    const auto cgLowered = [this](const std::string& key) { return continuityGuardLowered_(key); };
+    std::set<std::string> cg_stepped;                                // "sat|signal" keys stepped at this emission
+    std::map<std::string, double> cg_level;                          // "<family>|sat" -> level this emission
+    std::map<std::string, std::pair<double, double>> cg_e_now;       // "<family>|sat" -> (E_1, E_2)
+    cg_lowered_last_.clear();
+    if (cg_on) {
+        constexpr double kC = 299792458.0;
+        for (const UnsettledFamily& f : us_families_) {
+            const std::string c1 = "C" + f.p1.substr(1), c2 = "C" + f.p2.substr(1);
+            double l1 = 0.0, l2 = 0.0;
+            std::map<std::string, std::pair<double, double>> e_now;
+            for (const auto& s : sol.sats) {
+                if (s.sat.empty() || letterOfSat(s.sat) != f.constellation || !s.has_clock) continue;
+                const auto a  = s.phase_bias.find(f.p1);
+                const auto b  = s.phase_bias.find(f.p2);
+                const auto ca = s.code_bias_m.find(c1);
+                const auto cb = s.code_bias_m.find(c2);
+                if (a == s.phase_bias.end() || b == s.phase_bias.end() || ca == s.code_bias_m.end()
+                    || cb == s.code_bias_m.end())
+                    continue;
+                if (l1 <= 0.0) {
+                    l1 = nominalWavelengthM(classifySignalForSat(s.sat, f.p1).band);
+                    l2 = nominalWavelengthM(classifySignalForSat(s.sat, f.p2).band);
+                }
+                if (!(l1 > 0.0 && l2 > 0.0)) continue;
+                const double gam = (l2 / l1) * (l2 / l1);   // (f1 / f2)^2
+                const double x   = (ca->second - cb->second) / (gam - 1.0);
+                e_now[s.sat] = { (s.clock_c0_m - a->second.bias_m + x) / l1,
+                                 (s.clock_c0_m - b->second.bias_m + gam * x) / l2 };
+            }
+            if (e_now.empty()) continue;
+            // The family's datum: the running sum of the median epoch-to-epoch step over the satellites at both
+            // emissions (4 or more), as stream_seg_drift.py forms it from the stream.
+            std::vector<double> d1, d2;
+            for (const auto& [sat, e] : e_now) {
+                const auto p = cg_prev_e_.find(f.name + "|" + sat);
+                if (p == cg_prev_e_.end()) continue;
+                d1.push_back(e.first - p->second.first);
+                d2.push_back(e.second - p->second.second);
+            }
+            auto& dat = cg_datum_[f.name];
+            if (d1.size() >= 4) {
+                const auto median = [](std::vector<double> v) {
+                    const std::size_t m = v.size() / 2;
+                    std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(m), v.end());
+                    const double hi = v[m];
+                    if (v.size() % 2 == 1) return hi;
+                    return 0.5 * (hi + *std::max_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(m)));
+                };
+                dat.first  += median(d1);
+                dat.second += median(d2);
+            }
+            const double f1 = kC / l1, f2 = kC / l2;
+            for (const auto& [sat, e] : e_now) {
+                const std::string k = f.name + "|" + sat;
+                cg_level[k] = (f1 * (e.first - dat.first) - f2 * (e.second - dat.second)) / (f1 - f2);
+                cg_e_now[k] = e;
+            }
+        }
+    }
+
     // --- The unsettled steps (network.ring_fix.unsettled_steps) -----------------------------------------------
     // Per family and satellite, from the flags on this emission's P records: "sat|signal" -> (the family, whether
     // the step is the settling one).  Off (no family), nothing here runs.
@@ -539,7 +662,8 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                 const auto b = s.phase_bias.find(f.p2);
                 if (a == s.phase_bias.end() && b == s.phase_bias.end()) continue;   // the family is not emitted
                 const bool both = a != s.phase_bias.end() && b != s.phase_bias.end() && a->second.signal_integer
-                                  && b->second.signal_integer;
+                                  && b->second.signal_integer && !cgLowered(s.sat + "|" + f.p1)
+                                  && !cgLowered(s.sat + "|" + f.p2);   // a key the continuity guard holds lowered
                 const std::string k = f.name + "|" + s.sat;
                 const auto prev = us_prev_both_.find(k);
                 // An unknown previous state (after a warm resume, which does not carry it) counts as not settled;
@@ -802,6 +926,7 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                 }
                 if (have_baseline && (forced || value_jump || released || unsettled)) {
                     ++ctr;
+                    if (cg_on) cg_stepped.insert(key);   // a step of any rule ends the guard's run
                 }
                 last_phase_bias_[key] = npb.bias_m;
                 if (staleness_horizon_s_ > 0.0) phase_last_seen_s_[key] = epoch_s;
@@ -816,6 +941,13 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                 SsrPhaseBiasEntry entry;
                 entry.bias_m                = npb.bias_m;
                 entry.signal_integer        = npb.signal_integer;
+                if (cgLowered(key)) {   // the continuity guard holds this key's flag lowered
+                    if (entry.signal_integer) {
+                        ++cg_lowered_keys_;
+                        cg_lowered_last_.insert(key);
+                    }
+                    entry.signal_integer = false;
+                }
                 entry.wide_lane_integer     = npb.wide_lane_integer;
                 entry.discontinuity_counter = ctr;
                 entry.sigma_m               = npb.sigma_m;   // 0 unless emit_phase_bias_sigma populated it (gauge-exact); in-process store only, no wire record (B1b)
@@ -829,8 +961,15 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                 entry.hold_generation       = npb.hold_generation;
                 rec.bias_per_signal[signal] = entry;
             }
+            if (cg_on) continuityGuardRun_(s, rec, cg_level, cg_stepped);
             store.pushPhaseBias(rec, header);
         }
+    }
+    // The continuity guard's hold counts emissions; the levels of this emission are the next one's baselines.
+    if (cg_on) {
+        for (auto it = cg_hold_left_.begin(); it != cg_hold_left_.end();)
+            it = (--it->second > 0) ? std::next(it) : cg_hold_left_.erase(it);
+        cg_prev_e_ = std::move(cg_e_now);   // replaced, not merged: a datum step compares consecutive emissions only
     }
 
     // Replace (never merge) the previous-epoch code-bias trackers with this epoch's:

@@ -1485,6 +1485,15 @@ int Application::networkSetup_(NetworkSetupResult& setup) {
             log->warn("Network (ring fix): UNSETTLED STEPS OF THE SIGNALS OF NO HELD FAMILY: a phase signal that belongs "
                       "to none of {} is never settled, so its phase counter steps at every emission.", fams);
         }
+        if (nc.ring_fix.continuity_guard_cyc > 0.0) {
+            emitter.setContinuityGuard(nc.ring_fix.continuity_guard_cyc, nc.ring_fix.continuity_guard_hold,
+                                       nc.ring_fix.continuity_guard_min_run);
+            log->warn("Network (ring fix): CONTINUITY GUARD on {}: a satellite whose level moves more than {:.3f} "
+                      "narrow-lane cycle while both its flags stay up and neither counter steps (after {} emissions "
+                      "of the run) has both flags lowered for {} emissions; the unsettled steps step its counters.",
+                      fams, nc.ring_fix.continuity_guard_cyc, nc.ring_fix.continuity_guard_min_run,
+                      nc.ring_fix.continuity_guard_hold);
+        }
     }
 
     // --- Optional on-disk product serialization -----------------------------

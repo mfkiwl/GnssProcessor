@@ -1962,6 +1962,21 @@ namespace GnssProcessor {
         /// counter steps at every emission (with a baseline), as a held family's unsettled signals do.  Needs
         /// unsettled_steps.  False (default): such signals are stepped by the other rules only.
         bool unsettled_steps_unheld{ false };
+        /// @c network.ring_fix.continuity_guard_cyc: the stream's continuity guard (card NRF part 10, section 89).
+        /// Per held family and satellite the emitter forms the satellite's ionosphere-free level in narrow-lane cycles
+        /// from its own records (clock, the two phase biases, the two code biases of the same bands) less the family's
+        /// running median epoch-to-epoch step; while both signals stay flagged and neither counter steps, a level that
+        /// moves from its value at the run's start by more than this many cycles lowers both flags for
+        /// continuity_guard_hold emissions (the unsettled steps then step both counters).  A user that waits for the
+        /// flags then never fixes on a level the stream calls continuous while it moves.  0 (default): off.  Needs
+        /// unsettled_steps; in (0, 1].
+        double continuity_guard_cyc{ 0.0 };
+        /// @c network.ring_fix.continuity_guard_hold: emissions for which a tripped satellite's two flags stay lowered
+        /// (default 20); in [1, 1000].  Read only with continuity_guard_cyc.
+        int continuity_guard_hold{ 20 };
+        /// @c network.ring_fix.continuity_guard_min_run: emissions of a run before the guard compares its level
+        /// (default 4); in [1, 100].  Read only with continuity_guard_cyc.
+        int continuity_guard_min_run{ 4 };
         /// @c network.ring_fix.settled_rule: which satellites the settled flags flag.  "root" (default): those
         /// reached from their tree's datum receiver through held links and tree edges that entered as held links.
         /// "largest": the largest set of a family's satellites mutually tied through those links, whatever receiver

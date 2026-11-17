@@ -447,6 +447,47 @@ public:
     const std::map<std::string, std::pair<long long, long long>>& unsettledStepCounts() const { return us_counts_; }
 
     /**
+     * @brief Arm the stream's continuity guard (@c network.ring_fix.continuity_guard_cyc).
+     *
+     * Needs @ref setUnsettledSteps (its families are the guarded families).  At every emission, per family and
+     * satellite with both phase signals, both code biases of the same bands (C for L in the signal code) and a clock,
+     * the satellite's level in narrow-lane cycles is formed from the emitted values,
+     * E_b = (c0 - pb_b + mu_b x) / lambda_b with x = ((c0 - cb_1) - (c0 - cb_2)) / (1 - gamma) and mu_1 = 1,
+     * mu_2 = gamma, combined as (f1 E_1 - f2 E_2) / (f1 - f2) after the family's datum is removed (the running sum of
+     * the median epoch-to-epoch step of E_1 and of E_2 over the satellites at both emissions, 4 or more).  A run is a
+     * sequence of emissions with both flags up, neither counter stepped and no hold; after @p min_run emissions of a
+     * run, a level more than @p thr_cyc away from its value at the run's start trips the guard: both flags are lowered
+     * at that emission and the next @p hold - 1, and both counters step at that emission; the unsettled steps then
+     * step them while lowered and once more when the flags rise.  The state is not carried across a warm resume (a
+     * restored emitter starts every run afresh).
+     *
+     * @param thr_cyc Threshold in narrow-lane cycles, > 0.
+     * @param hold    Emissions the flags stay lowered, >= 1.
+     * @param min_run Emissions of a run before its level is compared, >= 1.
+     * @throws std::invalid_argument when the unsettled steps are not armed or a value is out of range.
+     */
+    void setContinuityGuard(double thr_cyc, int hold, int min_run);
+    /// @brief Whether the continuity guard is armed.
+    /// @return True after @ref setContinuityGuard.
+    bool continuityGuardArmed() const { return cg_thr_cyc_ > 0.0; }
+    /// @brief Trips of the continuity guard, per family.
+    /// @return Family name ("E:L1X/L5X") -> trips over the run.
+    const std::map<std::string, long long>& continuityGuardTrips() const { return cg_trips_; }
+    /// @brief Phase-key emissions whose flag the continuity guard lowered, over the run.
+    /// @return The count.
+    long long continuityGuardLoweredKeys() const { return cg_lowered_keys_; }
+    /**
+     * @brief Lower, in @p sol, the flags the continuity guard lowered at the last @ref emitToStore.
+     *
+     * The store's records carry the guard's flags from @ref emitToStore; the product file is written from the
+     * solution record, so the emit seam applies them to @p sol after the emission and before the file write, and the
+     * file then says what the store says.  Nothing happens when the guard is off or lowered nothing.
+     *
+     * @param sol The epoch's solution as emitted (its P-record flags are lowered in place).
+     */
+    void applyContinuityGuardFlags(NetworkSolutionEpoch& sol) const;
+
+    /**
      * @brief Both edges of the phase-visible step test (standing invariant 7), counted over
      *        the emitter's life.  All zero when the test is off.
      */
@@ -876,6 +917,39 @@ private:
     std::map<std::string, std::pair<long long, long long>> us_counts_;  ///< Family -> (unsettled steps, settling steps).
     bool us_unheld_{false};                                           ///< The signals of no held family step too.
     std::map<char, std::string> us_unheld_names_;                      ///< Constellation -> "<c>:no held family".
+
+    // --- The continuity guard (network.ring_fix.continuity_guard_cyc; threshold 0 = off) ------------------------
+    /// One satellite's run under the guard.
+    struct GuardRun {
+        double ref{0.0};   ///< The level (narrow-lane cycles) at the run's first emission.
+        int    n{0};       ///< Emissions of the run; 0 = no run.
+    };
+    double cg_thr_cyc_{0.0};                                         ///< Threshold; 0 = off.
+    int    cg_hold_{20};                                             ///< Emissions a trip lowers the flags.
+    int    cg_min_run_{4};                                           ///< Emissions before a run is compared.
+    std::map<std::string, std::pair<double, double>> cg_prev_e_;     ///< "<family>|sat" -> (E_1, E_2) at the last emission.
+    std::map<std::string, std::pair<double, double>> cg_datum_;      ///< Family -> running datum of E_1 and E_2.
+    std::map<std::string, GuardRun> cg_run_;                         ///< "<family>|sat" -> its run.
+    std::map<std::string, int> cg_hold_left_;                        ///< "sat|signal" -> emissions still lowered.
+    std::map<std::string, long long> cg_trips_;                      ///< Family -> trips.
+    long long cg_lowered_keys_{0};                                   ///< Phase-key emissions lowered by the guard.
+    std::set<std::string> cg_lowered_last_;                          ///< "sat|signal" keys lowered at the last emission.
+    /**
+     * @brief Whether the continuity guard holds a phase key's flag lowered at this emission.
+     * @param key "sat|signal".
+     * @return True while a trip's hold lasts (always false when the guard is off).
+     */
+    bool continuityGuardLowered_(const std::string& key) const;
+    /**
+     * @brief The continuity guard's run test for one satellite, after its phase records are formed: continues,
+     *        restarts or ends each family's run, and on a trip lowers both flags and steps both counters in @p rec.
+     * @param s       The satellite's solution.
+     * @param rec     Its phase-bias record of this emission (modified on a trip).
+     * @param level   "<family>|sat" -> the level of this emission (narrow-lane cycles, less the family's datum).
+     * @param stepped "sat|signal" keys stepped at this emission by any rule.
+     */
+    void continuityGuardRun_(const NetworkSatSolution& s, SsrPhaseBias& rec, const std::map<std::string, double>& level,
+                             const std::set<std::string>& stepped);
     /// One key's phase-visible baseline: its clock less phase bias at its last emission
     /// with a clock, and that emission's product time.
     struct PvBaseline {

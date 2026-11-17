@@ -711,6 +711,7 @@ add_executable(gnss_tests
     tests/test_phase_visible_step_test.cpp
     tests/test_phase_step_class_test.cpp
     tests/test_unsettled_steps.cpp
+    tests/test_continuity_guard.cpp
     tests/test_exact_epoch_time.cpp
     tests/test_consumer_sat_trace.cpp
     tests/test_ar_observe_search.cpp

@@ -439,6 +439,9 @@ void networkEmitStore(NetworkRun& run, const NetworkEpoch& ep, NetworkSolutionEp
     if (emitter.stepClassArmed() && chain_obs != nullptr && chain_obs->armed)
         emitter.markReleasedSignals(chainDeclaredKeys(*chain_obs));
     emitter.emitToStore(sol, network_store);
+    // The continuity guard (network.ring_fix.continuity_guard_cyc) lowered flags in the store's records; the file
+    // below is written from `sol` (written), so the same flags are lowered there.  Off, nothing changes.
+    if (emitter.continuityGuardArmed()) emitter.applyContinuityGuardFlags(sol);
     // The declaration reaches the in-process consumer here, immediately after this
     // epoch's records and before the closed-loop consumer reads them below, which is
     // the position the file replay gives it.
@@ -1203,6 +1206,27 @@ static int networkUnsettledStepsRunEnd(const NetworkRunEndView& v) {
     return 0;
 }
 
+/**
+ * @brief Run-end report: the continuity guard (network.ring_fix.continuity_guard_cyc), its trips per family and the
+ *        phase-key emissions whose flag it lowered.
+ *
+ * Gate: the emitter's guard armed.
+ *
+ * @param v The run at its end (network/runend/RunEnd.hpp).
+ * @return 0 (this report does not set the exit code).
+ */
+static int networkContinuityGuardRunEnd(const NetworkRunEndView& v) {
+    if (!v.setup.emitter || !v.setup.emitter->continuityGuardArmed()) return 0;
+    std::string line;
+    for (const auto& [fam, n] : v.setup.emitter->continuityGuardTrips())
+        line += fmt::format("{}{} {}", line.empty() ? "" : ", ", fam, n);
+    v.log->info("Network (ring fix, continuity guard): trips {}; {} phase-key emission(s) with the flag lowered.",
+                line.empty() ? "none" : line, v.setup.emitter->continuityGuardLoweredKeys());
+    if (line.empty())
+        v.log->info("Network (ring fix, continuity guard): no flagged level moved past the threshold on this run.");
+    return 0;
+}
+
 // Run-end report of this subsystem: its sections in print order (
 // declared in network/emit/EmitStore.hpp).
 int networkEmitStoreRunEnd(const NetworkRunEndView& v) {
@@ -1212,7 +1236,8 @@ int networkEmitStoreRunEnd(const NetworkRunEndView& v) {
         networkProductContractRunEnd,
         networkPhaseVisibleStepRunEnd,
         networkStepClassRunEnd,
-        networkUnsettledStepsRunEnd
+        networkUnsettledStepsRunEnd,
+        networkContinuityGuardRunEnd
     });
 }
 
