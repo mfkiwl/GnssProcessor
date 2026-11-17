@@ -995,6 +995,10 @@ namespace GnssProcessor {
         // has been parsed.
         run_smoother_ = jval<bool>(json, "processing.run_smoother", "run_smoother", false);
 
+        // The exact calendar conversion (TimeUtils::setExactCalendarTime): applied process-wide by
+        // Application::initLoggingAndConfig right after the load, before any file is parsed.
+        exact_epoch_time_ = jval<bool>(json, "processing.exact_epoch_time", "exact_epoch_time", false);
+
         // Cross-session normal-equation export (item #13B): post-processing
         // only.  Real-time guard is applied by loadAppModeAndRealtimeSection_,
         // once app_mode_ has been parsed.

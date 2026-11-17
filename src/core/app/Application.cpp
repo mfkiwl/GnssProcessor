@@ -32,6 +32,7 @@
 #include "app/PppPipelineWork.hpp"   // PppEpochWork, PppRunEndView: the spine's working values
 #include "products/PathResolver.hpp"
 #include "products/ProductCache.hpp"
+#include "math/TimeUtils.hpp"     // the calendar conversion's rule (processing.exact_epoch_time)
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -66,6 +67,14 @@ bool Application::initLoggingAndConfig() {
         log_manager_.getLogger("main_log")->error("Failed to load JSON configuration from {}", config_path_.string());
         return false;
     }
+
+    // The calendar conversion's rule, process-wide, before any file is parsed (processing.exact_epoch_time).
+    TimeUtils::setExactCalendarTime(config_.exactEpochTime());
+    if (config_.exactEpochTime())
+        log_manager_.getLogger("main_log")->warn(
+            "Exact epoch time ON (processing.exact_epoch_time): calendar dates and times (observation epochs, product "
+            "epochs, the navigation message's toc) convert to GPS time from whole days and seconds of the day, not "
+            "through a double-precision Julian date (up to 20 microseconds of rounding, wrapping every 675 s).");
 
     // Apply logger enable/disable flags from the logging config section.
     {

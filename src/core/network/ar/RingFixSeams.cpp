@@ -271,6 +271,11 @@ void networkRingFixArm(NetworkRun& run) {
         log->warn("Network (ring fix): CASCADE TREE: a cascade's third band grows its tree on its pair's forest: the "
                   "chain's walk takes first the tree edges of both of the pair's bands, then the links the pair holds, "
                   "then the band's own incumbents and new edges.");
+    rf->cascade_rehost_keep = nc.ring_fix.cascade_rehost_keep && !rf->cascades.empty();
+    if (rf->cascade_rehost_keep)
+        log->warn("Network (ring fix): CASCADE RE-HOST KEEPS THE CARRY: a chain re-host of a third band onto a link the "
+                  "cascade holds, whose carry sits on the held integer, takes it at a step of 0 and keeps the moved "
+                  "side's carries; the held cascade links across it stay held.");
     rf->cascade_log = nc.ring_fix.cascade_log && !rf->cascades.empty();
     if (rf->cascade_log)
         log->warn("Network (ring fix): CASCADE LOG: the cascades decide and trace, never hold: a link that passes the "
@@ -1362,7 +1367,7 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
             rel_n += n;
         }
         log->warn("Network (ring fix, cascade {} against {}): decided {}; held link-epochs {}; released {}{}; to the "
-                  "tree {}; refused link-epochs: fraction {}, odds {}, persistence {}, no float {}.{}{}{}",
+                  "tree {}; refused link-epochs: fraction {}, odds {}, persistence {}, no float {}.{}{}{}{}",
                   c.name, c.ref, CC.decided, CC.held_link_epochs, rel_n, rel.empty() ? std::string() : " (" + rel + ")",
                   CC.to_tree, CC.refused_fraction, CC.refused_odds, CC.refused_persist, CC.refused_no_float,
                   rf.truth ? fmt::format("  Truth: held link-epochs right {}, WRONG {}; decisions WRONG {}.",
@@ -1375,7 +1380,12 @@ int networkRingFixRunEnd(const NetworkRunEndView& v) {
                   rf.cascade_log ? fmt::format("  Log mode: {} would-hold link-epochs, none held{}.", CC.would_hold,
                                                rf.truth ? fmt::format(" (truth: WRONG {})", CC.would_truth_wrong)
                                                         : std::string())
-                                 : std::string());
+                                 : std::string(),
+                  rf.cascade_rehost_keep
+                      ? fmt::format("  Re-hosts of {} onto held links: {} kept at the held integer, {} released off "
+                                    "it, {} released for another cause.", c.s3, CC.rehost_kept, CC.rehost_off_integer,
+                                    CC.rehost_not_kept)
+                      : std::string());
     }
     if (rf.rehost_keep_carry)
         log->warn("Network (ring fix, re-hosts onto held links): {} kept with their carries (the new host's carry on "

@@ -1999,6 +1999,12 @@ namespace GnssProcessor {
         /// simulator) and never enters the hold table, so the third signal stays float.  For a read of the would-be
         /// decisions on observed data.  Needs network.ring_fix.cascade.  False (default): the cascades hold.
         bool cascade_log{ false };
+        /// @c network.ring_fix.cascade_rehost_keep: a chain re-host of a cascade's third band onto a link the cascade
+        /// holds, whose third-signal carry sits on the held integer, takes it at a step of 0 and keeps the moved side's
+        /// carries, as network.ring_fix.rehost_keep_carry does for the pairs' held links; the held cascade links across
+        /// it are not released.  Needs network.ring_fix.cascade.  False (default): every re-host of a third band is a
+        /// cut release.
+        bool cascade_rehost_keep{ false };
         /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
         /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
         /// latch (the residual monitor's path).  Empty (default): no mask.

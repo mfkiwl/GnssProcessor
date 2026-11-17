@@ -51,6 +51,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
@@ -318,6 +319,18 @@ std::string ringFixCascadeReference(const std::string& sat, const std::string& s
 int ringFixCascadeLeadRank(bool pair_tree_edge, bool pair_held, bool third_incumbent, bool third_slipped,
                            bool eligible_host);
 
+struct RingFixCascadeLink;
+
+/**
+ * @brief The third-signal integer a chain re-host of the third band onto a cascade link may keep
+ *        (network.ring_fix.cascade_rehost_keep), as a re-host onto a pair's held link keeps the pair's integer.
+ * @param link        The cascade link the new tree edge lies on.
+ * @param ref_freed   The link's reference signal is in this epoch's free-epoch latch.
+ * @param third_freed The link's third signal is in this epoch's free-epoch latch.
+ * @return The held integer when the link is held, its monitor not tripped and neither signal freed; none otherwise.
+ */
+std::optional<long long> ringFixCascadeKeepInteger(const RingFixCascadeLink& link, bool ref_freed, bool third_freed);
+
 /// One link of a cascade: the third signal of a link the pair holds.
 struct RingFixCascadeLink {
     bool      held{false};          ///< Held now.
@@ -356,6 +369,10 @@ struct RingFixCascadeCounters {
     // The log mode (network.ring_fix.cascade_log).
     long long would_hold{0};           ///< Link-epochs that passed the gate for the persistence, traced, not held.
     long long would_truth_wrong{0};    ///< Simulation: of them, wrong against truth in the epoch's frame.
+    // Re-hosts of the third band onto held cascade links (network.ring_fix.cascade_rehost_keep).
+    long long rehost_kept{0};          ///< Kept at the held integer (the new host's carry on it), a step of 0.
+    long long rehost_off_integer{0};   ///< Released: the new host's carry 1e-4 cycle or more off the held integer.
+    long long rehost_not_kept{0};      ///< Released for another cause (no carry at the new host, an unknown draft step).
 };
 
 /**
@@ -648,6 +665,7 @@ struct NetworkRingFix {
     bool        flags_per_family{false};    ///< The settled flags are kept per family (armed with a cascade).
     bool        cascade_tree{false};        ///< A cascade's third band grows its tree on its pair's forest (network.ring_fix.cascade_tree).
     bool        cascade_log{false};         ///< The cascades decide and trace, never hold (network.ring_fix.cascade_log).
+    bool        cascade_rehost_keep{false}; ///< A re-host of a third band onto a held cascade link keeps its integer (network.ring_fix.cascade_rehost_keep).
     /**
      * @brief The cascade a cascade link belongs to.
      * @param id The link (station, satellite, reference, third signal).

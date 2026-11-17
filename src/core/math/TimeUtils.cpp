@@ -39,6 +39,33 @@ namespace GnssProcessor {
         // leap-second insertion does not require a rebuild.  Atomic: set on the
         // main thread, read from the receive and processing threads (RTB-1(c)).
         std::atomic<double> g_leap_seconds_override{ TimeUtils::LEAP_SECONDS };
+
+        // The calendar conversion's rule (processing.exact_epoch_time): false keeps the Julian-date round trip as
+        // built.  Atomic: set once on the main thread before any file is parsed, read by every parser.
+        std::atomic<bool> g_exact_calendar_time{ false };
+
+        /// The GPS time of whole days since the GPS epoch plus seconds of that day, without forming a Julian date:
+        /// the time of week is at most a few weeks of seconds, so a double holds it to a fraction of a nanosecond.
+        GnssTime gpsTimeOfDays(long long days, double seconds_of_day) {
+            long long week = days >= 0 ? days / 7 : -((-days + 6) / 7);
+            double tow = static_cast<double>(days - 7 * week) * TimeUtils::SECONDS_IN_DAY + seconds_of_day;
+            while (tow >= static_cast<double>(TimeUtils::SECONDS_IN_WEEK)) {
+                tow -= static_cast<double>(TimeUtils::SECONDS_IN_WEEK);
+                ++week;
+            }
+            while (tow < 0.0) {
+                tow += static_cast<double>(TimeUtils::SECONDS_IN_WEEK);
+                --week;
+            }
+            return GnssTime{ static_cast<int>(week), tow };
+        }
+
+        /// Whole days from the GPS epoch to 0h of a calendar date: both Julian dates are half-integers, so their
+        /// difference is exact.
+        long long gpsDaysOfDate(int year, int month, int day) {
+            const double jd0 = TimeUtils::gregorianToJulianDay(year, month, day, 0, 0, 0.0);
+            return std::llround(jd0 - TimeUtils::GPS_EPOCH_JD);
+        }
     } // namespace
 
     void TimeUtils::setLeapSecondsOverride(double leap_s) {
@@ -47,6 +74,14 @@ namespace GnssProcessor {
 
     double TimeUtils::currentLeapSeconds() {
         return g_leap_seconds_override.load(std::memory_order_relaxed);
+    }
+
+    void TimeUtils::setExactCalendarTime(bool on) {
+        g_exact_calendar_time.store(on, std::memory_order_relaxed);
+    }
+
+    bool TimeUtils::exactCalendarTime() {
+        return g_exact_calendar_time.load(std::memory_order_relaxed);
     }
 
     // =================================================================
@@ -203,8 +238,10 @@ namespace GnssProcessor {
             throw std::invalid_argument("Invalid Gregorian date");
 
         double jd_utc = gregorianToJulianDay(year, month, day, hour, minute, second);
-        double utc_since_epoch = (jd_utc - GPS_EPOCH_JD) * SECONDS_IN_DAY;
         double ls = leapSecondsAtUtcJd(jd_utc);
+        if (exactCalendarTime())
+            return gpsTimeOfDays(gpsDaysOfDate(year, month, day), hour * 3600.0 + minute * 60.0 + second + ls);
+        double utc_since_epoch = (jd_utc - GPS_EPOCH_JD) * SECONDS_IN_DAY;
         return gpsSecondsToGnssTime(utc_since_epoch + ls);
     }
 
@@ -213,6 +250,8 @@ namespace GnssProcessor {
         if (!isValidGregorianDate(year, month, day, hour, minute, second))
             throw std::invalid_argument("Invalid Gregorian date");
 
+        if (exactCalendarTime())
+            return gpsTimeOfDays(gpsDaysOfDate(year, month, day), hour * 3600.0 + minute * 60.0 + second);
         double jd_gps = gregorianToJulianDay(year, month, day, hour, minute, second);
         double gps_seconds = (jd_gps - GPS_EPOCH_JD) * SECONDS_IN_DAY;
         return gpsSecondsToGnssTime(gps_seconds);

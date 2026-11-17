@@ -63,8 +63,11 @@ void ringFixStampSettledFlags(NetworkSolutionEpoch& sol, const NetworkRingFix& r
             bool held_family = false;
             for (const auto& [pc, s1, s2] : rf.pairs)
                 if (pc == ck && (signal == s1 || signal == s2)) held_family = true;
-            for (const RingFixCascade& c : rf.cascades)
-                if (c.ck == ck && signal == c.s3) held_family = true;
+            // A cascade's third signal is a held family only while the cascades hold: in the log mode
+            // (network.ring_fix.cascade_log) nothing is held and the stream declares what it would without them.
+            if (!rf.cascade_log)
+                for (const RingFixCascade& c : rf.cascades)
+                    if (c.ck == ck && signal == c.s3) held_family = true;
             const auto f = rf.settled.find({s.sat, signal});
             npb.signal_integer    = held_family && f != rf.settled.end() && f->second;
             npb.wide_lane_integer = held_family ? 1 : 0;
@@ -107,6 +110,11 @@ std::string ringFixCascadeReference(const std::string& sat, const std::string& s
     const double l1 = chainWavelengthM(sat, s1), l2 = chainWavelengthM(sat, s2), l3 = chainWavelengthM(sat, s3);
     if (!(l1 > 0.0 && l2 > 0.0 && l3 > 0.0)) return {};
     return std::abs(1.0 / l1 - 1.0 / l3) <= std::abs(1.0 / l2 - 1.0 / l3) ? s1 : s2;
+}
+
+std::optional<long long> ringFixCascadeKeepInteger(const RingFixCascadeLink& link, bool ref_freed, bool third_freed) {
+    if (!link.held || link.monitor_trip || ref_freed || third_freed) return std::nullopt;
+    return link.n3;
 }
 
 int ringFixCascadeLeadRank(bool pair_tree_edge, bool pair_held, bool third_incumbent, bool third_slipped,

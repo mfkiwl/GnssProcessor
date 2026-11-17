@@ -1463,10 +1463,57 @@ std::optional<long long> chainHeldInteger(const ChainElection& el, const ChainBa
     return std::nullopt;
 }
 
+/// The held third-signal integer of a cascade link on arc (ri, sat) of a cascade's third band, and its cascade
+/// (network.ring_fix.cascade_rehost_keep; ringFixCascadeKeepInteger); none without the option, for a band that is no
+/// cascade's third signal, or when the link is not held, its monitor tripped or a signal freed this epoch.
+std::optional<std::pair<long long, const RingFixCascade*>> chainCascadeHeldInteger(const ChainElection& el,
+                                                                                   const ChainBand& band,
+                                                                                   std::size_t ri,
+                                                                                   const std::string& sat) {
+    const NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->cascade_rehost_keep || sat.empty()) return std::nullopt;
+    const auto& free_ambs = el.events.slip.relevel.free_ambs;
+    for (const RingFixCascade& c : rf->cascades) {
+        if (c.letter != sat[0] || c.s3 != band.signal) continue;
+        const auto it = rf->cascade_links.find(RingFixLinkId{static_cast<int>(ri), sat, c.ref, c.s3});
+        if (it == rf->cascade_links.end()) return std::nullopt;
+        const int sta = static_cast<int>(ri);
+        const std::optional<long long> n3 = ringFixCascadeKeepInteger(
+            it->second, free_ambs.count({sta, StateKeys::makeAmbiguityKey(sat, c.ref)}) != 0,
+            free_ambs.count({sta, StateKeys::makeAmbiguityKey(sat, c.s3)}) != 0);
+        if (!n3) return std::nullopt;
+        return std::make_pair(*n3, &c);
+    }
+    return std::nullopt;
+}
+
 /// Remedy (a): a re-host onto a held link is kept only when the new host's carry sits on the held integer to
 /// within this many cycles (the hold's own residual, micrometres on the simulator and on DOY 144 and 145; card
 /// NRF sections 41 and 42).
 constexpr double kRehostKeepZeroStepCyc = 1e-4;
+
+/// The outcome of remedy (a)'s keep test.
+enum class RehostKeep : std::uint8_t {
+    Kept,        ///< The new host's carry sits on the held integer and the draft's step is known: kept at a step of 0.
+    OffInteger,  ///< Released: the carry is kRehostKeepZeroStepCyc or more off the held integer.
+    NotKept,     ///< Released for another cause: no carry at the new host, or an unknown draft step.
+};
+
+/// Remedy (a)'s keep test of a re-host onto a link held at integer @p n: when kept, the draft takes the integer at a
+/// step of 0 (its as-built facts kept for the observatory); otherwise the draft is left as it is.
+RehostKeep keepOnHeldInteger(const ChainBand& band, long long n, PinDraft& d) {
+    const double target = static_cast<double>(n) * band.lambda_m;
+    const bool   carry  = band.lambda_m > 0.0 && std::isfinite(d.carry_val);
+    const bool   on_int = carry && std::abs(target - d.carry_val) < kRehostKeepZeroStepCyc * band.lambda_m;
+    if (on_int && d.known) {
+        d.as_built = asBuilt(d);
+        d.held     = true;
+        d.target   = target;
+        d.pinmove  = 0.0;
+        return RehostKeep::Kept;
+    }
+    return carry && !on_int ? RehostKeep::OffInteger : RehostKeep::NotKept;
+}
 
 /// The rehost row of the chain's event table, applied to a pin after the as-built draft, the kept row
 /// and the returning row.  A tree edge is released (the cut release of its moved side) when all of
@@ -1491,7 +1538,8 @@ constexpr double kRehostKeepZeroStepCyc = 1e-4;
 /// pulled its carry) is released as above: a fractional step carried into the moved side would move every chord
 /// through it off its integer, held links included, and the ring fix sees no cut to re-express them by (card NRF
 /// section 42).  Kept only where the host's carry exists and the draft's step was known otherwise (no unpinned
-/// root handover).
+/// root handover).  With network.ring_fix.cascade_rehost_keep the same holds for a re-host of a cascade's third band
+/// onto a link the cascade holds, at its held third-signal integer.
 ///
 /// @param d The draft; replaced in place when the edge is released or kept on a held integer.
 void applyRehostRow(ChainElection& el, const ChainBand& band, std::size_t ri, const std::string& sat,
@@ -1505,22 +1553,22 @@ void applyRehostRow(ChainElection& el, const ChainBand& band, std::size_t ri, co
         ++cnt.eq34_rh_not_freed;
         return;
     }
-    // Kept on a held integer (remedy (a)): the host's carry on the held integer, a step of 0.
+    // Kept on a held integer (remedy (a)): the host's carry on the held integer, a step of 0; a pair's held link
+    // first, else (network.ring_fix.cascade_rehost_keep) a held cascade link of a third band.
     if (const std::optional<long long> held = chainHeldInteger(el, band, ri, sat); held.has_value()) {
-        NetworkRingFix& rf = *el.ctx.carry.ring_fix;
-        const double target = static_cast<double>(*held) * band.lambda_m;
-        const bool   carry  = band.lambda_m > 0.0 && std::isfinite(d.carry_val);
-        const bool   on_int = carry && std::abs(target - d.carry_val) < kRehostKeepZeroStepCyc * band.lambda_m;
-        if (on_int && d.known) {
-            ++rf.counters.rehost_kept;
-            d.as_built = asBuilt(d);
-            d.held     = true;
-            d.target   = target;
-            d.pinmove  = 0.0;
-            return;
+        RingFixCounters& C = el.ctx.carry.ring_fix->counters;
+        switch (keepOnHeldInteger(band, *held, d)) {
+            case RehostKeep::Kept:       ++C.rehost_kept; return;
+            case RehostKeep::OffInteger: ++C.rehost_off_integer; break;
+            case RehostKeep::NotKept:    ++C.rehost_not_kept; break;
         }
-        if (carry && !on_int) ++rf.counters.rehost_off_integer;
-        else                  ++rf.counters.rehost_not_kept;
+    } else if (const auto held3 = chainCascadeHeldInteger(el, band, ri, sat); held3.has_value()) {
+        RingFixCascadeCounters& CC = el.ctx.carry.ring_fix->cascade_counters[held3->second->name];
+        switch (keepOnHeldInteger(band, held3->first, d)) {
+            case RehostKeep::Kept:       ++CC.rehost_kept; return;
+            case RehostKeep::OffInteger: ++CC.rehost_off_integer; break;
+            case RehostKeep::NotKept:    ++CC.rehost_not_kept; break;
+        }
     }
     // Released.  What the as-built draft would have done is tallied and kept for the observatory.
     ++cnt.eq34_rh_released;

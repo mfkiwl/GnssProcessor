@@ -1602,6 +1602,11 @@ namespace GnssProcessor {
             if (rf.cascade_log && rf.cascade.empty())
                 throw std::runtime_error("network.ring_fix.cascade_log traces the cascades' decisions without holding "
                                          "them: it needs network.ring_fix.cascade.");
+            rf.cascade_rehost_keep = jval<bool>(json, "network.ring_fix.cascade_rehost_keep",
+                                                "network_ring_fix_cascade_rehost_keep", false);
+            if (rf.cascade_rehost_keep && rf.cascade.empty())
+                throw std::runtime_error("network.ring_fix.cascade_rehost_keep keeps a third band's re-hosts onto held "
+                                         "cascade links: it needs network.ring_fix.cascade.");
             rf.max_decisions_per_epoch = jval<int>(json, "network.ring_fix.max_decisions_per_epoch",
                                                    "network_ring_fix_max_decisions_per_epoch", 3);
             if (rf.max_decisions_per_epoch < 0)

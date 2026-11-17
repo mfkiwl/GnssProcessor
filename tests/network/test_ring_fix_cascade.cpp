@@ -29,6 +29,19 @@ TEST(RingFixCascade, TheLeadRankPutsThePairsTreeEdgesFirstThenItsHeldLinks) {
     EXPECT_EQ(ringFixCascadeLeadRank(true, false, true, false, false), 1);   // ...unless it is an incumbent
 }
 
+TEST(RingFixCascade, AReHostKeepsTheHeldThirdIntegerOnlyWhileTheLinkHolds) {
+    RingFixCascadeLink link;
+    link.n3 = -17;
+    EXPECT_FALSE(ringFixCascadeKeepInteger(link, false, false).has_value());   // not held
+    link.held = true;
+    ASSERT_TRUE(ringFixCascadeKeepInteger(link, false, false).has_value());
+    EXPECT_EQ(*ringFixCascadeKeepInteger(link, false, false), -17);
+    EXPECT_FALSE(ringFixCascadeKeepInteger(link, true, false).has_value());    // the reference freed this epoch
+    EXPECT_FALSE(ringFixCascadeKeepInteger(link, false, true).has_value());    // the third signal freed this epoch
+    link.monitor_trip = true;
+    EXPECT_FALSE(ringFixCascadeKeepInteger(link, false, false).has_value());   // the monitor asks for a release
+}
+
 TEST(RingFixCascadeGate, TheDifferenceDecidesWithinTheFractionAndTheOdds) {
     // A float difference 0.03 cycle off 7 with a sigma of 0.02: decided.
     RingFixCascadeGate g = ringFixCascadeGate(105.0, 98.03, 1e-8, 0.0, 4e-4, 1.0);

@@ -1515,6 +1515,19 @@ namespace GnssProcessor {
         bool runSmoother() const { return run_smoother_; }
 
         /**
+         * @brief Check whether calendar times convert to GPS time exactly (@c processing.exact_epoch_time).
+         *
+         * When true, every calendar date and time a parser reads (observation epochs, SP3 and clock product
+         * epochs, bias validity times, the navigation message's toc, IONEX epochs) becomes GPS week and time of
+         * week from the whole days and the seconds of the day; when false (the default) it goes through a Julian
+         * date in double precision and carries up to 20 microseconds of rounding (TimeUtils::setExactCalendarTime).
+         * Applied process-wide at startup, before any file is parsed.
+         *
+         * @return True for the exact conversion.
+         */
+        bool exactEpochTime() const { return exact_epoch_time_; }
+
+        /**
          * @brief Check if cross-session normal-equation export is enabled.
          *
          * When true, the post-processing run accumulates a label-keyed normal
@@ -10066,6 +10079,7 @@ namespace GnssProcessor {
         int    relinearize_max_count_;              ///< Hard cap on total relinearizations per run; -1 = unlimited.
         int    eigen_threads_;                       ///< Eigen thread count (0=default, 1=sequential, N=pinned).  See eigenThreads().
         bool run_smoother_;                    ///< Run backward RTS smoother after forward Kalman pass (post-processing only).
+        bool exact_epoch_time_{ false };       ///< Calendar times convert to GPS time from whole days and seconds of the day (processing.exact_epoch_time).
         bool enable_neq_export_{ false };      ///< Accumulate & export cross-session normal equations (.neq/.asc); post-processing only.
         bool enable_trig_sp3_interp_{ false }; ///< Use sidereal-trig (sin/cos) SP3 position interpolation instead of the default polynomial (Neville) path. Default off (byte-identical legacy).
         bool enable_noon_turn_attitude_{ false }; ///< GPS Block IIF/IIR yaw-rate-limited noon turn for the satellite PCO and the phase wind-up (Kouba 2009); else nominal yaw everywhere. Default off.
