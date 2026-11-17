@@ -49,6 +49,31 @@ TREE_ROWS = [
 TREE_ROW_INDEX = {k: i for i, (k, _l) in enumerate(TREE_ROWS)}
 
 
+#: Families of event tiers, for the events view's filter: (key, label, tier names or prefixes).
+EVENT_FAMILIES = [
+    ('slip', 'Cycle slips and gaps', ('T0_mw_detect', 'T0_gap', 'T0_windup', 'T0_band_scope', 'T1_gf_jump', 'T1_if_slip')),
+    ('channel', 'Signals and channels', ('SCC', 'SPC', 'SIGNAL')),
+    ('fixing', 'Whole numbers', ('RINGFIX',)),
+    ('datum', 'Tree and datum', ('CHAIN', 'PHASE_DATUM', 'CLK_BASIS', 'DATUMGRAPH', 'TOPOLOGY', 'READMIT', 'PIVOT',
+                                 'PHASE_ANCHOR', 'PBGAUGE', 'STRANSFORM', 'GATE', 'DD_FOLD', 'D2_DENSE', 'INJECT', 'ARC',
+                                 'ADMISSION')),
+    ('qc', 'Quality tests', ('BLOCKBAARDA', 'MDB', 'CONGRUENCE', 'PRIORRES', 'GROSSLOS', 'RAIM', 'PREFIT', 'REDUNDANCY',
+                             'SIGMA0', 'VCE_APPLY', 'T2_', 'T3_', 'T4_')),
+    ('atmosphere', 'Atmosphere', ('ZWD',)),
+    ('satellite', 'Satellites and clocks', ('CLK_ANCHOR', 'CB_DATUM', 'RETRO', 'CLK_STEP', 'CLK_FRAME', 'PB_FRAME', 'PB_HOLD',
+                                            'PHASE_FRAME', 'ANCHOR_LEVEL', 'BRD_TRACK', 'MARK_SCOPE', 'T5_', 'T6_')),
+    ('other', 'Other', ()),
+]
+
+
+def event_family(tier: str) -> int:
+    """Index into EVENT_FAMILIES of an event tier."""
+    for i, (_k, _l, names) in enumerate(EVENT_FAMILIES):
+        if any(tier == n or (n.endswith('_') and tier.startswith(n)) or tier.startswith(n + '_') for n in names):
+            return i
+    return len(EVENT_FAMILIES) - 1
+
+
 def event_lane(tier: str, event: str, action: str) -> str:
     """The lane of an event row."""
     if tier == 'RINGFIX':
@@ -343,7 +368,10 @@ def build_events(ix: Index, events, raim):
     def table(tab):
         return [k for k, _v in sorted(tab.items(), key=lambda kv: kv[1])]
 
-    return arr, {'tiers': table(tiers), 'names': table(names), 'actions': table(actions), 'details': table(details)}
+    tier_list = table(tiers)
+    return arr, {'tiers': tier_list, 'names': table(names), 'actions': table(actions), 'details': table(details),
+                 'tier_family': [event_family(t) for t in tier_list],
+                 'families': [[k, l] for (k, l, _n) in EVENT_FAMILIES]}
 
 
 # --------------------------------------------------------------------------------------------------------------- #
@@ -616,19 +644,20 @@ def build_summary(ix: Index, links):
 # the whole block
 
 
-#: What each part of the page needs: (part, file in logs/ or the run folder, the config key that writes it).
+#: What each part of the core block needs: (part, file in logs/ or the run folder, the config key that writes it,
+#: the layer of the dashboard that shows it).
 NEEDS = [
-    ('tree', 'logs/network_chain_edges.csv', 'network.trace_chain_datum (written on a run with network.phase_datum_eq34)'),
-    ('links', 'logs/network_chain_frame.csv', 'network.trace_chain_datum (written on a run with network.phase_datum_eq34)'),
-    ('fixing', 'logs/network_ring_fix.csv', 'network.ring_fix.enable (the fixing itself; a run without it has floats only)'),
-    ('events', 'logs/network_events.csv', 'network.trace_events'),
-    ('alarms', 'logs/network_raim.csv', 'network.trace_slip_events'),
-    ('receivers', 'logs/network_stations.csv', 'network.trace_stations'),
-    ('wet delay', 'logs/network_zwd.csv', 'network.trace_zwd'),
-    ('receiver clock', 'logs/network_rx_states.csv', 'network.trace_rx_states'),
-    ('receiver phase bias', 'logs/network_rpb_states.csv', 'network.trace_rpb_states (written on a chain run)'),
-    ('satellite positions and elevations', 'logs/network_ionosphere.csv', 'network.trace_ionosphere'),
-    ('corrections', 'products.txt', 'the run output itself (always written)'),
+    ('tree', 'logs/network_chain_edges.csv', 'network.trace_chain_datum (written on a run with network.phase_datum_eq34)', 'network'),
+    ('links', 'logs/network_chain_frame.csv', 'network.trace_chain_datum (written on a run with network.phase_datum_eq34)', 'network'),
+    ('fixing', 'logs/network_ring_fix.csv', 'network.ring_fix.enable (the fixing itself; a run without it has floats only)', 'network'),
+    ('events', 'logs/network_events.csv', 'network.trace_events', 'events'),
+    ('alarms', 'logs/network_raim.csv', 'network.trace_slip_events', 'events'),
+    ('receivers', 'logs/network_stations.csv', 'network.trace_stations', 'receivers'),
+    ('wet delay', 'logs/network_zwd.csv', 'network.trace_zwd', 'atmosphere'),
+    ('receiver clock', 'logs/network_rx_states.csv', 'network.trace_rx_states', 'receivers'),
+    ('receiver phase bias', 'logs/network_rpb_states.csv', 'network.trace_rpb_states (written on a chain run)', 'receivers'),
+    ('satellite positions and elevations', 'logs/network_ionosphere.csv', 'network.trace_ionosphere', 'satellites'),
+    ('corrections', 'products.txt', 'the run output itself (always written)', 'satellites'),
 ]
 
 
@@ -650,8 +679,28 @@ def read_all(run: Path, log=print):
     return out, timing
 
 
+def build_blocks(run: Path, log=print) -> dict:
+    """Read a run folder and return every block of the page: {'core': (header, arrays), 'epoch': ..., ...}."""
+    import layers
+    t_start = time.time()
+    header, arrays, ix, tr = _core(run, log)
+    ctx = layers.Ctx(run, ix, tr, log)
+    blocks = layers.build_all(ctx)
+    header['missing'] = header['missing'] + ctx.missing
+    header['blocks'] = sorted(blocks)
+    header['read_s'].update(ctx.timing)
+    header['build_s'] = round(time.time() - t_start, 1)
+    return {'core': (header, arrays), **blocks}
+
+
 def build_block(run: Path, log=print):
-    """Read a run folder and return (header dict, {name: numpy array})."""
+    """Read a run folder and return the core block only: (header dict, {name: numpy array})."""
+    header, arrays, _ix, _tr = _core(run, log)
+    return header, arrays
+
+
+def _core(run: Path, log=print):
+    """The core block (trees, links, events, products, receivers' wet delay and clock, sky) and the run's index."""
     t_start = time.time()
     tr, timing = read_all(run, log)
     ix = make_index(tr)
@@ -672,7 +721,7 @@ def build_block(run: Path, log=print):
     arrays.update(build_summary(ix, links))
     header = make_header(run, ix, tr, pmeta, ev_tables, jtables, audits, timing)
     header['build_s'] = round(time.time() - t_start, 1)
-    return header, arrays
+    return header, arrays, ix, tr
 
 
 def make_header(run, ix, tr, pmeta, ev_tables, jtables, audits, timing):
@@ -698,7 +747,7 @@ def make_header(run, ix, tr, pmeta, ev_tables, jtables, audits, timing):
                'receiver clock': tr['clock'], 'receiver phase bias': tr['rpb'],
                'satellite positions and elevations': tr['los'], 'corrections': tr['products']}
     # absent means no file (None); a file with a header and no rows is present and simply has nothing to show
-    missing = [{'part': p, 'file': f, 'key': k} for (p, f, k) in NEEDS if present.get(p) is None]
+    missing = [{'part': p, 'file': f, 'key': k, 'layer': lay} for (p, f, k, lay) in NEEDS if present.get(p) is None]
     t0 = ix.t_ms[0]
     week, tow0 = divmod(t0, R.WEEK_MS)
     cfg = _config_summary(run)

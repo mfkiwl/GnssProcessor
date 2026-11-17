@@ -5,19 +5,19 @@
 - **id:** NETVIEW
 - **topic:** tools
 - **status:** open
-- **summary:** A tool that turns the traces of one network run into one self-contained HTML page: the tree of each signal as rings of hops around its reference receiver, the links held at whole numbers and the float links, the history of every link (whole numbers, wide-lane and narrow-lane distance from them with sigma, state, holds and releases), satellite (hops, jumps of the correction level, clock and biases) and receiver (wet delay, clock, receiver phase bias, alarms, links), an event timeline and summaries over the run; a comparison page links two pages in time. Made on request from existing traces, no C++ change; `netview.py arm` writes a config copy with the traces on. Branch `viz/network-view`.
-- **dates:** 2026-11-15 (built and first version shown to the author)
-- **code:** `scripts/netview/` (`netview.py` with the commands build, arm and compare; readers `nv_read.py`, aggregation `nv_build.py`, page writer `nv_page.py`, the page's sources in `page/`, unit tests `test_netview.py`); how-to [onboarding/network_view.md](../../onboarding/network_view.md)
+- **summary:** A tool that turns the traces of one network run into one self-contained HTML page. Since 2026-11-17 the page is a dashboard of layers a reader clicks through (section 11): overview, network links (the trees, held and float links, each link's whole numbers), receivers, satellites, cycle slips, stochastic model, atmosphere, products and the held-out user check, events; and pages of one receiver, one satellite and one line of sight, all on one time cursor. Made on request from existing traces, no C++ change; `netview.py arm` writes a config copy with the two traces the reference configurations lack. Branch `viz/network-view`.
+- **dates:** 2026-11-15 (built and first version shown to the author); 2026-11-17 (the dashboard)
+- **code:** `scripts/netview/` (`netview.py` with the commands build, arm and compare; readers `nv_read.py` and `nv_tables.py`, aggregation `nv_build.py` (core block) and `layers/` (the other blocks), page writer `nv_page.py`, the page's sources in `page/`, unit tests `test_netview.py`); how-to [onboarding/network_view.md](../../onboarding/network_view.md)
 - **knobs / posture:** none new. `arm` switches on existing trace keys only.
-- **run dirs:** pages of `D:\GnssProcessorSupport\runs_nom\_rap_o2s1j_n144`, `_rap_o2s1j_n144r`, `_rap_o2offj_n144`, `_rap_o9_n145`, `_rap_ka_sim` and `_rap_k0_sim` in `D:\GnssProcessorSupport\netview_out\`; the timing pair in `D:\GnssProcessorSupport\netview_out\timing\`
+- **run dirs:** pages of `D:\GnssProcessorSupport\runs_nom\_rap_o2s1j_n144`, `_rap_o2s1j_n144r`, `_rap_o2offj_n144`, `_rap_o9_n145`, `_rap_ka_sim` and `_rap_k0_sim` in `D:\GnssProcessorSupport\netview_out\` (the first page design); the dashboard of `_rap_l12_n144` as `D:\GnssProcessorSupport\netview_out\l12_n144.html`; the timing pair in `D:\GnssProcessorSupport\netview_out\timing\`
 - **source:** the author's request of 2026-11-15 (section 1); the definitions of NRF and BER (branch `irdu/user-integers`, `docs/refound/NRF_network_ring_fixing_2026-11-14*.md`, `BER_bad_epoch_response_2026-11-15.md`) and of ARNF sections 3, 9 and 15 (branch `ar/rx-sat-code-bias`)
 
-**Outcome.** Built. One command makes a page of 6 to 7 MB from a 6 h run of 56 receivers in about 20 s; it is
-ready about 0.5 s after opening and redraws in 3 to 7 ms per epoch while scrubbing. The page shows the tree, held
-and float links, each link's whole numbers and float distances, satellites' correction-level jumps, receivers' wet
-delay and clock, events in lanes, held share and jumps by hops over the run. It degrades to what a run traced and
-names the key of each missing part. `arm` adds two traces on a chain run, about 1 % of the run time, products
-byte-identical. What it cannot show yet is listed with the export that would provide it.
+**Outcome.** Built, then rebuilt as a dashboard (section 11). One command makes a 22 MB page from a 6 h run of 56
+receivers in about 40 s. The overview is ready about 0.9 s after the page loads, a layer opens in 0.01 to 0.2 s and
+a time step redraws in about 4 ms. Nine layers (overview, network links, receivers, satellites, cycle slips,
+stochastic model, atmosphere, products and user check, events) lead to pages of one receiver, one satellite and one
+line of sight. The page degrades to what a run traced and names the key of each missing part. `arm` adds two
+traces, about 1 % of the run time, products byte-identical.
 
 > Results are appended to this file, below the text, under dated headings.
 
@@ -196,3 +196,80 @@ Recorded at the end of the build, for the author to read later; no answer was wa
 4. Default output path: `<run folder>/netview.html` (as built) or a separate folder?
 5. BeiDou: the frequency table includes it, but no sample run has a BeiDou tree, so a BeiDou page is untested.
 6. Merging the branch to `main` (no C++, the tool and its documentation only) is the author's call.
+
+## 11. 2026-11-17: the dashboard (layers a reader clicks through)
+
+**The request.** The author's words, 2026-11-17: "The interactive network viewer is a good attempt. I want something
+like a dashboard. Interactive selectable layers that I can click through to get more detail at each level. What I
+envision is almost like a network management visual tool. Network information, receiver information, stochastic
+model, cycle slips, satellite health, etc. We have an incredible amount of data to view and we need a fast,
+efficient, organized structure that is intuitive to help me follow along."
+
+**Structure.** The time bar and its event lanes stay on top. A rail on the left lists the layers, each with a badge
+(its count), and a path above the view names where the reader is (Overview > Receivers > MBAR00UGA > G05). The
+address is `#/layer/argument?t=epoch`, so the browser's back button walks the views and a view can be bookmarked.
+Every receiver and satellite name is a link to its page, and one time cursor drives every view. Three levels: the
+layers over the whole network, the page of one receiver or one satellite, the page of one line of sight (receiver x
+satellite).
+
+| Layer | What it shows | Traces |
+| --- | --- | --- |
+| Overview | key figures with their history (epochs emitted, post-fit sigma0, receivers and satellites in the solution, held share per family, slips per hour, quality-test flags, held-out user 3D error, time per epoch); receivers x time and satellites x time for a chosen metric; the receivers and satellites worth a look | epoch status, solve health, run summary, held-out user, post-fit rows and pools, events, links |
+| Network links | the first page design (sections 2 and 3), with links to the pages below and a double-click that opens them | chain edges and frame, ring fix, events, products |
+| Receivers, and the page of one | a map and a table; receivers x time; per receiver a sky plot, the arcs of its satellites with slips, gaps, holds and releases, post-fit code and phase residuals, normalized scales, satellites, wet delay, clock, code biases and inter-system bias, the coordinate test, the residual test, its held links | post-fit rows and pools, receiver states, coordinate test, residual test, wet delay, ionosphere (azimuths) |
+| Satellites, and the page of one | sub-satellite points on a map and a table; satellites x time; per satellite the receivers tracking it (arcs), its ground track, the emitted clock and phase biases with their discontinuity steps, code-bias states with sigma, the clock anchor guard, its residuals, hops and correction-level jumps | products and their counters, code-bias states, anchor guard, post-fit rows and pools |
+| Line of sight | elevation; the post-fit residual of every signal with its a priori sigma; Melbourne-Wubbena, geometry-free and phase minus code with the loss-of-lock flags; the time-difference test against its threshold; slant ionosphere; the residual test; carried float ambiguities with births and drops; the link's whole numbers | post-fit rows, raw slip observables, time-difference test, ionosphere, residual test, carried floats, ring fix, chain frame |
+| Cycle slips | slips per 10 minutes by detector (loss of lock, Melbourne-Wubbena, geometry-free, time-difference test); receivers x time; by receiver (also per satellite-hour of tracking) and by satellite; by elevation with the rate per hour of tracking; how often each test flags and the false-alarm rate its threshold implies; the list | events, flag rates, post-fit rows (tracking) |
+| Stochastic model | sigma0 over time; variance factors per class of observation; residuals and normalized residuals by elevation and by hour; histograms of the normalized residuals against the normal curve; the block outlier test, smallest detectable errors, carried-prior tests, attribution of large residuals; parameters as modelled and responses to events (run manifest); measured floors of the carried priors | epoch status, variance factors, post-fit rows, block outlier test, detectability, carried-prior test, attribution, run manifest, carried-prior variance |
+| Atmosphere | wet delay on a map and receivers x time; slant ionosphere at the pierce points on a shell 350 km high; the vertical-equivalent ionosphere per receiver over time | wet delay, ionosphere |
+| Products and user check | epochs emitted, discontinuity steps, datum per constellation, time per epoch; the held-out user receiver's position error by hour, satellites and fixing, inter-system bias | epoch status, solve health, products' counters, datum graph, service health, held-out user |
+| Events | events per 10 minutes by family; the list with filters (family, check, name, time window) | events |
+
+**Data.** The page holds six blocks: the core block of the first design (decoded at open) and five more (epoch,
+receivers, satellites, quality, line of sight), each a gzip and base64 container decoded the first time a view needs
+it. The new blocks are read with pyarrow and reduced with numpy (`nv_tables.py`, `layers/`). Line-of-sight series
+are dense [line of sight, epoch] arrays of small integers (code residuals in cm, phase residuals in 0.2 mm, a
+sentinel where absent); the smooth ones (slant ionosphere, geometry-free, carried floats) are stored as steps between
+epochs and added back when the block opens. pyarrow's conversions of arrays with empty fields import pandas, which
+took 74 s on the loaded machine; the readers take the values from the arrays' buffers instead.
+
+**Size and speed** (`_rap_l12_n144`, 6 h, 56 receivers, 62 satellites; Chromium, page served locally):
+
+| Quantity | Value |
+| --- | --- |
+| build | 39 s |
+| page | 22.1 MB: core 6.3, line of sight 10.1, satellites 2.7, receivers 2.2, quality 0.3, epoch 0.1 |
+| overview ready | 0.9 s after the page loads (the epoch, receivers and satellites blocks decode in 0.12 s) |
+| line-of-sight block | decodes in 0.24 s the first time a line of sight or the atmosphere is opened |
+| a layer drawn | overview 0.19 s, satellites 0.15 s, atmosphere 0.14 s, receivers and slips 0.08 s, stochastic model 0.04 s, the rest below 0.03 s |
+| a time step | about 4 ms |
+| memory | about 44 MB |
+
+**Verification.** 27 unit tests pass, 7 of them new (the table reader, the round trip of the step coding, receiver
+residuals, line-of-sight slots and steps, the epoch and satellite blocks, the quality block, missing parts named per
+layer). Every view of `_rap_l12_n144` was drawn in headless Chrome with no error. The plain-word check covers every
+page file.
+
+**Limits.**
+1. The receiver phase bias needs `network.trace_rpb_states` (not traced in `_rap_l12_n144`).
+2. The line-of-sight block grows with the run: about 10 MB per 6 h, so a 24 h page would be about 60 MB. Nothing is
+   thinned yet.
+3. The items of section 7 remain.
+
+**Decisions, for review.**
+1. One file per run with its data in blocks decoded on first use, so a page still opens by double-click and can be
+   sent; a folder of files or a local server was not taken.
+2. Event families: cycle slips and gaps, signals and channels, whole numbers, tree and datum, quality tests,
+   atmosphere, satellites and clocks, other. A slip counts once per response (the rows of the loss-of-lock,
+   Melbourne-Wubbena, geometry-free and time-difference tests, without the repeated and diagnostic geometry-free
+   rows), so the slips of the layers differ from the Slips lane of the time bar, which also holds wind-up restarts.
+3. Matrices order their rows worst first by the run median (by the total for counts); the receivers layer offers
+   name order.
+4. Colours: viridis for magnitudes and counts, vik for signed values (wet delay, offsets, variance factors on a log
+   scale), one colour per constellation for tracks.
+5. `arm` is unchanged: the reference configurations already switch on every trace the new layers read.
+
+**Open questions.**
+1. Which metrics the overview's matrices should open with (now: post-fit code residual RMS for both).
+2. Whether runs over 6 h should get a thinned line-of-sight block (every second or fourth epoch).
+3. Whether the first page design should remain a separate output (it lives on as the network links layer).

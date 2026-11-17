@@ -27,8 +27,8 @@
 [hidden] { display: none !important; }
 html, body { margin: 0; background: var(--bg); }
 #loading { padding: 40px; color: var(--muted); font-size: 16px; }
-#app { display: flex; flex-direction: column; min-height: 100vh; }
-header#top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 8px 14px;
+#app { display: flex; flex-direction: column; height: 100vh; }
+header#top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 18px; padding: 6px 14px;
   border-bottom: 1px solid var(--line); background: var(--panel); }
 .title { display: flex; flex-direction: column; min-width: 220px; }
 #run-name { font-weight: 650; font-size: 15px; }
@@ -40,7 +40,7 @@ select, input, button { font: inherit; color: var(--ink); background: var(--pane
 button { cursor: pointer; }
 button:hover, select:hover { border-color: var(--muted); }
 #search { width: 210px; }
-#timebar { padding: 6px 14px 4px; border-bottom: 1px solid var(--line); background: var(--panel); }
+#timebar { padding: 5px 14px 3px; border-bottom: 1px solid var(--line); background: var(--panel); flex: none; }
 .timerow { display: flex; align-items: center; gap: 10px; }
 #play { width: 34px; }
 #time-label { min-width: 300px; font-variant-numeric: tabular-nums; }
@@ -95,6 +95,7 @@ a.act:hover, span.act:hover { text-decoration: underline; }
 .state-refused { color: var(--refused); }
 .state-float { color: var(--muted); }
 #summary { padding: 6px 14px 30px; border-top: 1px solid var(--line); }
+.netctl { padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
 #summary h2 { font-size: 14px; margin: 6px 0; }
 #summary-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px 22px; }
 #summary-charts figure { margin: 0; }

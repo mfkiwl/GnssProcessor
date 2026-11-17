@@ -1,6 +1,6 @@
 """Writes the page: one HTML file that opens from file:// with no server and no network access.
 
-The data block is a small binary container, gzip-compressed and base64-encoded into a script tag:
+Each data block is a small binary container, gzip-compressed and base64-encoded into a script tag of its own:
     'NVB1' | u32 header length | header JSON (UTF-8) | padding to 8 | arrays, each aligned to 8 bytes
 The page decompresses it with the browser's DecompressionStream and takes typed-array views of the arrays
 (little-endian, as numpy writes them on x86), so nothing large is parsed as text.
@@ -88,23 +88,54 @@ def coastline():
     return {'lon': [r(v) for v in j['lon']], 'lat': [r(v) for v in j['lat']]}
 
 
-def write_page(path: Path, header: dict, arrays: dict, compress: bool = True) -> dict:
-    """Write the HTML file; returns sizes (bytes) of the raw block, the encoded block and the page."""
+#: The page's style and script files, joined in this order (a file not yet written is skipped).
+CSS_FILES = ['netview.css', 'dashboard.css']
+JS_FILES = ['core.js', 'widgets.js', 'network.js', 'overview.js', 'receivers.js', 'satellites.js', 'los.js',
+            'slips.js', 'stochastic.js', 'atmosphere.js', 'products.js', 'events.js', 'main.js']
+
+
+def _joined(names: list[str]) -> str:
+    parts = []
+    for n in names:
+        p = HERE / 'page' / n
+        if p.exists():
+            parts.append(f'/* ---- {n} ---- */\n' + p.read_text(encoding='utf-8'))
+    return '\n'.join(parts)
+
+
+def encode_block(header: dict, arrays: dict, compress: bool = True) -> tuple[str, int]:
+    """(base64 text, raw size) of one block."""
     raw = pack(header, arrays)
     data = gzip.compress(raw, compresslevel=6, mtime=0) if compress else raw
-    b64 = base64.b64encode(data).decode('ascii')
+    return base64.b64encode(data).decode('ascii'), len(raw)
+
+
+def write_page(path: Path, blocks: dict, compress: bool = True) -> dict:
+    """Write the HTML file from {block name: (header, arrays)} ('core' is decoded at open, the others when a view
+    first needs them); returns the sizes (bytes) of each block raw and encoded, and of the page."""
+    sizes = {}
+    core_b64, raw = encode_block(*blocks['core'], compress=compress)
+    sizes['core'] = {'raw': raw, 'encoded': len(core_b64)}
+    tags = []
+    for name, (h, a) in blocks.items():
+        if name == 'core':
+            continue
+        b64, raw = encode_block(h, a, compress=compress)
+        sizes[name] = {'raw': raw, 'encoded': len(b64)}
+        tags.append(f'<script id="nv-block-{name}" type="application/octet-stream" '
+                    f'data-encoding="{"gzip" if compress else "raw"}">{b64}</script>')
     page = (HERE / 'page' / 'netview.html').read_text(encoding='utf-8')
-    css = (HERE / 'page' / 'netview.css').read_text(encoding='utf-8')
-    js = (HERE / 'page' / 'netview.js').read_text(encoding='utf-8')
     assets = json.dumps({'colormaps': colormaps(), 'coastline': coastline()}, separators=(',', ':'))
-    fill = {'CSS': css, 'ASSETS': f'window.NV_ASSETS = {assets};', 'JS': js,
-            'TITLE': _html_escape(f'Network view {header.get("run", "")}'),
-            'ENCODING': 'gzip' if compress else 'raw', 'DATA': b64}
+    header = blocks['core'][0]
+    fill = {'CSS': _joined(CSS_FILES), 'ASSETS': f'window.NV_ASSETS = {assets};', 'JS': _joined(JS_FILES),
+            'TITLE': _html_escape(f'Network dashboard {header.get("run", "")}'),
+            'ENCODING': 'gzip' if compress else 'raw', 'DATA': core_b64, 'BLOCKS': '\n'.join(tags)}
     # one pass over the template only, so text inserted for one token is never scanned for another
-    html = re.sub(r'\{\{(CSS|ASSETS|JS|TITLE|ENCODING|DATA)\}\}', lambda m: fill[m.group(1)], page)
+    html = re.sub(r'\{\{(CSS|ASSETS|JS|TITLE|ENCODING|DATA|BLOCKS)\}\}', lambda m: fill[m.group(1)], page)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html, encoding='utf-8', newline='\n')
-    return {'raw': len(raw), 'encoded': len(b64), 'page': path.stat().st_size}
+    sizes['page'] = path.stat().st_size
+    return sizes
 
 
 def _html_escape(s: str) -> str:

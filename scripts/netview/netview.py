@@ -1,12 +1,15 @@
-"""Network view: an interactive page of one network run (links, held whole numbers, parameters over time).
+"""Network dashboard: an interactive page of one network run, in layers a reader clicks through.
 
     py -3.14 scripts/netview/netview.py build <run folder> [-o page.html] [--no-compress]
     py -3.14 scripts/netview/netview.py arm <config.json> -o <armed config.json> [--no-map]
     py -3.14 scripts/netview/netview.py compare <page A.html> <page B.html> -o <compare.html>
 
-build   reads the run folder's traces (logs/*.csv and products.txt) and writes one HTML page that opens by
-        double-click from file:// (no server, no network access).  Default output: <run folder>/netview.html.
-        Parts whose trace is absent are left out and named on the page with the key that writes them.
+build   reads the run folder's traces (logs/*.csv, logs/network_run_manifest.json and products.txt) and writes one
+        HTML page that opens by double-click from file:// (no server, no network access).  Default output:
+        <run folder>/netview.html.  The page has layers (overview, network links, receivers, satellites, cycle
+        slips, stochastic model, atmosphere, products and user check, events) and pages of one receiver, one
+        satellite and one line of sight.  Parts whose trace is absent are left out and named on the page with the
+        key that writes them.
 arm     writes a copy of a run config with the trace keys the page needs switched on (traces only: nothing that
         the estimate reads).  Normal runs leave them off and pay nothing; a run made from the armed copy can be
         viewed.
@@ -37,11 +40,14 @@ def cmd_build(a) -> int:
     out = Path(a.output) if a.output else run / 'netview.html'
     t = time.time()
     print(f'reading {run}')
-    header, arrays = nv_build.build_block(run)
-    sizes = nv_page.write_page(out, header, arrays, compress=not a.no_compress)
-    print(f'wrote {out}: page {sizes["page"] / 1e6:.1f} MB (data block {sizes["raw"] / 1e6:.1f} MB before compression), '
+    blocks = nv_build.build_blocks(run)
+    header = blocks['core'][0]
+    sizes = nv_page.write_page(out, blocks, compress=not a.no_compress)
+    raw = sum(v['raw'] for k, v in sizes.items() if k != 'page')
+    print(f'wrote {out}: page {sizes["page"] / 1e6:.1f} MB (data {raw / 1e6:.1f} MB before compression), '
           f'{header["n_ep"]} epochs, {len(header["stations"])} receivers, {len(header["sats"])} satellites, '
           f'{len(header["families"])} signal families, {time.time() - t:.1f} s')
+    print('  blocks (MB in the page): ' + ', '.join(f'{k} {v["encoded"] / 1e6:.1f}' for k, v in sizes.items() if k != 'page'))
     for m in header['missing']:
         print(f'  not in this run: {m["part"]} ({m["file"]}; key {m["key"]})')
     return 0

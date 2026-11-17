@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import math
 import re
 import struct
 import sys
@@ -26,6 +27,7 @@ import nv_arm  # noqa: E402
 import nv_build as B  # noqa: E402
 import nv_page  # noqa: E402
 import nv_read as R  # noqa: E402
+import nv_tables as T  # noqa: E402
 
 WEEK = 2420
 TOWS = (0.0, 30.0, 60.0)
@@ -105,6 +107,54 @@ def make_run(root: Path, fixing=True, raim_header_only=True, rpb=False) -> Path:
            'iono_total_m\n' + ''.join(f'{WEEK},{t:.3f},R1,E01,0.1,90.0,0.0,0.0,0.1\n' for t in TOWS))
     _write(run / 'products.txt', _products())
     return run
+
+
+def add_dashboard_traces(run: Path) -> Path:
+    """The traces the dashboard's other blocks read, small: post-fit rows, epoch status, variance factors, slip
+    test and raw observables, carried floats, products' discontinuity counters, the held-out user check."""
+    logs = run / 'logs'
+    pf = ['week,tow,station,sat,signal,kind,resid_m,w,elev_deg\n']
+    for t in TOWS:
+        pf += [f'{WEEK},{t:.3f},R1,E01,C1X,code,0.30,4.0,90.0\n', f'{WEEK},{t:.3f},R1,E01,C5X,code,-0.40,4.0,90.0\n',
+               f'{WEEK},{t:.3f},R1,E01,L1X,phase,0.002,250000.0,90.0\n', f'{WEEK},{t:.3f},R1,E01,L5X,phase,-0.004,250000.0,90.0\n',
+               f'{WEEK},{t:.3f},R2,E02,C1X,code,0.50,1.0,45.0\n']
+    _write(logs / 'network_pf_rows.csv', ''.join(pf))
+    _write(logs / 'network_epoch_status.csv', 'week,tow,disposition,sigma0,n_present,n_clock_sats,sigma0_pf_code\n' +
+           f'{WEEK},0.000,emitted,1.0,3,5,0.8\n{WEEK},30.000,gate_withheld,1.0,3,5,0.9\n{WEEK},60.000,emitted,1.0,2,5,1.1\n')
+    _write(logs / 'network_vcf.csv', 'week,tow,class,sys,signal,kind,n,sum_wv2,sum_r,rho,f,g,ewma_f,ewma_g,identifiable,n_dw,n_unchk\n' +
+           ''.join(f'{WEEK},{t:.3f},E C1X,E,C1X,code,60,30.0,50.0,0.8,0.6,0.5,0.6,0.5,1,0,0\n' for t in (0.0, 60.0)))
+    _write(logs / 'network_if_slip.csv', 'week,tow,station,sat,sig1,sig2,elev_deg,dd_m,med_m,s_pool_m,ewma_scale_m,count,'
+           'w_shrink,s_eff_m,elev_map,thr_m,floor_m,abs_dev_m,flagged,carry_warm,is_ref\n' + ''.join(
+               f'{WEEK},{t:.3f},R1,E01,L1X,L5X,90.0,{0.3 if t == 30.0 else 0.001},0.0,0.003,0,0,0,0.003,1,0.1,0.1,0,'
+               f'{1 if t == 30.0 else 0},1,0\n' for t in TOWS[1:]))
+    _write(logs / 'network_slip_raw.csv', 'week,tow,station,sat,sig1,sig2,elev_deg,mw_m,gf_m,l1_c1_m,lli1,lli2\n' + ''.join(
+        f'{WEEK},{t:.3f},R1,E01,L1X,L5X,90.0,{-2.0 + (0.86 if t == 60.0 else 0)},0.5,1.0,{1 if t == 30.0 else 0},0\n' for t in TOWS))
+    _write(logs / 'network_amb_state.csv', '# network_amb_state.csv - a description line, as the engine writes it\n'
+           'week,tow,station,sat,signal,value_abs_m,var_m2,var_first_m2,var_birth_m2,fold_var_m2,n_folds,age_ep,'
+           'age_since_relevel_ep,folded,route,event\n' + ''.join(
+               f'{WEEK},{t:.3f},R1,E01,L1X,{10.0 + (0.5 if t == 60.0 else 0)},0.01,0.01,0.01,0,0,0,0,0,,{"birth" if t == 0.0 else ""}\n'
+               for t in TOWS))
+    _write(logs / 'network_solution.csv', 'week,tow,sat,kind,signal,value_m,disc_counter\n' + ''.join(
+        f'{WEEK},{t:.3f},E01,PB,L1X,1.0,{1 if t == 60.0 else 0}\n' for t in TOWS))
+    _write(logs / 'closed_loop_trace.csv', 'week,tow,n_sats,pos_err_3d_m,east_m,north_m,up_m\n' + ''.join(
+        f'{WEEK},{t:.3f},5,{0.5 - t / 150},0.1,0.1,0.1\n' for t in TOWS))
+    return run
+
+
+def undelta(a, flags, sentinel):
+    """The page's adding back of a series coded as steps (core.js undeltaBlock), for the tests."""
+    out = a.astype(np.int64).reshape(-1, a.shape[-1]).copy()
+    for r, f in enumerate(flags.reshape(-1)):
+        if not f:
+            continue
+        acc, first = 0, True
+        for i in range(out.shape[1]):
+            if out[r, i] == sentinel:
+                continue
+            acc = out[r, i] if first else acc + out[r, i]
+            first = False
+            out[r, i] = acc
+    return out.reshape(a.shape)
 
 
 def _products():
@@ -281,6 +331,94 @@ class TestBlock(Fixture):
             np.testing.assert_array_equal(got.reshape(e['shape']), np.asarray(a[e['name']]).astype(dt))
 
 
+class TestTables(Fixture):
+    def test_read_names_and_empty_fields(self):
+        logs = self.root / 'logs'
+        _write(logs / 't.csv', 'week,tow,station,v\n2420,0.000,R1,1.5\n2420,30.000,RX,\n')
+        t = T.read(logs, 't.csv', {'week': T.I64, 'tow': T.F64, 'station': T.STR, 'v': T.F64, 'absent': T.F64})
+        self.assertEqual(T.missing_columns(t), ['absent'])
+        self.assertEqual(list(T.names(t, 'station', {'R1': 0})), [0, -1])
+        v = T.num(t, 'v')
+        self.assertEqual(v[0], 1.5)
+        self.assertTrue(np.isnan(v[1]))
+        self.assertIsNone(T.read(logs, 'missing.csv', {}))
+
+    def test_delta_rows_round_trip(self):
+        rng = np.random.default_rng(1)
+        q = rng.integers(-3000, 3000, (6, 50)).astype(np.int16)
+        q[q % 7 == 0] = -32768
+        q[5, 0], q[5, 1] = 32000, -32000                       # steps that do not fit: the row stays as it is
+        coded, flags = T.delta_rows(q, -32768)
+        self.assertEqual(flags[5], 0)
+        self.assertTrue((flags[:5] == 1).all())
+        self.assertTrue(np.array_equal(undelta(coded, flags, -32768), q.astype(np.int64)))
+
+
+class TestDashboardBlocks(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.blocks = B.build_blocks(add_dashboard_traces(make_run(self.root)), log=lambda *x: None)
+        self.ne = len(TOWS)
+
+    def test_receiver_residuals(self):
+        h, a = self.blocks['receivers']
+        self.assertAlmostEqual(float(a['rp_c_rms'][0, 0]), math.sqrt((0.3 ** 2 + 0.4 ** 2) / 2), places=5)
+        self.assertAlmostEqual(float(a['rp_p_rms'][0, 1]), math.sqrt((0.002 ** 2 + 0.004 ** 2) / 2), places=6)
+        self.assertAlmostEqual(float(a['rp_c_rms'][1, 2]), 0.5, places=5)
+        self.assertEqual(int(a['rp_nsat'][0, 0]), 1)
+        self.assertTrue(np.isnan(a['rp_c_rms'][2, 0]))         # R3 has no rows
+
+    def test_line_of_sight_slots_and_steps(self):
+        h, a = self.blocks['los']
+        sigs = h['pf_signals']
+        l = [i for i in range(len(a['los_sta'])) if a['los_sta'][i] == 0 and a['los_sat'][i] == 0][0]
+        self.assertEqual(sigs[a['lsig'][l, 0]], 'C1X')
+        self.assertEqual(sigs[a['lsig'][l, 2]], 'C5X')
+        self.assertEqual(sigs[a['lsig'][l, 3]], 'L1X')
+        self.assertEqual(sigs[a['lsig'][l, 4]], 'L5X')
+        self.assertEqual(int(a['lres'][l, 0, 0]), round(0.30 * h['res_scale'][0]))
+        self.assertEqual(int(a['lres'][l, 3, 0]), round(0.002 * h['res_scale'][3]))
+        lam = undelta(a['lam'], a['lam_dz'], -2147483648)
+        self.assertEqual(int(lam[l, 0, 2] - lam[l, 0, 0]), 500)  # +0.5 m in mm
+        self.assertEqual(h['amb_events'][a['ae_code'][0]], 'birth')
+        self.assertEqual(int(a['llli'][l, 1]), 1)
+        self.assertEqual(int(a['ltf'][l, 1]) & 1, 1)              # flagged by the time-difference test at 30 s
+        mw = a['lmw'][l].astype(float) / h['scales']['lmw'] + a['lmw_off'][l]
+        self.assertAlmostEqual(mw[2] - mw[0], 0.86, places=2)
+
+    def test_epoch_and_satellite_blocks(self):
+        h, a = self.blocks['epoch']
+        self.assertEqual([h['dispositions'][v] for v in a['es_disp']], ['emitted', 'gate_withheld', 'emitted'])
+        i = [f[0] for f in h['es_fields']].index('sigma0_pf_code')
+        self.assertAlmostEqual(float(a['es'][i, 2]), 1.1, places=5)
+        j = [f[0] for f in h['cl_fields']].index('pos_err_3d_m')
+        self.assertAlmostEqual(float(a['cl'][j, 2]), 0.1, places=5)
+        hs, s = self.blocks['satellites']
+        self.assertEqual(list(s['dc_ep']), [2])
+        self.assertEqual(hs['dc_items'][s['dc_item'][0]], 'PB L1X')
+
+    def test_quality_block(self):
+        h, a = self.blocks['quality']
+        self.assertEqual(h['vcf_classes'], ['E C1X'])
+        self.assertAlmostEqual(float(a['vcf_f'][0, 0]), 0.6, places=5)
+        k = h['pf_signals'].index('C1X')
+        self.assertAlmostEqual(float(a['eb_rms'][k, 17]), 0.30, places=5)   # 90 degrees, R1-E01
+        self.assertAlmostEqual(float(a['eb_zrms'][k, 17]), 0.60, places=5)  # residual / 0.5 m
+        self.assertAlmostEqual(float(a['eb_rms'][k, 9]), 0.50, places=5)    # 45 degrees, R2-E02
+        self.assertEqual(int(a['zh'].sum()), 15)
+        self.assertEqual(list(a['if_ep']), [1])
+        self.assertAlmostEqual(float(a['if_dev'][0]), 0.3, places=5)
+
+    def test_missing_parts_named_per_layer(self):
+        blocks = B.build_blocks(make_run(self.root / 'plain'), log=lambda *x: None)
+        miss = {(m['layer'], m['file']) for m in blocks['core'][0]['missing']}
+        self.assertIn(('stochastic', 'logs/network_pf_rows.csv'), miss)
+        self.assertIn(('los', 'logs/network_amb_state.csv'), miss)
+        self.assertNotIn('lres', blocks['los'][1])              # the ionosphere trace alone gives azimuths only
+        self.assertIn('laz', blocks['los'][1])
+        self.assertNotIn('quality', blocks)                     # nothing to show without its traces
+
+
 class TestCommands(Fixture):
     def test_build_writes_one_self_contained_page(self):
         run = make_run(self.root)
@@ -326,7 +464,9 @@ class TestPlainWords(unittest.TestCase):
               'standing')
 
     def test_page_sources(self):
-        for name in ('netview.js', 'netview.html', 'netview.css'):
+        names = ['netview.html'] + nv_page.CSS_FILES + nv_page.JS_FILES
+        self.assertTrue(all((HERE / 'page' / n).exists() for n in names), 'a page file named in nv_page is missing')
+        for name in names:
             text = (HERE / 'page' / name).read_text(encoding='utf-8').lower()
             # the one substitution the page makes for a raw trace text names the word on purpose
             text = text.replace(".replace(/wire/gi, 'stream')", '')

@@ -28,7 +28,7 @@ These pages are looked up, not read in order.
 | [Build toolchain](build_toolchain.md) | The Visual Studio 2026 migration record, the traps behind the build wrapper, the disk placement background |
 | [Data files](data_files.md) | How RINEX files and products are located, downloaded and bootstrapped |
 | [Where new code goes](where_new_code_goes.md) | The decision trees of the network producer and the real-time engine, at full length |
-| [Network view](network_view.md) | One network run on one interactive page: making it, making a run that can be viewed, comparing two runs, reading it |
+| [Network dashboard](network_view.md) | One network run on one interactive page in layers (receivers, satellites, slips, stochastic model, ...): making it, making a run that can be viewed, comparing two runs, reading it |
 | [CLAUDE.md history](claude_md_history.md) | Descriptive and historical text cut from `CLAUDE.md` |
 
 ## Suggested schedule
