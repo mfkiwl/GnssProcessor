@@ -4408,6 +4408,24 @@ namespace GnssProcessor {
         }
 
         /**
+         * @brief Sigma multiplier for extra-band phase rows in the network solve
+         *        (@c network.extra_band_phase_sigma_scale), the phase twin of
+         *        @ref networkExtraBandCodeSigmaScale.
+         *
+         * The phase rows of a signal whose band is neither band of the constellation's
+         * ionosphere-free pin pair fold at sigma x scale (information / scale squared) in the
+         * network solve; the code rows are left as they are.  A diagnostic lever: with the
+         * third band's phase deweighted its carried ambiguities lose their pull on the shared
+         * states.  1.0 is the default and is never applied (byte-identical); the loader refuses a
+         * value below 1; the closed-loop consumer is pinned to 1.
+         *
+         * @return The multiplier; 1.0 (no scaling) by default.
+         */
+        double networkExtraBandPhaseSigmaScale() const {
+            return network_config_.extra_band_phase_sigma_scale;
+        }
+
+        /**
          * @brief Cold-start absolute bound of the gross line-of-sight screen, metres
          *        (@c network.gross_los_cold_bound_m;
          *        docs/record/refound/ICF_ignition_code_fault_2026-10-09.md).

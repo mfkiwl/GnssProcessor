@@ -247,6 +247,9 @@ struct NetStation {
     ///.  Those rows keep their unscaled weight; a nonzero count means the
     /// knob is partly inert, and the run-end line says so (standing invariant #4).
     long long eb_rows_no_pin{ 0 };
+    /// Phase rows of an extra-band signal this station folded at the scaled sigma over the run
+    /// (`network.extra_band_phase_sigma_scale`), kept like @c eb_rows_deweighted.
+    long long eb_phase_rows_deweighted{ 0 };
     /// The receiver IFB columns network.estimate_rx_extra_band_code_delay estimates at
     /// this station: the counts and edge state of
     /// network/assembly/ParamInventory.hpp, written by the station's own split and inject

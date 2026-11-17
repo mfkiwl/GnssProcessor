@@ -3697,6 +3697,18 @@ namespace GnssProcessor {
                        network_config_.extra_band_code_sigma_scale);
             network_config_.extra_band_code_sigma_scale = 1.0;
         }
+        // The phase twin (a diagnostic lever): the same rule on the extra band's phase rows.
+        network_config_.extra_band_phase_sigma_scale =
+            jval<double>(json, "network.extra_band_phase_sigma_scale",
+                         "extra_band_phase_sigma_scale", 1.0);
+        if (!(network_config_.extra_band_phase_sigma_scale >= 1.0)) {
+            log->error("Network: network.extra_band_phase_sigma_scale = {} is not at "
+                       "or above 1 (or is not a number) — falling back to 1.0 (no scaling).  "
+                       "The knob only ever DEWEIGHTS the phase rows of a signal whose band is "
+                       "neither band of the constellation's ionosphere-free pin pair.",
+                       network_config_.extra_band_phase_sigma_scale);
+            network_config_.extra_band_phase_sigma_scale = 1.0;
+        }
         // Second code channel.  A station contributes every allow-listed
         // band-1 code it reports besides the one its canonical latch selected, so the
         // C1C and C1W satellite families stop competing for the same stations.  The
@@ -3816,6 +3828,14 @@ namespace GnssProcessor {
                       network_config_.extra_band_code_sigma_scale,
                       network_config_.extra_band_code_sigma_scale
                           * network_config_.extra_band_code_sigma_scale);
+        if (network_config_.extra_band_phase_sigma_scale > 1.0)
+            log->info("Network: network.extra_band_phase_sigma_scale = {:.3f} — "
+                      "EXTRA-BAND phase rows fold at sigma x {:.3f} (information / {:.3f}) in "
+                      "the network solve; the closed-loop consumer stays at 1.",
+                      network_config_.extra_band_phase_sigma_scale,
+                      network_config_.extra_band_phase_sigma_scale,
+                      network_config_.extra_band_phase_sigma_scale
+                          * network_config_.extra_band_phase_sigma_scale);
 
         if (estimate_network_sat_code_bias_) {
             estimate_sat_biases_   = true;   // promote the satellite code bias to a state
@@ -13655,6 +13675,7 @@ namespace GnssProcessor {
         // consumer's band-5 code residual at its own weight).  Pinned at 1 so an arm of
         // this knob moves only the wire.
         c.network_config_.extra_band_code_sigma_scale = 1.0;
+        c.network_config_.extra_band_phase_sigma_scale = 1.0;   // the phase twin, pinned likewise
         // The second code channel is a producer-side mechanism: it exists
         // so the satellite C1C and C1W families share the network's stations.  A consumer
         // is one station and has no family to support; arming it there would only add a

@@ -2599,6 +2599,11 @@ namespace GnssProcessor {
         /// 1 in @c deriveClosedLoopConsumerConfig: this is a producer-side lever, and
         /// the consumer's own code weighting is a separate graded variable.
         double extra_band_code_sigma_scale{ 1.0 };
+        /// Multiplier on the phase sigma of an extra-band signal in the network solve, the phase twin of
+        /// @c extra_band_code_sigma_scale (a diagnostic lever: which of the third band's rows reach the shared
+        /// states).  The default 1.0 is byte-identical (never applied); values below 1 are refused at load; the
+        /// closed-loop consumer is pinned to 1.
+        double extra_band_phase_sigma_scale{ 1.0 };
         /// Anchor-slip handover (docs/record/SPEC_event_harness.md §12.7): when a slip
         /// response frees the arc that anchors a (sat, signal) phase-bias family, stage
         /// the one-epoch candidacy ban so that the same epoch's election hands the
