@@ -123,3 +123,25 @@ The per-link Melbourne-Wübbena means against truth (the levels fitted with the 
 - `h40_off` (seed 40, the tail): 130 wrong C/Q decisions (the first 0.47 h into the run; 192 right) and 21 871 wrong C/Q held link-epochs (27 % of the family's), all one wide-lane cycle ((−3, −4) 66 times, (+3, +4) 64); X/X one wrong decision at 4.08 h (229 held link-epochs); GPS none. As expected (at least 5 wrong C/Q decisions, an outlier among the hosts): the outlier S24000SIM–E02, the tree edge of E02 at the C/Q family's root (E1 −0.682 m, E5a −0.464 m; +0.64 cycle predicted on the filter's wide lane, +0.78 on the Melbourne-Wübbena one), lies on all 130 wrong cycles and on none of the right ones; for every wrong decision it carries over half the predicted error, and the chords' own links carry 1 % of it.
 
 **Reading.** At the error size read on observed data (section 105), a typical draw costs nothing, and the risk is concentrated in one kind of event: a link with a lasting code error past half a wide-lane cycle that sets a level near the root. With seed 40 one such link made 40 % of the C/Q family's decisions wrong. Section 105 shows why no fractional test catches it (its error wraps), so a defence has to keep any single link from setting a level unchecked: a level set by the agreement of several links, or a second, independent route to the same level (the other Galileo family, or another root).
+
+## 106. 2026-11-17: the single Galileo network, step A: one network by relabelling the combined mode on the simulator (pre-registered)
+
+**Why.** The author's go-ahead of 2026-11-17 to start the single Galileo network of section 98, tested first on the bed with one bad link at a root (section 103.2). Before any engine change the tie can be had on the simulator from the data alone: the combined-mode stations' observation types are relabelled to the pilot mode (their data keep the combined mode's offsets), so the unchanged engine sees every Galileo station in one mode.
+
+**What the relabel gives, and what it leaves out** (section 98's points):
+- one satellite phase-bias column per satellite and band for both modes (point 1), each receiver's phase and code biases taking up its own mode's offsets (no receiver tracks both);
+- one tree per band (point 3): Galileo becomes a constellation of two phase signals, so the chain forms its pair family, with one datum receiver elected over all 60 stations;
+- one ring-fix family E:L1C/L5Q spanning both modes (point 4), so a chord may join the modes;
+- left out: the per-satellite wide-lane term between the modes (point 2): the satellites' code offsets between the modes stay unmodelled (on the bed sd 0.051 and at most 0.12 cycle in the filter's wide-lane direction, E12); the stream carries the pilot records only (point 5); nothing here applies to observed data.
+
+**Arms** (exe nrf37, 6 h from 00:30:15): `u1_m1`, `u1_d1`, `u1_h1` and `u1_h40` are `m1_off37`, `d1_off`, `h1_off` and `h40_off` (the separate families on the clean two-mode bed, the seed-1 code-error bed and the two bracket beds) with `--rinex "relabel;sys=E;stations=<the 30 combined-mode stations>;from=?1X;to=?1C"` and `"...;from=?5X;to=?5Q"`, and `network.ring_fix.truth_root` at the bed's truth alias (`scripts/nrf_truth_alias.py`: the integers and slips of L1X and L5X renamed to L1C and L5Q, the wind-up as it is; verify PASS on all four). The truth root is read by the audit alone.
+
+**Bars on the clean bed** (`u1_m1` against `m1_off37`):
+- T1: no wrong decision and no wrong held link-epoch against truth.
+- T2: Galileo held link-epochs at least 98 % of the two families' together (166 081 in `m1_off37`, so at least 162 759).
+- T3: the held-out user SZZ000SIM's 3D error, median by hour from the run's start (`closed_loop_trace.csv`), not worse by more than 2 mm in hours 2 to 6.
+- T4: chords whose cycle joins the two modes decided (at least 20) and none wrong.
+
+**On the code-error beds** (reported against the separate runs, no bar): wrong decisions and wrong held link-epochs (`d1_off` 35, `h1_off` 0, `h40_off` 131), and on `u1_h40` which link hosts E02's level in the joint tree. Expected: a bad link near the root still sets its satellite's level for every chord through it unless the joint tree elects another host for that satellite; the joint network adds chords that tie, not a check on a host.
+
+**Reading prepared.** T1 to T4 passing: the tie costs nothing on the simulator, and the full build (point 2's term and the stream's combined-mode records, behind a key) comes next, before observed data. A failure of T1 or T4 in chords that join the modes, with wide lanes off by about the satellites' term, says the term is needed even here.
