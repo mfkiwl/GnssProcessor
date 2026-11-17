@@ -205,20 +205,31 @@ function renderMatrix(spec, w, h, rowH, labelW) {
   const ctx = off.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const nr = spec.rows.length, ne = M.nEp;
-  // the cells: one pixel per (epoch, row) in an image, drawn scaled without smoothing
-  const img = new ImageData(ne, nr);
-  const sc = spec.scale;
+  // the cells: one pixel per (column, row) in an image, drawn scaled without smoothing.  When the run has more
+  // epochs than the plot has pixels (a long run), each column takes its epochs together: the largest for counts (an
+  // isolated slip stays visible), the mean of the finite values otherwise
+  const ncol = Math.max(1, Math.min(ne, Math.round((w - labelW - 6) * dpr)));
+  const img = new ImageData(ncol, nr);
+  const sc = spec.scale, isCount = sc.kind === 'count';
   const bg = C.soft.startsWith('#') ? [parseInt(C.soft.slice(1, 3), 16), parseInt(C.soft.slice(3, 5), 16), parseInt(C.soft.slice(5, 7), 16)] : [235, 235, 230];
+  const val = (r, e) => (spec.value ? spec.value(r, e) : spec.values[r * ne + e]);
   for (let r = 0; r < nr; r++) {
-    for (let e = 0; e < ne; e++) {
-      const v = spec.value ? spec.value(r, e) : spec.values[r * ne + e];
-      const c = scaleRgb(sc, v) || bg;
-      const o = (r * ne + e) * 4;
-      img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+    for (let c = 0; c < ncol; c++) {
+      let v;
+      if (ncol === ne) v = val(r, c);
+      else {
+        const e0 = Math.floor(c * ne / ncol), e1 = Math.max(e0 + 1, Math.floor((c + 1) * ne / ncol));
+        let acc = 0, n = 0, mx = -Infinity;
+        for (let e = e0; e < e1; e++) { const x = val(r, e); if (isFinite(x)) { acc += x; n++; if (x > mx) mx = x; } }
+        v = n ? (isCount ? mx : acc / n) : NaN;
+      }
+      const col = scaleRgb(sc, v) || bg;
+      const o = (r * ncol + c) * 4;
+      img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
     }
   }
   const tmp = document.createElement('canvas');
-  tmp.width = ne; tmp.height = nr;
+  tmp.width = ncol; tmp.height = nr;
   tmp.getContext('2d').putImageData(img, 0, 0);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(tmp, labelW, 0, w - labelW - 6, nr * rowH);
