@@ -18,7 +18,10 @@ Two ways of choosing the links (the satellite system is --system, or the satelli
 - every link: --draw-sigma-m s, each of --signals present at each receiver, of each satellite of the system that the
   receiver observes, moved by its own draw from N(0, s), seeded by (--seed, receiver, satellite, signal) so that a
   link's bias does not depend on which others exist, rounded to the millimetre: an observed receiver's long-lived
-  code multipath, constant through the day.
+  code multipath, constant through the day.  With --outlier-share p and --outlier-sigma-m S, each link (receiver,
+  satellite) is an outlier with probability p, by its own uniform draw seeded by (--seed, receiver, satellite), and
+  every signal of an outlier link draws from N(0, S) instead (card NRF section 103.1: a bed at a smaller spread with
+  a few large lasting errors, to bracket observed receivers).
 The same bias on C1C and C5Q of Galileo moves the link's Melbourne-Wubbena wide lane by -bias / 0.751 m cycle.
 Phases and every other file are untouched; each edited receiver's truth_injected_code.csv lists its satellites,
 signals and biases; GENERATED.txt keeps the base's record and adds the command and the edited files' sha256.
@@ -71,6 +74,12 @@ def draw(seed, station, sat, signal, sigma):
     return round(random.Random("%d|%s|%s|%s" % (seed, station, sat, signal)).gauss(0.0, sigma), 3)
 
 
+def is_outlier(seed, station, sat, share):
+    """Whether the link (station, sat) draws from the outlier spread: its own uniform draw below share, seeded by
+    (seed, receiver, satellite) alone, so that the choice depends neither on the signals nor on the other links."""
+    return share > 0.0 and random.Random("%d|%s|%s|outlier" % (seed, station, sat)).random() < share
+
+
 def satellites(text, system):
     return sorted({ln[:3] for ln in text.split("END OF HEADER", 1)[1].split("\n") if ln[:1] == system})
 
@@ -84,7 +93,8 @@ def tables(base, a):
         for s, rinex in st.items():
             text, _ = mb.read_text(rinex)
             codes = mb.obs_types(text.split("\n"), a.system)
-            t = {(sat, g): draw(a.seed, s, sat, g, a.draw_sigma_m)
+            t = {(sat, g): draw(a.seed, s, sat, g, a.outlier_sigma_m
+                                if is_outlier(a.seed, s, sat, a.outlier_share) else a.draw_sigma_m)
                  for sat in satellites(text, a.system) for g in signals if g in codes}
             if t:
                 out[s] = t
@@ -129,6 +139,12 @@ def make(a):
     how = ("each link's own draw from N(0, %g m), seed %d, signals %s of system %s at every receiver"
            % (a.draw_sigma_m, a.seed, a.signals, a.system) if a.draw_sigma_m > 0.0
            else "%g m on %s of %s at %s" % (a.bias_m, a.signals, a.sats, a.station))
+    if a.draw_sigma_m > 0.0 and a.outlier_share > 0.0:
+        n_out = sum(1 for s, t in tab.items() for sat in {k[0] for k in t}
+                    if is_outlier(a.seed, s, sat, a.outlier_share))
+        n_all = sum(len({k[0] for k in t}) for t in tab.values())
+        how += ("; a share %g of the links (each its own uniform draw; %d of %d links) drawn from N(0, %g m) instead"
+                % (a.outlier_share, n_out, n_all, a.outlier_sigma_m))
     cmd = "py -3.14 scripts/nrf_inject_code_bed.py " + " ".join(sys.argv[1:])
     with open(os.path.join(out, "GENERATED.txt"), "a", newline="\n") as fh:   # after the base's own record
         fh.write("\n---\nInjected code bed %s of card NRF (section 102): %s with %s.\n\n" % (a.label, a.base, how))
@@ -212,6 +228,10 @@ def selftest():
     ok = ok and lines[5] == ("G04" + "".join("%14.3f 8" % v for v in (20000000.0, 105000000.123)))
     ok = ok and draw(1, "S01000SIM", "E07", "C1C", 0.15) == draw(1, "S01000SIM", "E07", "C1C", 0.15)
     ok = ok and draw(1, "S01000SIM", "E07", "C1C", 0.15) != draw(2, "S01000SIM", "E07", "C1C", 0.15)
+    links = [("S%02d000SIM" % i, "E%02d" % k) for i in range(1, 61) for k in range(1, 37)]
+    ok = ok and not any(is_outlier(1, s, k, 0.0) for s, k in links)
+    share = sum(is_outlier(1, s, k, 0.05) for s, k in links) / len(links)
+    ok = ok and 0.03 < share < 0.07 and is_outlier(1, "S01000SIM", "E07", 0.05) == is_outlier(1, "S01000SIM", "E07", 0.05)
     print("selftest: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
@@ -231,6 +251,8 @@ def main():
     m.add_argument("--bias-m", type=float, default=0.25)
     m.add_argument("--draw-sigma-m", type=float, default=0.0)
     m.add_argument("--seed", type=int, default=1)
+    m.add_argument("--outlier-share", type=float, default=0.0)
+    m.add_argument("--outlier-sigma-m", type=float, default=0.0)
     m.add_argument("--label", required=True)
     v = sub.add_parser("verify")
     v.add_argument("--base", required=True)
