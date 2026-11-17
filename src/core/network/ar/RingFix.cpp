@@ -328,6 +328,10 @@ RingFixReattachPick ringFixReattachChoice(const std::vector<RingFixReattachCand>
     p.med_if = circularMedian(fi, mi);
     p.med_wl = circularMedian(fw, mw);
     if (p.n < kRingFixReattachMinLinks || si > kRingFixReattachMaxSdIfCyc || sw > kRingFixReattachMaxSdWlCyc) return p;
+    if (std::abs(p.med_if) < kRingFixReattachMinOffsetIfCyc && std::abs(p.med_wl) < kRingFixReattachMinOffsetWlCyc) {
+        p.converging = true;   // the links are converging onto the satellite's level: the gates decide them
+        return p;
+    }
     double best = std::numeric_limits<double>::infinity();
     for (std::size_t i = 0; i < cands.size(); ++i) {
         const double d = std::abs(wrapCycle(cands[i].frac_if - p.med_if)) / kRingFixReattachMaxSdIfCyc

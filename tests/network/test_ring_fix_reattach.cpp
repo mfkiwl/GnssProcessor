@@ -53,6 +53,20 @@ TEST(RingFixReattach, FractionsAcrossHalfACycleAreOneCluster) {
     EXPECT_EQ(c[static_cast<std::size_t>(p.index)].station, 3);
 }
 
+TEST(RingFixReattach, AgreementOnASmallOffsetIsAConvergenceNotAMove) {
+    const std::vector<RingFixReattachCand> small{{1, 0.03, -0.05}, {2, 0.05, -0.08}, {3, 0.04, -0.06}};
+    const RingFixReattachPick p = ringFixReattachChoice(small);
+    EXPECT_FALSE(p.ok);
+    EXPECT_TRUE(p.converging);
+    EXPECT_EQ(p.index, -1);
+    // A wide-lane offset alone is an offset: the satellite moves.
+    const std::vector<RingFixReattachCand> wl{{1, 0.03, -0.20}, {2, 0.05, -0.22}, {3, 0.04, -0.18}};
+    const RingFixReattachPick q = ringFixReattachChoice(wl);
+    EXPECT_TRUE(q.ok);
+    EXPECT_FALSE(q.converging);
+    EXPECT_EQ(wl[static_cast<std::size_t>(q.index)].station, 1);
+}
+
 TEST(RingFixReattach, TheWideLaneAloneCanRefuse) {
     const std::vector<RingFixReattachCand> c{{1, 0.10, -0.30}, {2, 0.11, 0.05}, {3, 0.09, 0.35}};
     const RingFixReattachPick p = ringFixReattachChoice(c);

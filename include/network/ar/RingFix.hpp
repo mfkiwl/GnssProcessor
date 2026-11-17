@@ -89,8 +89,16 @@ inline constexpr int kRingFixSettledMinSats = 4;
 /// Rule "largest": another set replaces the incumbent once it holds this many more satellites.
 inline constexpr int kRingFixSettledHysteresis = 2;
 /// The re-attachment of untied satellites (network.ring_fix.reattach): how long a satellite of a family's tree stays
-/// unsettled and without a tie before its tree edge may move (s).
-inline constexpr double kRingFixReattachDwellS = 600.0;
+/// unsettled and without a tie before its tree edge may move (s; card NRF section 102.2).
+inline constexpr double kRingFixReattachDwellS = 1800.0;
+/// The re-attachment: how long after a move its satellite is not moved again (s), longer than its links' window and
+/// persistence after the re-host (section 102.2).
+inline constexpr double kRingFixReattachHoldoffS = 3600.0;
+/// The re-attachment: the smallest common offset of the candidates that moves a satellite, ionosphere-free (cycles);
+/// below it and below the wide lane's the links are converging onto the satellite's level (section 102.2).
+inline constexpr double kRingFixReattachMinOffsetIfCyc = 0.10;
+/// The re-attachment: the smallest common offset of the candidates that moves a satellite, wide lane (cycles).
+inline constexpr double kRingFixReattachMinOffsetWlCyc = 0.15;
 /// The re-attachment: the fewest agreeing candidate links of the flagged piece.
 inline constexpr int kRingFixReattachMinLinks = 3;
 /// The re-attachment: the candidates' largest circular standard deviation of the ionosphere-free fraction (cycles).
@@ -252,7 +260,8 @@ struct RingFixReattachCand {
 
 /// The re-attachment's reading of one untied satellite's candidates (@ref ringFixReattachChoice).
 struct RingFixReattachPick {
-    bool   ok{false};      ///< At least kRingFixReattachMinLinks candidates whose fractions agree: a move is chosen.
+    bool   ok{false};      ///< Enough candidates agree on a common offset large enough: a move is chosen.
+    bool   converging{false};  ///< They agree but their common offset is below both minimums: no move.
     int    index{-1};      ///< The chosen candidate, an index into the candidates (-1 unless @ref ok).
     int    n{0};           ///< The candidates read.
     double med_if{0.0};    ///< Their circular median of the ionosphere-free fraction (cycles).
@@ -269,12 +278,15 @@ struct RingFixReattachPick {
  * standard deviation sqrt(-2 ln R) / (2 pi) are formed (R the mean resultant length); the median is the median of
  * the fractions unwrapped about m, plus m.  The candidates agree when there are at least
  * @ref kRingFixReattachMinLinks of them and both spreads are within @ref kRingFixReattachMaxSdIfCyc and
- * @ref kRingFixReattachMaxSdWlCyc; the chosen candidate is the one with the smallest
- * |d_if| / kRingFixReattachMaxSdIfCyc + |d_wl| / kRingFixReattachMaxSdWlCyc, d its wrapped distance to the medians,
- * ties by the lower index.  The median, so that one receiver's code does not set the wide lane for all.
+ * @ref kRingFixReattachMaxSdWlCyc.  Agreeing candidates move the satellite only when their common offset is an
+ * offset, not a convergence: |median| at least @ref kRingFixReattachMinOffsetIfCyc ionosphere-free or
+ * @ref kRingFixReattachMinOffsetWlCyc wide lane (else @c converging).  The chosen candidate is the one with the
+ * smallest |d_if| / kRingFixReattachMaxSdIfCyc + |d_wl| / kRingFixReattachMaxSdWlCyc, d its wrapped distance to the
+ * medians, ties by the lower index.  The median, so that one receiver's code does not set the wide lane for all.
  *
  * @param cands The candidates (their order breaks ties).
- * @return The reading; @c ok false with the spreads filled when the candidates are too few or disagree.
+ * @return The reading; @c ok false with the spreads and medians filled when the candidates are too few, disagree or
+ *         converge.
  */
 RingFixReattachPick ringFixReattachChoice(const std::vector<RingFixReattachCand>& cands);
 
@@ -646,6 +658,8 @@ struct RingFixCounters {
     long long untied_missed{0};           ///< Band-moves not applied: the arc absent, or the satellite reached another way.
     long long untied_few{0};              ///< Satellite-epochs past the dwell with too few candidates (no move).
     long long untied_spread{0};           ///< Satellite-epochs past the dwell whose candidates disagree (no move).
+    long long untied_converging{0};       ///< Satellite-epochs past the dwell whose candidates agree on a small offset (no move).
+    long long untied_held_off{0};         ///< Satellite-epochs past the dwell within a moved satellite's hold-off (no move).
     long long untied_flagged_after{0};    ///< Moved satellites flagged within kRingFixReattachWatchS of the move.
     long long untied_unflagged_after{0};  ///< Moved satellites not flagged within it.
 };
@@ -771,6 +785,8 @@ struct NetworkRingFix {
     std::map<std::pair<std::string, std::string>, RingFixUntiedMove> untied_moves;
     /// (family, satellite) -> the epoch of its last applied move, watched for its flag.
     std::map<std::pair<std::string, std::string>, double> untied_moved_s;
+    /// (family, satellite) -> the epoch of its last requested move, for the hold-off (kRingFixReattachHoldoffS).
+    std::map<std::pair<std::string, std::string>, double> untied_last_move_s;
     /// This epoch's election outcomes of the moves, for the decision seam's events (cleared there).
     std::vector<RingFixUntiedOutcome> untied_outcomes;
 };

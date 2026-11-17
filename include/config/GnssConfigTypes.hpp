@@ -1991,13 +1991,14 @@ namespace GnssProcessor {
         int settled_wait_emissions{ 0 };
         /// @c network.ring_fix.reattach: the re-attachment of untied satellites (card NRF part 12, section 102).
         /// After each epoch's settled flags, a satellite of a held family's tree that is not settled and holds no tie
-        /// (no held chord, no certified tree edge) for 600 s, with at least 3 candidate links whose receivers are in
+        /// (no held chord, no certified tree edge) for 1 800 s, with at least 3 candidate links whose receivers are in
         /// the flagged piece (and not below the satellite in its tree), whose floats passed the decision's window with
         /// an ionosphere-free sigma of at most 0.10 cycle, and whose fractions agree (circular standard deviations at
-        /// most 0.08 cycle ionosphere-free and 0.10 cycle wide lane), has its tree edge moved at the next election
-        /// onto the candidate nearest their medians, in every band of the family: an ordinary re-host (the new host
-        /// link's rounded float, an unknown step); no integer is decided.  Events and run-end counters at both edges.
-        /// Needs settled_flags.  False (default): off, byte-identical.
+        /// most 0.08 cycle ionosphere-free and 0.10 cycle wide lane) on a common offset of at least 0.10 cycle
+        /// ionosphere-free or 0.15 cycle wide lane, has its tree edge moved at the next election onto the candidate
+        /// nearest their medians, in every band of the family: an ordinary re-host (the new host link's rounded float,
+        /// an unknown step); no integer is decided, and the satellite is not moved again for 3 600 s (section 102.2).
+        /// Events and run-end counters at both edges.  Needs settled_flags.  False (default): off, byte-identical.
         bool reattach{ false };
         /// @c network.ring_fix.form_configured_pairs: the chord table forms every family of network.ring_fix.pairs on
         /// an arc that tracks both its signals, beside the rule that pairs every band-1 signal with the arc's
