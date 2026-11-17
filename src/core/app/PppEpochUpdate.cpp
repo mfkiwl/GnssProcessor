@@ -646,6 +646,18 @@ void Application::resolveEpochAmbiguities_(const PppEpochWork& w) {
             epoch_prefix, ar_result.release_satellites.size(), n_keys,
             ambiguity_resolver_->holdReleaseCount(), ambiguity_resolver_->partnerReleaseCount());
     }
+
+    // A contradiction between the code and the iono-free phase (wl_branch_check)
+    // returns the satellites at fault to the prior of their code-bias states, again
+    // after the fix is installed.  With the family off the list is only reported.
+    if (config_.estimateRxSatCodeBias()) {
+        for (const auto& sat : ar_result.bias_reset_satellites) {
+            const std::size_t n_states = state_manager_->resetRxSatCodeBiasStatesToPrior(sat);
+            log_manager_.getLogger("main_log")->info(
+                "{}AR code-bias reset: satellite {}, {} receiver-satellite code-bias state(s) "
+                "returned to the prior", epoch_prefix, sat, n_states);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

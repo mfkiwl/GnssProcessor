@@ -293,6 +293,15 @@ void RealTimeEngine::resolveAmbiguities(RtEpochContext& ctx) {
                       ambiguity_resolver_->holdReleaseCount(),
                       ambiguity_resolver_->partnerReleaseCount());
         }
+        // A contradiction between the code and the iono-free phase (wl_branch_check)
+        // returns the satellites at fault to the prior of their code-bias states.
+        if (config_.estimateRxSatCodeBias()) {
+            for (const auto& sat : ar_result.bias_reset_satellites) {
+                const std::size_t n_states = state_manager_->resetRxSatCodeBiasStatesToPrior(sat);
+                log->info("{}AR code-bias reset: satellite {}, {} receiver-satellite code-bias "
+                          "state(s) returned to the prior", epoch_prefix, sat, n_states);
+            }
+        }
     }
 }
 

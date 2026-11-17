@@ -1392,6 +1392,297 @@ AmbiguityResolver::NlRowCoefficients AmbiguityResolver::nlRowCoefficients(
     return c;
 }
 
+// ===========================================================================
+// Wide-lane decision by the code and the ionosphere-free phase
+// ===========================================================================
+
+WlBranchDecision decideWlBranch(double w, double sigma_w, double r0, double r1,
+                                double sigma_n, double gap, double wl_max_frac) {
+    WlBranchDecision out;
+    if (!(std::isfinite(w) && std::isfinite(sigma_w))) {
+        out.reason = WlBranchReason::NotFinite;
+        return out;
+    }
+    const double d = w - std::round(w);
+    out.code_admits = std::abs(d) + 3.0 * sigma_w <= wl_max_frac;
+
+    // Three integers within reach: the code cannot tell the neighbours apart.
+    if (1.0 + std::abs(d) <= 3.0 * sigma_w) {
+        out.reason = WlBranchReason::Reach;
+        return out;
+    }
+
+    // Decisive means the phase sits within half a gap of an integer N_1 with the
+    // three-sigma margin.  Both at once cannot happen for consistent fractions; for
+    // inconsistent inputs the phase is read as decisive for neither.
+    const double half_gap = 0.5 * gap;
+    const bool dec0 = std::abs(r0) + 3.0 * sigma_n <= half_gap;
+    const bool dec1 = std::abs(r1) + 3.0 * sigma_n <= half_gap;
+    if (dec0 != dec1) out.phase = dec1 ? WlBranchChoice::W1 : WlBranchChoice::W0;
+
+    if (out.code_admits) {
+        // The code admits W0, so the neighbour is no candidate.  A phase that is
+        // decisive for the neighbour contradicts the code: neither integer is taken.
+        if (out.phase == WlBranchChoice::W1) {
+            out.reason = WlBranchReason::Contradiction;
+        } else {
+            out.integer = WlBranchChoice::W0;
+            out.reason  = WlBranchReason::Code;
+        }
+        return out;
+    }
+
+    // The code does not admit.  The neighbour is a candidate when the code cannot
+    // exclude it.
+    out.w1_candidate = 1.0 - std::abs(d) <= 3.0 * sigma_w;
+    if (out.phase == WlBranchChoice::W0) {
+        out.integer = WlBranchChoice::W0;
+        out.reason  = WlBranchReason::PhaseW0;
+    } else if (out.phase == WlBranchChoice::W1 && out.w1_candidate) {
+        out.integer = WlBranchChoice::W1;
+        out.reason  = WlBranchReason::PhaseW1;
+    } else {
+        out.reason = WlBranchReason::Undecided;
+    }
+    return out;
+}
+
+WlBranchPersistStep stepWlBranchPersistence(const std::optional<WlBranchRun>& entry,
+                                            bool decisive, long integer,
+                                            double tow, double persist_s) {
+    WlBranchPersistStep out;
+    if (!decisive) return out;     // erased: not decisive for either integer
+
+    const double since_last = entry ? tow - entry->last_tow : 0.0;
+    const bool continues = entry && entry->integer == integer && since_last >= 0.0
+                        && since_last <= std::max(persist_s, 1.0);
+    out.keep = true;
+    out.run.integer   = integer;
+    out.run.began_tow = continues ? entry->began_tow : tow;
+    out.run.last_tow  = tow;
+    out.persisted_s   = tow - out.run.began_tow;
+    out.ripe          = out.persisted_s >= persist_s;
+    return out;
+}
+
+const char* wlBranchReasonWord(WlBranchReason reason) {
+    switch (reason) {
+        case WlBranchReason::NotFinite:     return "nonfinite";
+        case WlBranchReason::Reach:         return "reach";
+        case WlBranchReason::Code:          return "code";
+        case WlBranchReason::Contradiction: return "contradiction";
+        case WlBranchReason::PhaseW0:       return "phase_w0";
+        case WlBranchReason::PhaseW1:       return "phase_w1";
+        case WlBranchReason::Undecided:     return "undecided";
+        case WlBranchReason::Waiting:       return "waiting";
+    }
+    return "unknown";
+}
+
+namespace {
+/// The word of a choice for the @c WLBRANCH line.
+const char* wlBranchChoiceWord(WlBranchChoice c) {
+    switch (c) {
+        case WlBranchChoice::W0:   return "w0";
+        case WlBranchChoice::W1:   return "w1";
+        case WlBranchChoice::None: break;
+    }
+    return "none";
+}
+} // namespace
+
+bool AmbiguityResolver::decideWlBranchOfPair_(
+    const DdPair& p_hi, const DdPair& p_lo, double lam1, double lam2, double f1, double f2,
+    const FloatWidelane& fw, const Eigen::VectorXd& x, const Eigen::MatrixXd& P,
+    double tow, WlBranchEpoch& epoch, int& dd_wl) {
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const long   w0  = std::isfinite(fw.w) ? std::lround(fw.w) : 0L;
+    const long   w1  = w0 + ((fw.w - std::round(fw.w)) >= 0.0 ? 1L : -1L);
+
+    // The N_1 float of the iono-free row for each candidate integer.  The row is
+    // always the iono-free one here: it does not see the slant ionosphere, so the
+    // phase it reports is the one the code bias states leave undetermined.
+    double r0 = nan, r1 = nan, sigma_n = nan, gap = 0.0;
+    if (f1 > f2 && std::isfinite(fw.w)) {
+        const NlRowCoefficients row = nlRowCoefficients(f1, f2, lam1, lam2, true);
+        const int idx[4] = { p_hi.state_idx_i, p_hi.state_idx_ref,
+                             p_lo.state_idx_i, p_lo.state_idx_ref };
+        const double g[4] = { row.t_1, -row.t_1, row.t_2, -row.t_2 };
+        double base = 0.0, var = 0.0;
+        for (int a = 0; a < 4; ++a) {
+            base += g[a] * x(idx[a]);
+            for (int b = 0; b < 4; ++b) var += g[a] * g[b] * P(idx[a], idx[b]);
+        }
+        const double n0 = base + row.shift * static_cast<double>(w0);
+        const double n1 = base + row.shift * static_cast<double>(w1);
+        r0 = n0 - std::round(n0);
+        r1 = n1 - std::round(n1);
+        const double floor_cyc = config_.nl_sigma_floor_cyc;
+        if (var >= 0.0) sigma_n = std::sqrt(var + floor_cyc * floor_cyc);
+        gap = std::abs(row.shift - std::round(row.shift));
+    }
+
+    WlBranchDecision dec = decideWlBranch(fw.w, fw.sigma, r0, r1, sigma_n, gap,
+                                          config_.wl_max_frac);
+
+    // The phase's integer must have been decisive for the persistence time before a
+    // decision by the phase, or a contradiction, takes effect.
+    const std::string run_key = p_hi.sat_i + "|" + p_hi.sat_ref + "|" + p_hi.signal + "|"
+                              + p_lo.signal;
+    std::optional<WlBranchRun> run;
+    if (const auto it = wl_branch_runs_.find(run_key); it != wl_branch_runs_.end())
+        run = it->second;
+    const bool decisive_phase = dec.phase != WlBranchChoice::None;
+    const long phase_integer  = dec.phase == WlBranchChoice::W1 ? w1 : w0;
+    WlBranchPersistStep step = stepWlBranchPersistence(
+        run, decisive_phase, phase_integer, tow, config_.wl_branch_persist_s);
+
+    bool contradiction_event = false;
+    if (dec.reason == WlBranchReason::PhaseW0 || dec.reason == WlBranchReason::PhaseW1) {
+        if (step.ripe) {
+            ++wl_branch_counters_.by_phase;
+        } else {
+            dec.integer = WlBranchChoice::None;
+            dec.reason  = WlBranchReason::Waiting;
+            ++wl_branch_counters_.waiting;
+        }
+    } else if (dec.reason == WlBranchReason::Contradiction && step.ripe) {
+        contradiction_event = true;
+        ++wl_branch_counters_.contradictions;
+        epoch.contradicted.emplace_back(p_hi.sat_i, p_hi.sat_ref);
+    }
+    const double persisted_s = step.persisted_s;
+    if (contradiction_event) {      // the event does not repeat every epoch
+        step.run.began_tow = tow;
+        step.persisted_s   = 0.0;
+    }
+    if (step.keep) wl_branch_runs_[run_key] = step.run;
+    else           wl_branch_runs_.erase(run_key);
+
+    ++wl_branch_counters_.evaluated;
+    if (dec.reason == WlBranchReason::Reach) ++wl_branch_counters_.refused_reach;
+    if (dec.code_admits) epoch.code_admitted.emplace_back(p_hi.sat_i, p_hi.sat_ref);
+
+    log_manager_.getLogger("ambiguity_resolver")->info(
+        "WLBRANCH tow={:.1f} sat_i={} sat_ref={} sig_hi={} sig_lo={} w={:.4f} sigma_w={:.4f} "
+        "w0={} w1={} r0={:.4f} r1={:.4f} sigma_n={:.4f} gap={:.4f} code={} cand1={} phase={} "
+        "persist={:.1f} decision={} reason={}",
+        tow, p_hi.sat_i, p_hi.sat_ref, p_hi.signal, p_lo.signal, fw.w, fw.sigma, w0, w1,
+        r0, r1, sigma_n, gap, dec.code_admits ? "admit" : "refuse", dec.w1_candidate ? 1 : 0,
+        wlBranchChoiceWord(dec.phase), persisted_s, wlBranchChoiceWord(dec.integer),
+        wlBranchReasonWord(dec.reason));
+
+    if (dec.integer == WlBranchChoice::None) return false;
+    dd_wl = static_cast<int>(dec.integer == WlBranchChoice::W1 ? w1 : w0);
+    return true;
+}
+
+void AmbiguityResolver::pruneWlBranchRuns_(double tow) {
+    // A run whose last decisive epoch is long past (or lies in the future, as after a
+    // week rollover) can never continue; dropping it keeps the map to the pairs in play.
+    const double max_age = 10.0 * std::max(config_.wl_branch_persist_s, 30.0);
+    for (auto it = wl_branch_runs_.begin(); it != wl_branch_runs_.end();) {
+        const double age = tow - it->second.last_tow;
+        it = (age > max_age || age < 0.0) ? wl_branch_runs_.erase(it) : std::next(it);
+    }
+}
+
+std::string AmbiguityResolver::wlBranchRunEndLine() const {
+    const WlBranchCounters& c = wl_branch_counters_;
+    return fmt::format("Wide-lane branch check: {} pairs evaluated, {} decided by the phase, "
+                       "{} persisted contradictions, {} pair-epochs waiting for persistence, "
+                       "{} refused for reach, {} satellites returned for a code-bias reset",
+                       c.evaluated, c.by_phase, c.contradictions, c.waiting, c.refused_reach,
+                       c.satellites_returned);
+}
+
+// ===========================================================================
+// Extra signals of a satellite pair (AmbiguityResolverConfig::extra_signals)
+// ===========================================================================
+
+ExtraWideLaneAdmission admitExtraWideLane(double e, double sigma_e, double wl_max_frac) {
+    // An extra-wide lane is a difference of cycle counts: it needs no division by a
+    // frequency difference, so two close frequencies (E5a and E5b, 9.8 m) cannot
+    // amplify an error in it, and no amplification guard is applied.
+    ExtraWideLaneAdmission out;
+    if (!(std::isfinite(e) && std::isfinite(sigma_e))) return out;
+    out.integer  = std::lround(e);
+    out.admitted = std::abs(e - std::round(e)) + 3.0 * sigma_e <= wl_max_frac;
+    return out;
+}
+
+PrimaryExtraSplit splitPrimaryAndExtra(const std::string& system_name,
+                                       const std::vector<PairSignal>& signals,
+                                       const std::map<std::string, std::string>& primary_bands) {
+    PrimaryExtraSplit out;
+    const auto entry = primary_bands.find(system_name);
+    if (entry == primary_bands.end()) {
+        // No entry: the rule from before the extra signals, exactly two signals.
+        if (signals.size() != 2) return out;
+        const bool first_is_hi = signals[0].freq > signals[1].freq;
+        out.hi     = first_is_hi ? 0 : 1;
+        out.lo     = first_is_hi ? 1 : 0;
+        out.usable = true;
+        return out;
+    }
+
+    if (entry->second.size() != 2) return out;   // malformed entry: nothing is primary
+
+    // The first signal on each primary band is a primary signal.
+    int first_of_band[2] = { -1, -1 };
+    for (int k = 0; k < static_cast<int>(signals.size()); ++k) {
+        const std::string& s = signals[k].signal;
+        if (s.size() < 2) continue;
+        for (int b = 0; b < 2; ++b)
+            if (first_of_band[b] < 0 && s[1] == entry->second[b]) { first_of_band[b] = k; break; }
+    }
+    if (first_of_band[0] < 0 || first_of_band[1] < 0) return out;
+
+    const bool a_is_hi = signals[first_of_band[0]].freq > signals[first_of_band[1]].freq;
+    out.hi = a_is_hi ? first_of_band[0] : first_of_band[1];
+    out.lo = a_is_hi ? first_of_band[1] : first_of_band[0];
+    for (int k = 0; k < static_cast<int>(signals.size()); ++k)
+        if (k != out.hi && k != out.lo) out.extras.push_back(k);
+    out.usable = true;
+    return out;
+}
+
+std::vector<AmbiguityResolver::ExtraCandidate> AmbiguityResolver::evaluateExtraWideLanes_(
+    const std::vector<DdPair>& pairs, int lo_pair_idx, double lam_lo,
+    const std::vector<ExtraCandidate>& extras, const Eigen::VectorXd& x,
+    const Eigen::MatrixXd& P, double tow, bool log_lines) {
+
+    std::vector<ExtraCandidate> admitted;
+    const DdPair& p_lo = pairs[lo_pair_idx];
+    for (ExtraCandidate cand : extras) {
+        // e = n_lo - n_x: the widelane form of floatWidelane_ with the lower primary
+        // signal in the first slot and the extra signal in the second.
+        const FloatWidelane fw = floatWidelane_(p_lo, pairs[cand.pair_idx], lam_lo, cand.lam, x, P);
+        const ExtraWideLaneAdmission adm = admitExtraWideLane(fw.w, fw.sigma, config_.wl_max_frac);
+        cand.e   = fw.w;
+        cand.ewl = static_cast<int>(adm.integer);
+        ++extra_counters_.evaluated;
+        if (adm.admitted) ++extra_counters_.admitted;
+        if (log_lines) {
+            log_manager_.getLogger("ambiguity_resolver")->info(
+                "EWLFLOAT tow={:.1f} sat_i={} sat_ref={} sig_lo={} sig_x={} e={:.4f} "
+                "sigma={:.4f} ewl={} admitted={}",
+                tow, p_lo.sat_i, p_lo.sat_ref, p_lo.signal, cand.signal, fw.w, fw.sigma,
+                cand.ewl, adm.admitted ? 1 : 0);
+        }
+        if (adm.admitted) admitted.push_back(std::move(cand));
+    }
+    return admitted;
+}
+
+std::string AmbiguityResolver::extraSignalsRunEndLine() const {
+    const ExtraSignalCounters& c = extra_counters_;
+    return fmt::format("Extra signals: {} extra-wide lanes evaluated, {} admitted, {} fixed, "
+                       "{} held pairs released by an extra-wide lane",
+                       c.evaluated, c.admitted, c.fixed, c.releases_caused);
+}
+
 AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
     const std::vector<DdPair>& pairs,
     const Eigen::VectorXd& x,
@@ -1432,6 +1723,19 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
         sat_pair_groups[spkey].push_back({ k, p.signal, freq, wl });
     }
 
+    // The primary two signals of a satellite pair and its extras.  With the extra
+    // signals off the table is empty and the rule is the one from before the key: a
+    // pair is processed only when it has exactly two signals.
+    const std::map<std::string, std::string> no_primary_bands;
+    const auto& primary_bands = extraSignalsActive() ? config_.primary_bands : no_primary_bands;
+    auto splitGroup = [&](const auto& infos) {
+        std::vector<PairSignal> signals;
+        signals.reserve(infos.size());
+        for (const auto& info : infos) signals.push_back({ info.signal, info.freq });
+        const std::string system = systemName(systemOfSat(pairs[infos.front().pair_idx].sat_i));
+        return splitPrimaryAndExtra(system, signals, primary_bands);
+    };
+
     // Identify dual-frequency pairs with known DD WL integers
     struct NlCandidate {
         int dd_idx_1;         // index of L1 DD in pairs[]
@@ -1448,6 +1752,8 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
         double shift_coef;    // y_for_mlambda = y_reduced + shift_coef·WL  (≡ N_1)
                               // and, identically, N_1 = n_reduced_fixed + shift_coef·WL
         double bt_coef_2;     // N_2 = n_reduced_fixed + bt_coef_2·WL  (= shift_coef − 1)
+        // The pair's admitted extra signals (extra_signals); empty with the key off.
+        std::vector<ExtraCandidate> extras;
     };
     std::vector<NlCandidate> nl_candidates;
     // Track which DD indices are consumed by NL pairs
@@ -1464,10 +1770,10 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
         const double tow = observations.empty() ? 0.0 : observations.front().time.tow;
         const int nx = static_cast<int>(x.size());
         for (const auto& [spkey, infos] : sat_pair_groups) {
-            if (infos.size() != 2) continue;
-            const bool a_hi = infos[0].freq > infos[1].freq;
-            const auto& hi = a_hi ? infos[0] : infos[1];
-            const auto& lo = a_hi ? infos[1] : infos[0];
+            const PrimaryExtraSplit sp = splitGroup(infos);
+            if (!sp.usable) continue;
+            const auto& hi = infos[sp.hi];
+            const auto& lo = infos[sp.lo];
             const auto& p1 = pairs[hi.pair_idx];
             const auto& p2 = pairs[lo.pair_idx];
             const auto it = held_pairs_.find(p1.sat_i + "|" + p1.sat_ref + "|" + hi.signal
@@ -1480,15 +1786,39 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
             const double dd2 = x(p2.state_idx_i) - x(p2.state_idx_ref);
             const HoldMisfit m = holdMisfit_(it->second, dd1, dd2);
             held_seen.emplace_back(p1.sat_i, p1.sat_ref);
-            if (std::abs(m.d_wl) > config_.hold_release_cyc
-                || std::abs(m.d_if) > config_.hold_release_cyc) {
-                contradicted.emplace_back(p1.sat_i, p1.sat_ref);
+            const bool primary_bad = std::abs(m.d_wl) > config_.hold_release_cyc
+                                  || std::abs(m.d_if) > config_.hold_release_cyc;
+            if (primary_bad) {
                 log->info("HOLDREL tow={:.1f} pair={}-{} {}/{} held_n1={} held_wl={} "
                           "d_wl={:+.3f} d_if={:+.3f} threshold={:.3f}",
                           tow, p1.sat_i, p1.sat_ref, hi.signal, lo.signal,
                           it->second.n1, it->second.wl, m.d_wl, m.d_if,
                           config_.hold_release_cyc);
             }
+
+            // Each held extra-wide lane against the float (extra signals only): the float
+            // n_lo - n_x must stay within the threshold of the held integer.
+            bool extra_bad = false;
+            for (const auto& he : it->second.extras) {
+                for (const int xi : sp.extras) {
+                    if (infos[xi].signal != he.signal) continue;
+                    const auto& px = pairs[infos[xi].pair_idx];
+                    if (px.state_idx_i < 0 || px.state_idx_i >= nx || px.state_idx_ref < 0
+                        || px.state_idx_ref >= nx) break;
+                    const double dd_x = x(px.state_idx_i) - x(px.state_idx_ref);
+                    const double d_ewl = (dd2 / it->second.lam2 - dd_x / he.lam) - he.ewl;
+                    if (std::abs(d_ewl) > config_.hold_release_cyc) {
+                        extra_bad = true;
+                        log->info("HOLDREL tow={:.1f} pair={}-{} {}/{} held_ewl={} d_ewl={:+.3f} "
+                                  "threshold={:.3f}",
+                                  tow, p1.sat_i, p1.sat_ref, lo.signal, he.signal, he.ewl, d_ewl,
+                                  config_.hold_release_cyc);
+                    }
+                    break;
+                }
+            }
+            if (extra_bad) ++extra_counters_.releases_caused;
+            if (primary_bad || extra_bad) contradicted.emplace_back(p1.sat_i, p1.sat_ref);
         }
         if (!contradicted.empty()) {
             const auto sats = chooseReleaseSatellites_(held_seen, contradicted);
@@ -1507,26 +1837,48 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
         }
     }
 
-    for (const auto& [spkey, infos] : sat_pair_groups) {
-        if (infos.size() != 2) continue;  // need exactly two frequencies
+    // The wide-lane decision by the iono-free phase (wl_branch_check), with what it
+    // collects over this epoch's pairs.
+    const bool   branch_check = wlBranchActive();
+    const double branch_tow   = observations.empty() ? 0.0 : observations.front().time.tow;
+    WlBranchEpoch branch_epoch;
+    if (branch_check) pruneWlBranchRuns_(branch_tow);
 
-        const auto& a = infos[0];
-        const auto& b = infos[1];
-        const auto& p_a = pairs[a.pair_idx];
-        const auto& p_b = pairs[b.pair_idx];
+    for (const auto& [spkey, infos] : sat_pair_groups) {
+        // Two primary frequencies are needed: exactly two signals, or with the extra
+        // signals on, the two signals on the constellation's primary bands.
+        const PrimaryExtraSplit sp = splitGroup(infos);
+        if (!sp.usable) continue;
+
+        // f1 is the higher primary frequency, f2 the lower.
+        const auto& hi = infos[sp.hi];
+        const auto& lo = infos[sp.lo];
+        const auto& p_a = pairs[hi.pair_idx];   // the satellite pair (both signals share it)
         if (!released.empty() && (released.count(p_a.sat_i) || released.count(p_a.sat_ref)))
             continue;
-
-        // Determine which is f1 (higher) and f2 (lower)
-        const bool a_is_f1 = a.freq > b.freq;
-        const auto& hi = a_is_f1 ? a : b;
-        const auto& lo = a_is_f1 ? b : a;
 
         // The DD widelane integer: from the float states (wl_from_float) or from
         // the MW detector's resolved WL map.
         int wl_int_i = 0, wl_int_ref = 0;   // MW per-satellite integers (MW source only)
         int dd_wl    = 0;
-        if (config_.wl_from_float) {
+        if (config_.wl_from_float && branch_check) {
+            // The code and the ionosphere-free phase decide together; the decision
+            // table is decideWlBranch.
+            const FloatWidelane fw = floatWidelane_(pairs[hi.pair_idx], pairs[lo.pair_idx],
+                                                    hi.wavelength, lo.wavelength, x, P);
+            const bool ok = decideWlBranchOfPair_(
+                pairs[hi.pair_idx], pairs[lo.pair_idx], hi.wavelength, lo.wavelength,
+                hi.freq, lo.freq, fw, x, P, branch_tow, branch_epoch, dd_wl);
+            if (!observations.empty()) {
+                log->info("WLFLOAT tow={:.1f} sat_i={} sat_ref={} sig_hi={} sig_lo={} "
+                          "w={:.4f} sigma={:.4f} dd_wl={} admitted={}",
+                          observations.front().time.tow, p_a.sat_i, p_a.sat_ref,
+                          hi.signal, lo.signal, fw.w, fw.sigma,
+                          ok ? static_cast<long>(dd_wl) : static_cast<long>(std::lround(fw.w)),
+                          ok ? 1 : 0);
+            }
+            if (!ok) continue;
+        } else if (config_.wl_from_float) {
             const FloatWidelane fw = floatWidelane_(pairs[hi.pair_idx], pairs[lo.pair_idx],
                                                     hi.wavelength, lo.wavelength, x, P);
             const double frac = fw.w - std::round(fw.w);
@@ -1622,14 +1974,39 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
             nlRowCoefficients(f1, f2, hi.wavelength, lo.wavelength,
                               config_.nl_iono_free_row);
 
+        // The extra signals of the pair: their extra-wide lanes against the lower primary
+        // signal.  They stay out of the N_1 search and ride on whatever fix the primary
+        // pair earns.
+        std::vector<ExtraCandidate> extras;
+        if (!sp.extras.empty()) {
+            std::vector<ExtraCandidate> to_evaluate;
+            for (const int xi : sp.extras)
+                to_evaluate.push_back({ infos[xi].pair_idx, infos[xi].signal, infos[xi].wavelength });
+            extras = evaluateExtraWideLanes_(pairs, lo.pair_idx, lo.wavelength, to_evaluate, x, P,
+                                             branch_tow, !observations.empty());
+        }
+
         nl_candidates.push_back({
             hi.pair_idx, lo.pair_idx,
             f1, f2, hi.wavelength, lo.wavelength,
             dd_wl, lambda_nl,
-            row.t_1, row.t_2, row.shift, row.bt_2
+            row.t_1, row.t_2, row.shift, row.bt_2,
+            std::move(extras)
         });
         consumed_dd.insert(hi.pair_idx);
         consumed_dd.insert(lo.pair_idx);
+    }
+
+    // A persisted contradiction between the code and the phase names satellites whose
+    // receiver-satellite code-bias states the caller returns to their prior.
+    if (!branch_epoch.contradicted.empty()) {
+        result.bias_reset_satellites =
+            chooseReleaseSatellites_(branch_epoch.code_admitted, branch_epoch.contradicted);
+        wl_branch_counters_.satellites_returned +=
+            static_cast<long long>(result.bias_reset_satellites.size());
+        for (const auto& sat : result.bias_reset_satellites)
+            log->info("WLBRANCH tow={:.1f} contradiction: code-bias reset requested for sat={}",
+                      branch_tow, sat);
     }
 
     if (n_skipped_immature > 0) {
@@ -1751,6 +2128,48 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
         return Eigen::MatrixXd(0.5 * (Q + Q.transpose()));
     };
 
+    // The extra signals of a fixed pair (extra_signals): each gets N_x = N_lo - E with
+    // N_lo = N_1 - W the integer of the lower primary signal.  They are added to the fix
+    // as one more pseudo-observation row each, the same row the primary signals have,
+    // so the hold pins them with the same variance.  With the key off every list is
+    // empty and no row is added.
+    struct FixedExtra {
+        int pair_idx;                            // index of the extra signal's DD pair
+        AmbiguityResolution::HeldExtraFix fix;   // its integer, extra-wide lane and wavelength
+    };
+    auto fixExtrasOf = [](const NlCandidate& nlc, long n1_int) {
+        std::vector<FixedExtra> out;
+        const long n_lo = n1_int - nlc.dd_wl;
+        for (const ExtraCandidate& ex : nlc.extras)
+            out.push_back({ ex.pair_idx,
+                            { ex.signal, ex.lam, ex.ewl, static_cast<int>(n_lo - ex.ewl) } });
+        return out;
+    };
+    auto heldExtrasOf = [](const std::vector<FixedExtra>& fixed) {
+        std::vector<AmbiguityResolution::HeldExtraFix> out;
+        for (const FixedExtra& fe : fixed) out.push_back(fe.fix);
+        return out;
+    };
+    // Writes the rows of one pair's fixed extra signals from row @p row on.
+    auto addExtraRows = [&](const NlCandidate& nlc, const std::vector<FixedExtra>& fixed,
+                            bool partial, Eigen::MatrixXd& H, Eigen::VectorXd& v, int& row) {
+        const int nx = static_cast<int>(x.size());
+        for (const FixedExtra& fe : fixed) {
+            const DdPair& px = pairs[fe.pair_idx];
+            if (px.state_idx_i   >= 0 && px.state_idx_i   < nx) H(row, px.state_idx_i)   = +1.0;
+            if (px.state_idx_ref >= 0 && px.state_idx_ref < nx) H(row, px.state_idx_ref) = -1.0;
+            v(row) = fe.fix.n * fe.fix.lam - (x(px.state_idx_i) - x(px.state_idx_ref));
+            result.fixed_dd_rows.push_back({ px.state_idx_i, px.state_idx_ref });
+            ++extra_counters_.fixed;
+            if (log->should_log(spdlog::level::debug)) {
+                log->debug("  {}EWL pair {}-{} {}/{}: N_x_fixed={} ewl={}", partial ? "[PAR] " : "",
+                           px.sat_i, px.sat_ref, pairs[nlc.dd_idx_2].signal, fe.fix.signal,
+                           fe.fix.n, fe.fix.ewl);
+            }
+            ++row;
+        }
+    };
+
     // Run MLAMBDA on the NL-only set
     // Shift y_reduced so MLAMBDA's integer search aligns with integer N_1.
     //
@@ -1868,8 +2287,16 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
 
         const int nx = static_cast<int>(x.size());
         const int m  = static_cast<int>(pf.kept.size());
-        Eigen::MatrixXd H = Eigen::MatrixXd::Zero(2 * m, nx);
-        Eigen::VectorXd v = Eigen::VectorXd::Zero(2 * m);
+        std::vector<std::vector<FixedExtra>> kept_extras(m);
+        int n_extra_rows = 0;
+        for (int a = 0; a < m; ++a) {
+            kept_extras[a] = fixExtrasOf(nl_candidates[pf.kept[a]],
+                                         std::lround(pf.afix_cycles(a)));
+            n_extra_rows += static_cast<int>(kept_extras[a].size());
+        }
+        Eigen::MatrixXd H = Eigen::MatrixXd::Zero(2 * m + n_extra_rows, nx);
+        Eigen::VectorXd v = Eigen::VectorXd::Zero(2 * m + n_extra_rows);
+        int extra_row = 2 * m;   // the extra signals' rows follow the primary rows
         for (int a = 0; a < m; ++a) {
             const auto&  nlc        = nl_candidates[pf.kept[a]];
             const double n_nl_fixed = pf.afix_cycles(a) - nl_shift(pf.kept[a]);  // N_1 → reduced
@@ -1889,15 +2316,17 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
                 result.held_pairs.push_back({ p1.sat_i, p1.sat_ref, p1.signal, p2.signal,
                                               nlc.f1, nlc.f2, nlc.lam1, nlc.lam2,
                                               static_cast<int>(std::lround(pf.afix_cycles(a))),
-                                              nlc.dd_wl });
+                                              nlc.dd_wl, heldExtrasOf(kept_extras[a]) });
             }
             if (log->should_log(spdlog::level::debug)) {
                 log->debug("  [PAR] NL pair {}-{} {}/{}: N_1_fixed={} dd_wl={}, DD1={:.3f}m DD2={:.3f}m",
                            p1.sat_i, p1.sat_ref, p1.signal, p2.signal,
                            static_cast<int>(std::lround(pf.afix_cycles(a))), nlc.dd_wl, dd1, dd2);
             }
+            addExtraRows(nlc, kept_extras[a], true, H, v, extra_row);
         }
-        Eigen::MatrixXd R = Eigen::MatrixXd::Identity(2 * m, 2 * m) * config_.hold_variance;
+        Eigen::MatrixXd R = Eigen::MatrixXd::Identity(2 * m + n_extra_rows, 2 * m + n_extra_rows)
+                          * config_.hold_variance;
         KalmanFilter::josephPseudoUpdate(x, P, H, v, R,
                                          result.fixed_state, result.fixed_covariance);
         result.success   = true;
@@ -1970,11 +2399,18 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
     // R.  The next epoch's AR sees a well-conditioned Qb and can
     // either re-confirm the same fix (tightening further, converging
     // toward the integer) or detect a slip through the residual.
-    const int n_fixed_dd = 2 * n_nl;
+    std::vector<std::vector<FixedExtra>> pair_extras(n_nl);
+    int n_extra_rows = 0;
+    for (int k = 0; k < n_nl; ++k) {
+        pair_extras[k] = fixExtrasOf(nl_candidates[k], std::lround(afix_n1(k)));
+        n_extra_rows += static_cast<int>(pair_extras[k].size());
+    }
+    const int n_fixed_dd = 2 * n_nl + n_extra_rows;
     const int nx = static_cast<int>(x.size());
 
     Eigen::MatrixXd H = Eigen::MatrixXd::Zero(n_fixed_dd, nx);
     Eigen::VectorXd v = Eigen::VectorXd::Zero(n_fixed_dd);
+    int extra_row = 2 * n_nl;   // the extra signals' rows follow the primary rows
 
     for (int k = 0; k < n_nl; ++k) {
         const auto& nlc = nl_candidates[k];
@@ -1996,8 +2432,9 @@ AmbiguityResolution AmbiguityResolver::resolveWlConstrained(
             result.held_pairs.push_back({ p1.sat_i, p1.sat_ref, p1.signal, p2.signal,
                                           nlc.f1, nlc.f2, nlc.lam1, nlc.lam2,
                                           static_cast<int>(std::lround(afix_n1(k))),
-                                          nlc.dd_wl });
+                                          nlc.dd_wl, heldExtrasOf(pair_extras[k]) });
         }
+        addExtraRows(nlc, pair_extras[k], false, H, v, extra_row);
     }
 
     Eigen::MatrixXd R   = Eigen::MatrixXd::Identity(n_fixed_dd, n_fixed_dd) * config_.hold_variance;

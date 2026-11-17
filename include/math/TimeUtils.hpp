@@ -527,6 +527,31 @@ namespace GnssProcessor {
         static double currentLeapSeconds();
 
         /**
+         * @brief Selects how @ref gregorianGpsToGpsTime and @ref gregorianToGpsTime form the GPS time of a calendar
+         *        date and time (config key @c processing.exact_epoch_time).
+         *
+         * Off (the default, the conversion as built): the fraction of the day is added to the Julian date, a value
+         * near 2.46e6 whose last-bit spacing is 2^-31 day (40.2 microseconds), and the Julian date is converted back
+         * to GPS seconds.  Every converted time then carries that rounding, up to 20 microseconds; on a 30 s grid it
+         * drifts by 0.044 spacing per epoch and wraps every 675 s (1/128 day), and a time evaluated 20 microseconds
+         * off its epoch places a satellite up to 8 cm along its track.  On: the GPS week and time of week are formed
+         * from the whole days since the GPS epoch and the seconds of the day, exact to a fraction of a nanosecond.
+         * Every calendar-parsed time takes the same rule (observation epochs, SP3 and clock product epochs, bias
+         * validity times, the navigation message's toc, IONEX epochs), so observations and products stay
+         * consistent with each other.  Set once at startup from the configuration, before any file is parsed
+         * (Application::initLoggingAndConfig); stored atomically.
+         *
+         * @param on True for the exact conversion.
+         */
+        static void setExactCalendarTime(bool on);
+
+        /**
+         * @brief Whether the exact calendar conversion is in effect (@ref setExactCalendarTime).
+         * @return True when the GPS time of a calendar date is formed from whole days and seconds of the day.
+         */
+        static bool exactCalendarTime();
+
+        /**
          * @brief Current system wall-clock time as a @c GnssTime (GPS week + TOW).
          *
          * Wraps @ref nowContinuousGpsSeconds and splits it into (week, tow).  Used

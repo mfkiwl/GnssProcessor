@@ -30,8 +30,10 @@
 
 #include "app/Application.hpp"
 #include "app/PppPipelineWork.hpp"   // PppEpochWork, PppRunEndView: the spine's working values
+#include "filter/RxSatCodeBiasLearning.hpp"   // noteLearnedRxSatCodeBiases: the per-epoch learned test
 #include "products/PathResolver.hpp"
 #include "products/ProductCache.hpp"
+#include "math/TimeUtils.hpp"     // the calendar conversion's rule (processing.exact_epoch_time)
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -66,6 +68,14 @@ bool Application::initLoggingAndConfig() {
         log_manager_.getLogger("main_log")->error("Failed to load JSON configuration from {}", config_path_.string());
         return false;
     }
+
+    // The calendar conversion's rule, process-wide, before any file is parsed (processing.exact_epoch_time).
+    TimeUtils::setExactCalendarTime(config_.exactEpochTime());
+    if (config_.exactEpochTime())
+        log_manager_.getLogger("main_log")->warn(
+            "Exact epoch time ON (processing.exact_epoch_time): calendar dates and times (observation epochs, product "
+            "epochs, the navigation message's toc) convert to GPS time from whole days and seconds of the day, not "
+            "through a double-precision Julian date (up to 20 microseconds of rounding, wrapping every 675 s).");
 
     // Apply logger enable/disable flags from the logging config section.
     {
@@ -401,6 +411,7 @@ int Application::runPpp() {
     buildAidingSources_();          // the IMU and the other aiding sources
     initializePppState_();          // PppModel::initializeState; the SIF a-priori re-applied
     buildAmbiguityResolver_();      // MLAMBDA, when ambiguity_resolution.mode > 0
+    buildRxSatCodeBiasStore_();     // the receiver-satellite code-bias store, when one is configured and exists
 
     const bool is_ppp_rtk = (config_.getProcessingMode() == ProcessingMode::PPP_RTK);
     buildTraceLogger_(is_ppp_rtk);  // the CSV trace streams
@@ -468,6 +479,11 @@ int Application::runPpp() {
         // loop so the smoother posterior capture below records the
         // GIM-constrained state, and before AR so fixing uses it.
         applyGimIonoUpdate(w.current_time, w.modeled_obs);
+
+        // The learned test of the receiver-satellite code biases, once per epoch, on the
+        // covariance the epoch's updates leave (before AR constrains the ambiguities).
+        if (config_.estimateRxSatCodeBias())
+            noteLearnedRxSatCodeBiases(*state_manager_, config_.getInitialStd().rx_sat_code_bias);
 
         // Smoother posterior capture, taken before AR so the smoother operates
         // on float ambiguities (v1 policy).  AR-fixed states are applied below

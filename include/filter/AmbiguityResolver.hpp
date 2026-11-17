@@ -25,6 +25,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <optional>
 #include <set>
 
 namespace GnssProcessor {
@@ -123,6 +124,32 @@ struct AmbiguityResolution {
      */
     std::vector<std::string> release_satellites;
 
+    /**
+     * @brief Satellites whose receiver-satellite code-bias states the caller returns
+     *        to their prior (@ref StateManager::resetRxSatCodeBiasStatesToPrior).
+     *
+     * Filled by the wide-lane decision of
+     * @ref AmbiguityResolverConfig::wl_branch_check: a satellite pair on which the
+     * code, with the bias states it carries, admitted one wide-lane integer while
+     * the ionosphere-free phase was decisive for the neighbouring one is a
+     * contradiction, and the satellites at fault are chosen as the held-pair
+     * release does (the reference when it is contradicted in at least two pairs that
+     * are the majority of its code-admitted pairs this epoch, else the other
+     * satellite).  Filled whether or not a fix was accepted.  The callers act on it
+     * only when the receiver-satellite code-bias family is on.  Empty with the key off.
+     */
+    std::vector<std::string> bias_reset_satellites;
+
+    /// One extra signal of a held satellite pair
+    /// (@ref AmbiguityResolverConfig::extra_signals): its integer and its extra-wide lane
+    /// against the lower primary signal.
+    struct HeldExtraFix {
+        std::string signal;     ///< The extra signal (for example "L5Q").
+        double lam{ 0.0 };      ///< Wavelength of the extra signal [m].
+        int ewl{ 0 };           ///< Extra-wide-lane integer E = N_lo - N_x (cycles).
+        int n{ 0 };             ///< DD integer of the extra signal, N_x = N_lo - E.
+    };
+
     /// One satellite pair the accepted WL-constrained fix held, as the integers
     /// @ref AmbiguityResolver remembers for @ref AmbiguityResolverConfig::hold_release_cyc.
     struct HeldPairFix {
@@ -136,6 +163,8 @@ struct AmbiguityResolution {
         double lam2{ 0.0 };     ///< Wavelength of @c sig_lo [m].
         int n1{ 0 };            ///< DD integer on the higher frequency.
         int wl{ 0 };            ///< DD widelane integer (N_1 - N_2).
+        /// The extra signals fixed with the pair (empty with @c extra_signals off).
+        std::vector<HeldExtraFix> extras;
     };
     /// Pairs the accepted fix held (filled by the WL-constrained path only when
     /// @ref AmbiguityResolverConfig::hold_release_cyc > 0; committed to memory by
@@ -285,6 +314,95 @@ struct AmbiguityResolverConfig {
      */
     bool   wl_from_float{ false };
     /**
+     * @brief Let the ionosphere-free phase decide the wide-lane integer where the
+     *        code cannot, and name the pairs on which the two disagree.  Off by
+     *        default.
+     *
+     * Needs @ref wl_from_float and @ref nl_iono_free_row; the resolver treats the
+     * key as off when either is missing.  For each satellite pair the float wide
+     * lane @c w has a nearest integer W0 and a second nearest W1.  One wide-lane
+     * cycle moves the N_1 target of the iono-free row by a shift whose distance
+     * from an integer (the branch gap, 0.471 cycle for GPS L1/L2) says how far the
+     * two integers are apart in the phase.  When the phase of the iono-free row,
+     * with its formal sigma and the narrow-lane error floor, lies within half a gap
+     * of an integer N_1 for one of the two wide-lane integers, it is decisive for
+     * that one.  The decision of one pair at one epoch is:
+     *
+     * - three integers within reach of the code sigma (@c 1 + |d| <= 3 sigma_w):
+     *   not admitted;
+     * - the code admits W0 (@c |d| + 3 sigma_w <= @ref wl_max_frac) and the phase is
+     *   decisive for W1: a contradiction.  Neither integer is taken and the pair is
+     *   not admitted;
+     * - the code admits and the phase is decisive for W0 or for neither: W0, as
+     *   without the key;
+     * - the code does not admit and the phase is decisive for W0: W0;
+     * - the code does not admit, the phase is decisive for W1 and W1 is a candidate
+     *   (@c 1 - |d| <= 3 sigma_w, the code cannot exclude the neighbour): W1;
+     * - otherwise not admitted.
+     *
+     * A decision by the phase (W0 or W1) and a contradiction only take effect once
+     * the phase has been decisive for the same integer of the same pair for at least
+     * @ref wl_branch_persist_s.  A persisted contradiction is the event: the
+     * satellites at fault are returned in
+     * @ref AmbiguityResolution::bias_reset_satellites and the pair stays not admitted.
+     *
+     * For a frequency pair with a small gap (Galileo E1/E5a, 0.051 cycle) the phase
+     * is never decisive and the decision is the one without the key.  A pair
+     * admitted by any row enters the maturity gate, the N_1 search, the ratio test,
+     * the per-pair cap and the hold as before.  Each evaluated pair logs a
+     * @c WLBRANCH line.
+     */
+    bool   wl_branch_check{ false };
+    /**
+     * @brief Fix the signals of a satellite pair beyond its two primary signals.
+     *        Off by default.
+     *
+     * Today a satellite pair tracked on more than two signals is skipped whole.  With
+     * this on, the two signals of the pair on the constellation's @ref primary_bands go
+     * through the wide-lane and N_1 step exactly as a two-signal pair does (admission,
+     * wide-lane branch check, search, validation).  Every other signal x of the pair is
+     * an extra signal: its extra-wide lane against the lower-frequency primary signal,
+     * @f$e = n_{lo} - n_x@f$ in cycles of the float between-satellite ambiguities, is
+     * admitted when @f$|e - \mathrm{round}(e)| + 3\sigma_e \le@f$ @ref wl_max_frac.
+     * Extra signals do not enter the N_1 search.  When the primary pair is fixed by an
+     * accepted search (full or partial), each admitted extra signal gets
+     * @f$N_x = N_{lo} - \mathrm{round}(e)@f$ with @f$N_{lo} = N_1 - W@f$, and its
+     * between-satellite ambiguity is held with the same pseudo-observation variance as
+     * the primary signals.  With @ref hold_release_cyc the held extra-wide lane is
+     * compared with the float as the wide lane is, and a contradiction releases the
+     * pair's satellite through the existing path.  A constellation without a
+     * @ref primary_bands entry keeps the rule that a pair needs exactly two signals.
+     *
+     * Needs @ref wl_from_float; the loader treats the key as off without it.  Each
+     * evaluated extra signal logs an @c EWLFLOAT line.
+     */
+    bool   extra_signals{ false };
+    /**
+     * @brief Per constellation, the two RINEX band digits of the primary signals.
+     *
+     * Key: constellation name as @c systemName spells it ("GPS", "Galileo", "BeiDou").
+     * Value: two distinct digits, for example "15" for Galileo E1 and E5a.  The primary
+     * signals are the signals of a satellite pair whose band digit (the second
+     * character of the signal name) is one of the two; they carry the wide-lane and N_1
+     * step, and are the bands the phase-bias products give biases for.  Read only with
+     * @ref extra_signals.
+     */
+    std::map<std::string, std::string> primary_bands{ defaultArPrimaryBands() };
+    /**
+     * @brief Seconds the iono-free phase must stay decisive for one wide-lane integer
+     *        of one satellite pair before @ref wl_branch_check acts on it.  Default 120.
+     *
+     * The float of a pair can leave its true value in one epoch (a change of
+     * reference satellite, a hold on other pairs) with a formal sigma that does not
+     * show it, and the phase then looks decisive for the wrong integer.  Requiring
+     * the same integer over this time lets such a transient pass.  The run is kept
+     * per pair (satellite, reference, higher and lower signal) and restarts when the
+     * integer changes, when the phase is decisive for neither integer, or when the
+     * time since the last decisive epoch exceeds the larger of this value and 1 s.
+     * 0 acts at once.  Used only with @ref wl_branch_check; must be >= 0.
+     */
+    double wl_branch_persist_s{ 120.0 };
+    /**
      * @brief Error floor (narrow-lane cycles) added to the covariance the
      *        WL-constrained N_1 search uses.  0 disables it (default).
      *
@@ -369,6 +487,188 @@ struct AmbiguityResolverConfig {
         ///< Ambiguity parameterization in the Kalman state.  Mirrors
         ///< @c GnssConfig::getStateAmbiguityBasis() and is read by
         ///< AR entry points to dispatch between per-band and NL/WL paths.
+};
+
+/// The wide-lane integer the decision of @ref AmbiguityResolverConfig::wl_branch_check chose.
+enum class WlBranchChoice {
+    None,   ///< The pair is not admitted.
+    W0,     ///< The nearest integer of the float wide lane.
+    W1      ///< The second nearest integer (one cycle away, on the side of the float).
+};
+
+/// Why @ref decideWlBranch chose what it chose (the @c reason word of the @c WLBRANCH line).
+enum class WlBranchReason {
+    NotFinite,      ///< The float wide lane or its sigma is not finite.
+    Reach,          ///< Three integers lie within three sigma of the float wide lane.
+    Code,           ///< The code admits and the phase does not contradict it: W0.
+    Contradiction,  ///< The code admits W0 and the phase is decisive for W1: not admitted; a contradiction once persisted.
+    PhaseW0,        ///< The code does not admit; the phase is decisive for W0.
+    PhaseW1,        ///< The code does not admit; the phase is decisive for W1 and W1 is a candidate.
+    Undecided,      ///< The code does not admit and the phase is not decisive (or decisive for a W1 that is no candidate).
+    Waiting         ///< A decision by the phase is held back until it has persisted (never returned by @ref decideWlBranch).
+};
+
+/// The outcome of @ref decideWlBranch for one satellite pair.
+struct WlBranchDecision {
+    WlBranchChoice integer{ WlBranchChoice::None };   ///< The chosen integer.
+    WlBranchReason reason{ WlBranchReason::Undecided }; ///< The row of the decision table that fired.
+    bool           code_admits{ false };              ///< The code's own test (|d| + 3 sigma_w <= wl_max_frac) passed.
+    WlBranchChoice phase{ WlBranchChoice::None };     ///< The integer the phase is decisive for, or None.
+    bool           w1_candidate{ false };             ///< The code does not admit and cannot exclude W1 (@c 1 - |d| <= 3 sigma_w).
+};
+
+/**
+ * @brief The wide-lane decision of one satellite pair by the code and the
+ *        ionosphere-free phase (@ref AmbiguityResolverConfig::wl_branch_check).
+ *
+ * A pure function of the pair's numbers, so the decision table is testable without a
+ * filter and without state.  With @c W0 = round(w), @c d = w - W0 and @c W1 = W0 + 1 for
+ * d >= 0 (else W0 - 1), evaluated in this order:
+ *
+ *  1. @p w or @p sigma_w not finite: not admitted (@c NotFinite).
+ *  2. @c 1 + |d| <= 3 sigma_w: not admitted (@c Reach).
+ *  3. The code admits (@c |d| + 3 sigma_w <= @p wl_max_frac); W1 is then never a candidate:
+ *     a. the phase is decisive for W1: no integer this epoch (@c Contradiction);
+ *     b. otherwise W0 (@c Code).
+ *  4. The code does not admit:
+ *     a. the phase is decisive for W0: W0 (@c PhaseW0);
+ *     b. the phase is decisive for W1 and W1 is a candidate (@c 1 - |d| <= 3 sigma_w):
+ *        W1 (@c PhaseW1);
+ *     c. otherwise not admitted (@c Undecided).
+ *
+ * The result is the provisional decision of one epoch.  Rows 3a, 4a and 4b take effect
+ * only after the phase has persisted (@ref stepWlBranchPersistence).
+ *
+ * The phase is decisive for an integer when @c |r| + 3 sigma_n <= gap / 2, with @c r
+ * the fraction of its N_1 float.  For fractions that belong to one float (they differ
+ * by the wide-lane shift) it cannot be decisive for both integers; for inputs that
+ * claim it is, the function treats the phase as decisive for neither.
+ *
+ * @param w           Float wide lane of the pair [cycles].
+ * @param sigma_w     Formal sigma of @p w [cycles].
+ * @param r0          Fraction (N_1 float minus its nearest integer) for W0 [cycles].
+ * @param r1          The same for W1 [cycles].
+ * @param sigma_n     Sigma of the N_1 float of the iono-free row, with the
+ *                    narrow-lane error floor in quadrature [cycles].
+ * @param gap         Branch gap, the distance of the wide-lane shift of the N_1
+ *                    float from an integer [cycles].
+ * @param wl_max_frac The code's admission limit (@ref AmbiguityResolverConfig::wl_max_frac).
+ * @return The chosen integer, the reason, the code's own verdict and the phase's integer.
+ */
+WlBranchDecision decideWlBranch(double w, double sigma_w, double r0, double r1,
+                                double sigma_n, double gap, double wl_max_frac);
+
+/// The reason of a decision as the one short word of the @c WLBRANCH line.
+const char* wlBranchReasonWord(WlBranchReason reason);
+
+/// The run of one satellite pair over which the phase has been decisive for one integer.
+struct WlBranchRun {
+    long   integer{ 0 };      ///< The wide-lane integer the phase is decisive for.
+    double began_tow{ 0.0 };  ///< Epoch time the current run began [s].
+    double last_tow{ 0.0 };   ///< Epoch time of the last decisive evaluation [s].
+};
+
+/// The outcome of one @ref stepWlBranchPersistence.
+struct WlBranchPersistStep {
+    bool        keep{ false };       ///< False: erase the entry; true: store @ref run.
+    WlBranchRun run;                 ///< The updated entry (valid when @ref keep).
+    bool        ripe{ false };       ///< The run has reached the persistence time.
+    double      persisted_s{ 0.0 };  ///< Seconds the phase has been decisive for this integer (0 when not).
+};
+
+/**
+ * @brief One step of the persistence of the phase's decision for a satellite pair.
+ *
+ * A pure function of the stored run, this epoch's evaluation and the clock.  When the
+ * phase is not decisive the entry is erased.  When it is decisive for @p integer the run
+ * continues if the stored entry holds the same integer and the time since its last
+ * decisive evaluation lies in [0, max(@p persist_s, 1 s)], otherwise it restarts at
+ * @p tow (a negative time since the last evaluation, as at a week rollover, restarts it
+ * too).  The step is ripe when the run has lasted @p persist_s; 0 is ripe at once.
+ *
+ * @param entry     The pair's stored run, or none.
+ * @param decisive  True when the phase is decisive for an integer this epoch.
+ * @param integer   That integer (used only when @p decisive).
+ * @param tow       Epoch time [s].
+ * @param persist_s Persistence time [s], >= 0.
+ * @return The updated entry or its erasure, whether it is ripe, and the run length.
+ */
+WlBranchPersistStep stepWlBranchPersistence(const std::optional<WlBranchRun>& entry,
+                                            bool decisive, long integer,
+                                            double tow, double persist_s);
+
+/// The run counters of the wide-lane decision (@ref AmbiguityResolverConfig::wl_branch_check).
+struct WlBranchCounters {
+    long long evaluated{ 0 };            ///< Pairs the decision evaluated.
+    long long by_phase{ 0 };             ///< Pairs admitted only by the phase, after it persisted (rows PhaseW0 and PhaseW1).
+    long long contradictions{ 0 };       ///< Persisted contradictions (the code admitted W0, the phase stayed decisive for W1).
+    long long waiting{ 0 };              ///< Pair-epochs held back because the phase had not yet persisted.
+    long long refused_reach{ 0 };        ///< Pairs refused because three integers lie within reach.
+    long long satellites_returned{ 0 };  ///< Satellite returns for a code-bias reset (one per satellite per epoch).
+};
+
+/// The outcome of the admission of one extra-wide lane (@ref admitExtraWideLane).
+struct ExtraWideLaneAdmission {
+    bool admitted{ false };   ///< The extra-wide lane is close enough to an integer.
+    long integer{ 0 };        ///< round(e); meaningful only when @c admitted.
+};
+
+/**
+ * @brief Admission of one extra-wide lane (@ref AmbiguityResolverConfig::extra_signals).
+ *
+ * The extra-wide lane @p e of a signal against the lower primary signal is a difference
+ * of two cycle counts, so it is an integer in the absence of errors and needs no
+ * division by a frequency difference: unlike the iono-free N_1 row, two nearby
+ * frequencies cannot amplify an error here, and no amplification guard is applied.
+ * Admitted when both numbers are finite and @c |e - round(e)| + 3 sigma_e <= wl_max_frac.
+ *
+ * @param e            Float extra-wide lane [cycles].
+ * @param sigma_e      Its formal sigma [cycles].
+ * @param wl_max_frac  The admission limit (@ref AmbiguityResolverConfig::wl_max_frac).
+ * @return Whether it is admitted, and round(e).
+ */
+ExtraWideLaneAdmission admitExtraWideLane(double e, double sigma_e, double wl_max_frac);
+
+/// One signal of a satellite pair, as @ref splitPrimaryAndExtra reads it.
+struct PairSignal {
+    std::string signal;   ///< Signal name; its second character is the RINEX band digit ("L5Q" is band 5).
+    double      freq{ 0.0 }; ///< Carrier frequency [Hz].
+};
+
+/// How @ref splitPrimaryAndExtra divides the signals of one satellite pair.
+struct PrimaryExtraSplit {
+    bool             usable{ false };  ///< The pair has its primary two signals and is processed.
+    int              hi{ -1 };         ///< Index (in the input) of the higher-frequency primary signal.
+    int              lo{ -1 };         ///< Index of the lower-frequency primary signal.
+    std::vector<int> extras;           ///< Indices of every other signal, in input order.
+};
+
+/**
+ * @brief Split the signals of one satellite pair into its primary two and the extras
+ *        (@ref AmbiguityResolverConfig::extra_signals).
+ *
+ * With a @p primary_bands entry for @p system_name, the primary signals are the first
+ * signal on each of the entry's two band digits; every other signal is an extra.  The
+ * pair is usable only when both primary signals exist.  Without an entry for the
+ * constellation (or with an empty table, the key-off call) the pair is usable only when
+ * it has exactly two signals, both primary, as before the key existed.  The higher
+ * frequency of the two primary signals is @c hi (on equal frequencies the second input).
+ *
+ * @param system_name    Constellation name as @c systemName spells it.
+ * @param signals        The pair's signals.
+ * @param primary_bands  Constellation name to two band digits.
+ * @return The split; @c usable false when the pair is skipped.
+ */
+PrimaryExtraSplit splitPrimaryAndExtra(const std::string& system_name,
+                                       const std::vector<PairSignal>& signals,
+                                       const std::map<std::string, std::string>& primary_bands);
+
+/// The run counters of the extra signals (@ref AmbiguityResolverConfig::extra_signals).
+struct ExtraSignalCounters {
+    long long evaluated{ 0 };         ///< Extra-wide lanes evaluated (one per extra signal per pair-epoch).
+    long long admitted{ 0 };          ///< Of those, admitted.
+    long long fixed{ 0 };             ///< Extra signals given an integer by an accepted fix.
+    long long releases_caused{ 0 };   ///< Held pairs contradicted by a held extra-wide lane (counted per pair-epoch).
 };
 
 /**
@@ -526,6 +826,42 @@ public:
     /// Satellites refloated so far by @ref AmbiguityResolverConfig::refloat_partner_signal.
     int partnerReleaseCount() const { return n_partner_releases_; }
 
+    /// Run counters of the wide-lane decision (all zero with the key off).
+    const WlBranchCounters& wlBranchCounters() const { return wl_branch_counters_; }
+
+    /**
+     * @brief The run-end line of the wide-lane decision.
+     * @return One line with the pairs evaluated, decided by the phase, persisted
+     *         contradictions, pair-epochs waiting for persistence, pairs refused for reach
+     *         and satellites returned for a reset.
+     */
+    std::string wlBranchRunEndLine() const;
+
+    /// Run counters of the extra signals (all zero with the key off).
+    const ExtraSignalCounters& extraSignalCounters() const { return extra_counters_; }
+
+    /**
+     * @brief The run-end line of the extra signals.
+     * @return One line with the extra-wide lanes evaluated, admitted, fixed and the held
+     *         pairs released because of one.
+     */
+    std::string extraSignalsRunEndLine() const;
+
+    /**
+     * @brief True when the extra signals are in force.
+     * @return @c extra_signals together with @c wl_from_float, which the extra-wide lanes need.
+     */
+    bool extraSignalsActive() const { return config_.extra_signals && config_.wl_from_float; }
+
+    /**
+     * @brief True when the wide-lane decision is in force.
+     * @return @c wl_branch_check together with @c wl_from_float and @c nl_iono_free_row,
+     *         which the decision needs.
+     */
+    bool wlBranchActive() const {
+        return config_.wl_branch_check && config_.wl_from_float && config_.nl_iono_free_row;
+    }
+
     /// Get the current AR configuration.
     const AmbiguityResolverConfig& getConfig() const { return config_; }
 
@@ -550,6 +886,12 @@ private:
     friend struct ArFloatWlTestAccess;
     /// Test seam for the held-pair release (tests/test_ar_hold_release.cpp).
     friend struct ArHoldReleaseTestAccess;
+    /// Test seam for the wide-lane decision through @ref resolveWlConstrained
+    /// (tests/test_ar_wl_branch.cpp).
+    friend struct ArWlBranchTestAccess;
+    /// Test seam for the extra signals through @ref resolveWlConstrained
+    /// (tests/test_ar_extra_signals.cpp).
+    friend struct ArExtraSignalsTestAccess;
 
     // -----------------------------------------------------------------------
     // WL-constrained N_1 search functional
@@ -726,6 +1068,89 @@ private:
                                         const Eigen::VectorXd& x,
                                         const Eigen::MatrixXd& P);
 
+    /// What the wide-lane decision collects over one epoch's satellite pairs.
+    struct WlBranchEpoch {
+        /// (sat_i, sat_ref) of every pair the code admitted this epoch.
+        std::vector<std::pair<std::string, std::string>> code_admitted;
+        /// (sat_i, sat_ref) of every pair with a persisted contradiction of the code by the phase.
+        std::vector<std::pair<std::string, std::string>> contradicted;
+    };
+
+    /**
+     * @brief Decide the wide-lane integer of one satellite pair by the code and the
+     *        ionosphere-free phase (@ref AmbiguityResolverConfig::wl_branch_check).
+     *
+     * Builds the fractions and the sigma of the iono-free N_1 float for the two
+     * candidate wide-lane integers (the row is always the iono-free one, whichever row
+     * the search uses), calls @ref decideWlBranch, applies the persistence of the pair
+     * (@ref stepWlBranchPersistence, state in @c wl_branch_runs_), counts the outcome, logs
+     * one @c WLBRANCH line and records code-admitted pairs and persisted contradictions
+     * in @p epoch.
+     *
+     * @param p_hi      DD pair on the higher frequency.
+     * @param p_lo      DD pair on the lower frequency (same satellites).
+     * @param lam1      Wavelength on the higher frequency [m].
+     * @param lam2      Wavelength on the lower frequency [m].
+     * @param f1        Higher frequency [Hz].
+     * @param f2        Lower frequency [Hz].
+     * @param fw        Float wide lane of the pair (@ref floatWidelane_).
+     * @param x         Filter state.
+     * @param P         Filter covariance.
+     * @param tow       Epoch time of week, for the log line and the persistence [s].
+     * @param[in,out] epoch  The epoch's code-admitted pairs and persisted contradictions.
+     * @param[out] dd_wl     The chosen DD wide-lane integer (set when admitted).
+     * @return True when the pair is admitted with @p dd_wl.
+     */
+    bool decideWlBranchOfPair_(const DdPair& p_hi, const DdPair& p_lo,
+                               double lam1, double lam2, double f1, double f2,
+                               const FloatWidelane& fw,
+                               const Eigen::VectorXd& x, const Eigen::MatrixXd& P,
+                               double tow, WlBranchEpoch& epoch, int& dd_wl);
+
+    /// One extra signal of a satellite pair on its way to a fix
+    /// (@ref AmbiguityResolverConfig::extra_signals).
+    struct ExtraCandidate {
+        int         pair_idx{ -1 };   ///< Index of the extra signal's DD pair in the epoch's pair list.
+        std::string signal;           ///< The extra signal.
+        double      lam{ 0.0 };       ///< Its wavelength [m].
+        double      e{ 0.0 };         ///< Float extra-wide lane n_lo - n_x [cycles] (set by the evaluation).
+        int         ewl{ 0 };         ///< round(e) (set by the evaluation).
+    };
+
+    /**
+     * @brief Evaluate the extra-wide lanes of one satellite pair and keep the admitted.
+     *
+     * For each extra signal x the float extra-wide lane @c e = n_lo - n_x and its sigma
+     * come from @ref floatWidelane_ (lower primary signal first), the admission from
+     * @ref admitExtraWideLane.  Counts every evaluation and admission and logs one
+     * @c EWLFLOAT line per evaluated signal when @p log_lines is true.
+     *
+     * @param pairs        The epoch's DD pairs.
+     * @param lo_pair_idx  Index of the lower-frequency primary signal's DD pair.
+     * @param lam_lo       Its wavelength [m].
+     * @param extras       The pair's extra signals (pair index, signal and wavelength set).
+     * @param x            Filter state.
+     * @param P            Filter covariance.
+     * @param tow          Epoch time of week, for the log line [s].
+     * @param log_lines    Write the @c EWLFLOAT lines.
+     * @return The admitted extra signals with @c e and @c ewl filled in.
+     */
+    std::vector<ExtraCandidate> evaluateExtraWideLanes_(
+        const std::vector<DdPair>& pairs, int lo_pair_idx, double lam_lo,
+        const std::vector<ExtraCandidate>& extras, const Eigen::VectorXd& x,
+        const Eigen::MatrixXd& P, double tow, bool log_lines);
+
+    /**
+     * @brief Drop the persistence runs of the wide-lane decision that can no longer continue.
+     *
+     * Erases the entries of @c wl_branch_runs_ whose last decisive epoch is older than
+     * @c 10 * max(wl_branch_persist_s, 30 s) or lies after @p tow (a week rollover), so the
+     * map holds only the pairs in play.
+     *
+     * @param tow Epoch time of week [s].
+     */
+    void pruneWlBranchRuns_(double tow);
+
     /**
      * @brief Add the error floor of @ref AmbiguityResolverConfig::nl_sigma_floor_cyc
      *        to a search covariance.
@@ -801,6 +1226,10 @@ private:
     std::map<std::string, std::pair<uint64_t, int>> key_gen_;
     int n_hold_releases_{ 0 };      ///< Satellites refloated by hold_release_cyc.
     int n_partner_releases_{ 0 };   ///< Satellites refloated by refloat_partner_signal.
+    WlBranchCounters wl_branch_counters_;   ///< Run counters of the wide-lane decision.
+    ExtraSignalCounters extra_counters_;    ///< Run counters of the extra signals.
+    /// Per pair "sat_i|sat_ref|sig_hi|sig_lo": the run of the phase's decisive integer (wl_branch_check only).
+    std::map<std::string, WlBranchRun> wl_branch_runs_;
 
     // -----------------------------------------------------------------------
     // Partial ambiguity resolution (subset selection)

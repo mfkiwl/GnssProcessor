@@ -68,7 +68,8 @@ TEST(AmbiguityResolverSetupTest, CopiesEveryFieldOfTheResolverConfiguration) {
         "min_success_rate": 0.9995, "wl_only_ffr": false, "wl_only_min_arc_count": 12,
         "wl_only_max_innov_cyc": 0.45, "min_arc_info": 2.5, "nl_max_per_pair_frac": 0.12,
         "nl_iono_free_row": true, "enable_partial_ar": true,
-        "wl_from_float": true, "nl_sigma_floor_cyc": 0.04,
+        "wl_from_float": true, "wl_branch_check": true, "wl_branch_persist_s": 45.0,
+        "nl_sigma_floor_cyc": 0.04,
         "hold_release_cyc": 0.25, "refloat_partner_signal": true,
         "active_systems": ["GPS", "Galileo"])", "\"state_ambiguity_basis\": \"nl_wl\", "),
         cfg, log, "all"));
@@ -94,6 +95,8 @@ TEST(AmbiguityResolverSetupTest, CopiesEveryFieldOfTheResolverConfiguration) {
     EXPECT_TRUE(c.nl_iono_free_row);                    EXPECT_NE(c.nl_iono_free_row, def.nl_iono_free_row);
     EXPECT_TRUE(c.enable_partial_ar);                   EXPECT_NE(c.enable_partial_ar, def.enable_partial_ar);
     EXPECT_TRUE(c.wl_from_float);                       EXPECT_NE(c.wl_from_float, def.wl_from_float);
+    EXPECT_TRUE(c.wl_branch_check);                     EXPECT_NE(c.wl_branch_check, def.wl_branch_check);
+    EXPECT_DOUBLE_EQ(c.wl_branch_persist_s, 45.0);      EXPECT_NE(c.wl_branch_persist_s, def.wl_branch_persist_s);
     EXPECT_DOUBLE_EQ(c.nl_sigma_floor_cyc, 0.04);       EXPECT_NE(c.nl_sigma_floor_cyc, def.nl_sigma_floor_cyc);
     EXPECT_DOUBLE_EQ(c.hold_release_cyc, 0.25);         EXPECT_NE(c.hold_release_cyc, def.hold_release_cyc);
     EXPECT_TRUE(c.refloat_partner_signal);              EXPECT_NE(c.refloat_partner_signal, def.refloat_partner_signal);
