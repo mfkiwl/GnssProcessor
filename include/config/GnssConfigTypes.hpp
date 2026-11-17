@@ -177,6 +177,34 @@ namespace GnssProcessor {
          */
         bool          pb_disc_carry{ false };
         /**
+         * @brief Leave out of the consumer's solution every satellite the stream holds no clock
+         *        record for.
+         *
+         * Key @c network.closed_loop.drop_unrecorded, default false (byte-identical).
+         * @c deriveClosedLoopConsumerConfig copies it into the consumer engine's config as
+         * @c processing.ssr_drop_unrecorded (@c GnssConfig::ssrDropUnrecorded); a standalone
+         * consumer sets that @c processing key directly.  The rule and its edges are in
+         * @c UnrecordedSatGate and @c RealTimeEngine::dropUnrecorded (RealTimeEnginePrepare.cpp).
+         * It never reaches the producer's solve or its resume fingerprint.
+         */
+        bool          drop_unrecorded{ false };
+        /**
+         * @brief Leave out of the consumer's solution, besides every satellite without a clock
+         *        record, every satellite without a phase-bias record for a phase signal the
+         *        receiver uses for it.
+         *
+         * Key @c network.closed_loop.drop_unrecorded_phase_bias, default false (byte-identical).
+         * @c deriveClosedLoopConsumerConfig copies it into the consumer engine's config as
+         * @c processing.ssr_drop_unrecorded_phase_bias (@c GnssConfig::ssrDropUnrecordedPhaseBias);
+         * a standalone consumer sets that @c processing key directly.  It includes the clock rule
+         * of @ref drop_unrecorded, which keeps its own meaning when this key is off.  The whole
+         * satellite is left out when one of its signals lacks the record; a missing code bias is
+         * no reason.  The rule and its edges are in @c UnrecordedSatGate and
+         * @c RealTimeEngine::dropUnrecorded (RealTimeEnginePrepare.cpp).  It never reaches the
+         * producer's solve or its resume fingerprint.
+         */
+        bool          drop_unrecorded_phase_bias{ false };
+        /**
          * @brief Answer a presence edge of a held phase bias.
          *
          * Key @c network.closed_loop.pb_hold_presence_flip, default false
@@ -872,6 +900,13 @@ namespace GnssProcessor {
         /// @ref oracle_relevel is on and the directory does not exist; that error is
         /// what keeps the oracle inert on field data.
         std::string oracle_truth_root{};
+        /// Simulation only: the chain-frame target file of the oracle pin
+        /// (@c network.cycle_slip.oracle_pin_frame_file, default empty).  When it names a file, every armed
+        /// @c oracle_pin event holds every link the file lists that the chain does not pin at lambda times its
+        /// integer in the chain's frame (columns station, sat, signal, frame_int, role), and checks every listed
+        /// link the chain pins at that integer, in place of the anchor-frame fit; empty keeps the fit.  The loader
+        /// refuses it without an armed @c oracle_pin event or when the file does not exist.
+        std::string oracle_pin_frame_file{};
         /// 1-sigma (cycles) of a deterministic zero-mean Gaussian added to each
         /// applied sum d (@c network.cycle_slip.oracle_noise_cyc, default 0 = the
         /// exact ceiling).  Seeded from (station, satellite, signal, epoch), so a
@@ -1413,6 +1448,20 @@ namespace GnssProcessor {
     };
 
     /**
+     * @brief How the float vehicle's drop answers a band that returns after a tracking gap
+     *        (@c network.amb_float_drop_gap_cover).
+     *
+     * The drop of a latched arc keeps the pre-break value with the arc's first variance.  A band that returns
+     * after a gap with a shifted level then carries a prior at the old level, which the epoch's solve spreads
+     * into the line of sight's ionosphere, the other band and the receiver's states.
+     */
+    enum class NetworkAmbGapCover {
+        Off,   ///< (default) the drop as before: byte-identical.
+        Step,  ///< The drop covers (network.amb_float_drop_jump_k times the band's phase-minus-code step across the gap) squared.
+        Free   ///< A band whose return the gap instrument declares shifted is freed outright (a variance of 1e4 m^2).
+    };
+
+    /**
      * @brief How the gross-LOS screen reads @c network.gross_los_min_rows (RF-3b B1)
      *        (docs/record/refound/RF-3_code_row_qc_2026-09-22.md §4, requirement F1).
      *
@@ -1836,6 +1885,162 @@ namespace GnssProcessor {
      * The datum fields name the network time reference (a pivot receiver clock)
      * and, optionally, a reference satellite per constellation for the clock gauge.
      */
+    /**
+     * @brief Integer fixing in the network, ring by ring outward from the eq34 chain's root
+     *        (@c network.ring_fix.*; include/network/ar/RingFix.hpp).  Default off.
+     *
+     * The rule's numbers are constants of include/network/ar/RingFix.hpp, frozen by the card
+     * that pre-registered the mechanism; only the arming, the rule's name and the audit file
+     * are keys.
+     */
+    struct NetworkRingFixConfig {
+        /// @c network.ring_fix.enable: decide, hold, release and audit the chain's chord integers (default false).
+        bool enable{ false };
+        /// @c network.ring_fix.rule: "gated" (the frozen rule, default), "plain" (the negative
+        /// control: every candidate with a float is rounded and held at once) or "log" (the frozen rule
+        /// evaluated and traced, nothing held: the products are those of the key off).
+        std::string rule{ "gated" };
+        /// @c network.ring_fix.held_first: whenever the chain's tree must change, a held link that can
+        /// re-attach the moved side is taken first, pinned at its held integer (default false).
+        bool held_first{ false };
+        /// @c network.ring_fix.order: "ring" (ring by ring, default) or "certain" (every chord with a float is a
+        /// candidate; the most certain decided first, a few per epoch).
+        std::string order{ "ring" };
+        /// @c network.ring_fix.gate: "sigma" (the frozen gate, default) or "odds" (the log-odds of N1 and of the
+        /// wide lane at least ln 1e6, the fraction bound kept).
+        std::string gate{ "sigma" };
+        /// @c network.ring_fix.truth_root: a simulator fixture whose truth audits every held integer in the frame of
+        /// its epoch (simulation only; default empty).
+        std::string truth_root{};
+        /// @c network.ring_fix.oracle_until_s: an oracle phase of this many seconds from the first epoch, during which
+        /// every chord with a true integer is held at it (simulation only, needs truth_root; default 0, none).
+        double oracle_until_s{ 0.0 };
+        /// @c network.ring_fix.audit_frame_file: a frame-target file (station,sat,signal,frame_int,...)
+        /// against which every held integer is audited each epoch (simulation only; default empty).
+        std::string audit_frame_file{};
+        /// @c network.ring_fix.pairs: the pair families the ring fix considers, as "<constellation>:<signal>/<signal>"
+        /// ("E:L1X/L5X"); a link of another family is never decided or held.  Empty (default): every family.
+        std::vector<std::string> pairs{};
+        /// @c network.ring_fix.wl_frac_max: a bound on the wide lane's fraction at the decision (cycles, in (0, 0.5));
+        /// 0 (default): no bound.
+        double wl_frac_max{ 0.0 };
+        /// @c network.ring_fix.sigma_scale: the odds gate computes the log-odds of N1 and of the wide lane with this
+        /// factor times their formal sigmas (in [1, 100]; needs gate "odds").  1 (default): the formal sigmas.
+        double sigma_scale{ 1.0 };
+        /// @c network.ring_fix.code_event_window_s: no decision on any link of a satellite within this many seconds
+        /// after its code reference moves (the ionosphere-free pin pair is re-selected) or its code datum re-seeds.  The
+        /// level that only code holds then re-converges, and a wide-lane decision taken on it can land one lane off
+        /// while its float looks clean.  Links already held are kept: they were decided on the level before the move.
+        /// 0 (default): no such window.
+        double code_event_window_s{ 0.0 };
+        /// @c network.ring_fix.rehost_keep_carry: a chain re-host onto a link the ring fix holds, whose carry sits on
+        /// the held integer (within 1e-4 cycle), keeps the moved side's carries: the new tree edge takes the held
+        /// integer at a step of 0, and the moved side's carried arc entries, receiver phase biases and satellite phase
+        /// biases stay as they are instead of being released.  A re-host onto an arc that is not held, held but
+        /// latched or with its monitor tripped, or held with its carry off the integer (decided the epoch before), is
+        /// released as before.  False (default): every re-host is released.
+        bool rehost_keep_carry{ false };
+        /// @c network.ring_fix.max_decisions_per_epoch: under the order certain, at most this many links are decided
+        /// per epoch, the highest log-odds of N1 first; the others are refused with the cause cap and keep their
+        /// persistence count.  0: no cap.  Default 3, the value set when a wrong decision was still expected.
+        int max_decisions_per_epoch{ 3 };
+        /// @c network.ring_fix.settled_flags: the stream says which satellite signals are settled.  On every emitted
+        /// phase-bias record of a held family (a pair of network.ring_fix.pairs) signal_integer is 1 only while the
+        /// satellite is reached from its tree's datum receiver through held links and tree edges that entered the
+        /// tree as held links, and wide_lane_integer is 1; on a record of no held family both are 0.  False
+        /// (default): the records carry the flags as before.
+        bool settled_flags{ false };
+        /// @c network.ring_fix.unsettled_steps: an unsettled signal declares itself at every emission.  For each held
+        /// family and satellite, while the family's two signals are not both flagged settled, both signals' phase
+        /// discontinuity counters step at every emission, and once more at the first emission at which both are
+        /// flagged after one at which they were not; while both stay flagged only the other rules step them.  A level
+        /// that is not tied to the network's integers is not continuous, and the stream then says so; a user that
+        /// restarts an ambiguity at an increment needs no change.  Needs settled_flags.  False (default): no such steps.
+        bool unsettled_steps{ false };
+        /// @c network.ring_fix.unsettled_steps_unheld: the unsettled steps of the signals of no held family.  A phase
+        /// signal that belongs to no family of network.ring_fix.pairs is never settled, so its phase discontinuity
+        /// counter steps at every emission (with a baseline), as a held family's unsettled signals do.  Needs
+        /// unsettled_steps.  False (default): such signals are stepped by the other rules only.
+        bool unsettled_steps_unheld{ false };
+        /// @c network.ring_fix.continuity_guard_cyc: the stream's continuity guard (card NRF part 10, section 89).
+        /// Per held family and satellite the emitter forms the satellite's ionosphere-free level in narrow-lane cycles
+        /// from its own records (clock, the two phase biases, the two code biases of the same bands) less the family's
+        /// running median epoch-to-epoch step; while both signals stay flagged and neither counter steps, a level that
+        /// moves from its value at the run's start by more than this many cycles lowers both flags for
+        /// continuity_guard_hold emissions (the unsettled steps then step both counters).  A user that waits for the
+        /// flags then never fixes on a level the stream calls continuous while it moves.  0 (default): off.  Needs
+        /// unsettled_steps; in (0, 1].
+        double continuity_guard_cyc{ 0.0 };
+        /// @c network.ring_fix.continuity_guard_hold: emissions for which a tripped satellite's two flags stay lowered
+        /// (default 20); in [1, 1000].  Read only with continuity_guard_cyc.
+        int continuity_guard_hold{ 20 };
+        /// @c network.ring_fix.continuity_guard_min_run: emissions of a run before the guard compares its level
+        /// (default 4); in [1, 100].  Read only with continuity_guard_cyc.
+        int continuity_guard_min_run{ 4 };
+        /// @c network.ring_fix.settled_rule: which satellites the settled flags flag.  "root" (default): those
+        /// reached from their tree's datum receiver through held links and tree edges that entered as held links.
+        /// "largest": the largest set of a family's satellites mutually tied through those links, whatever receiver
+        /// roots it, once it holds at least 4 satellites; the incumbent set is kept until another holds 2 more.  Needs
+        /// settled_flags.
+        std::string settled_rule{ "root" };
+        /// @c network.ring_fix.settled_wait_emissions: the wait on the settled flag's raise.  A satellite the rule puts
+        /// in a family's set is flagged only from its (N+1)-th consecutive emission in the set; the count restarts when
+        /// it leaves the set or the family's tree is absent.  With network.ring_fix.unsettled_steps its signals step at
+        /// every emission of the wait and take the settling step at the delayed raise.  The rule's own set (rule L's
+        /// incumbent and hysteresis) is not changed.  Needs settled_flags when above 0.  0 (default): no wait.
+        int settled_wait_emissions{ 0 };
+        /// @c network.ring_fix.reattach: the re-attachment of untied satellites (card NRF part 12, section 102).
+        /// After each epoch's settled flags, a satellite of a held family's tree that is not settled and holds no tie
+        /// (no held chord, no certified tree edge) for 1 800 s, with at least 3 candidate links whose receivers are in
+        /// the flagged piece (and not below the satellite in its tree), whose floats passed the decision's window with
+        /// an ionosphere-free sigma of at most 0.10 cycle, and whose fractions agree (circular standard deviations at
+        /// most 0.08 cycle ionosphere-free and 0.10 cycle wide lane) on a common offset of at least 0.10 cycle
+        /// ionosphere-free or 0.15 cycle wide lane, has its tree edge moved at the next election onto the candidate
+        /// nearest their medians, in every band of the family: an ordinary re-host (the new host link's rounded float,
+        /// an unknown step); no integer is decided, and the satellite is not moved again for 3 600 s (section 102.2).
+        /// Events and run-end counters at both edges.  Needs settled_flags.  False (default): off, byte-identical.
+        bool reattach{ false };
+        /// @c network.ring_fix.form_configured_pairs: the chord table forms every family of network.ring_fix.pairs on
+        /// an arc that tracks both its signals, beside the rule that pairs every band-1 signal with the arc's
+        /// lowest-digit signal of another band, so that a family of a third band has chords.  Needs the pairs.  False
+        /// (default): that rule alone.
+        bool form_configured_pairs{ false };
+        /// @c network.ring_fix.cascade: a third signal's integer from a held pair, as "<constellation>:<signal 1>/
+        /// <signal 2>><signal 3>" ("G:L1C/L2W>L5Q", "E:L1C/L5Q>L7Q", "G:L1C/L2W>L1W").  On every link the pair
+        /// holds, the third signal's integer is decided from the pair's integer of its reference (the pair's signal on
+        /// the third's band, else the one nearest in frequency) and their float difference, then held as the pair's
+        /// are; the third signal is decided by its cascade only, never by a pair.  With it the settled flags are kept
+        /// per family.  Each entry's pair must be one of network.ring_fix.pairs, and its third signal in none of them.
+        /// Empty (default): no cascade.
+        std::vector<std::string> cascade{};
+        /// @c network.ring_fix.cascade_tree: a cascade's third band grows its tree on its pair's forest.  The chain's
+        /// walk of the third band takes first the arcs that are tree edges of both bands of the pair, then the links
+        /// the pair holds (those already in the band's tree before the others), and only then the band's own
+        /// incumbents and new edges, so that the band's tree paths close over arcs whose slant ionosphere the pair's
+        /// integers fix and the cascade's float difference keeps its extra-wide-lane precision.  Needs
+        /// network.ring_fix.cascade.  False (default): the third band's tree as built.
+        bool cascade_tree{ false };
+        /// @c network.ring_fix.cascade_log: the cascades decide and trace, never hold.  A link whose third-signal integer
+        /// passes the gate for the persistence is traced as "would_hold" at every such epoch (with truth on the
+        /// simulator) and never enters the hold table, so the third signal stays float.  For a read of the would-be
+        /// decisions on observed data.  Needs network.ring_fix.cascade.  False (default): the cascades hold.
+        bool cascade_log{ false };
+        /// @c network.ring_fix.cascade_rehost_keep: a chain re-host of a cascade's third band onto a link the cascade
+        /// holds, whose third-signal carry sits on the held integer, takes it at a step of 0 and keeps the moved side's
+        /// carries, as network.ring_fix.rehost_keep_carry does for the pairs' held links; the held cascade links across
+        /// it are not released.  Needs network.ring_fix.cascade.  False (default): every re-host of a third band is a
+        /// cut release.
+        bool cascade_rehost_keep{ false };
+        /// @c network.ring_fix.mask_slip_arc: simulation only (needs truth_root), "<station>:<satellite>": the
+        /// producer's slip flags of that arc are masked at @c mask_slip_tow, so its phase steps under a hold with no
+        /// latch (the residual monitor's path).  Empty (default): no mask.
+        std::string mask_slip_arc{};
+        /// @c network.ring_fix.mask_slip_tow: the GPS time of week (s) of the masked epoch (needs mask_slip_arc).
+        double mask_slip_tow{ -1.0 };
+        /// @c network.ring_fix.mask_slip_epochs: the number of epochs masked from @c mask_slip_tow (default 1).
+        int mask_slip_epochs{ 1 };
+    };
+
     struct NetworkConfig {
         std::vector<StationConfig> stations;  ///< Peer stations (>=2); each needs a known ECEF (held fixed).
         NetworkInjectConfig inject;           ///< Event-harness fault injector (network.inject.*; absent => off, byte-identical; docs/record/SPEC_event_harness.md).
@@ -1844,6 +2049,7 @@ namespace GnssProcessor {
         double epoch_sync_tolerance_s{ 0.01 };///< Max time-tag difference when matching epochs across stations.
         ClosedLoopConfig closed_loop;         ///< Optional closed-loop integer-recovery harness (held-out consumer).
         NetworkArConfig  ambiguity_resolution;///< Producer-side integer fixing (default off: float product).
+        NetworkRingFixConfig ring_fix;        ///< Integer fixing ring by ring on the eq34 chain (network.ring_fix.*; default off).
         SdEwlConfig      sd_ewl;              ///< SD pre-reduce EWL constraint (default off, byte-identical; docs/record/SPEC_sd_ewl_prereduce.md).
         SlipQcConfig     slip_qc;             ///< Slip-QC hardening (network.cycle_slip.*; every master default off, byte-identical; docs/record/SPEC_slip_qc_hardening.md).
         SignalIntegrityConfig signal_integrity; ///< Flicker/gap signal integrity: band-state classifier, degraded-phase demotion and re-vet (network.signal_integrity.*; default off, byte-identical; docs/record/SPEC_flicker_gap_integrity.md).
@@ -2277,6 +2483,25 @@ namespace GnssProcessor {
         /// Not fingerprinted, for the same reason RF-1's drop is not: it is a
         /// forward-only variance at a response and changes no carried state's meaning.
         double amb_float_drop_var_m2{ 0.0 };
+        /// @c network.amb_float_drop_jump_k (the response to a bad epoch): the drop of an arc latched by a slip takes
+        /// at least (k times the band's phase-minus-code step across the epoch) squared as its variance, so a
+        /// slip of tens of metres frees its band instead of leaving a prior at the pre-slip level with the
+        /// birth variance, which the epoch's solve would spread into the line of sight's ionosphere, the other
+        /// band and the receiver's states.  0 (default): the drop as before.  Read only on the float vehicle.
+        double amb_float_drop_jump_k{ 0.0 };
+        /// @c network.amb_float_drop_gap_cover ("off" | "step" | "free"): the drop of a band latched at its return
+        /// after a tracking gap covers the band's measured step across the gap ("step", scaled by
+        /// @ref amb_float_drop_jump_k, which must then be positive) or frees a band whose return the gap
+        /// instrument declares shifted ("free").  The step is the band's own phase-minus-code change, never a GF
+        /// change (a shift common to both bands cancels in GF).  Off (default): the drop as before.  Read only on
+        /// the float vehicle.
+        NetworkAmbGapCover amb_float_drop_gap_cover{ NetworkAmbGapCover::Off };
+        /// @c network.amb_float_drop_declared_var_m2: a floor (m^2 at zenith, elevation-mapped like the birth floor)
+        /// on the drop of a band latched by a declared break only: a slip detector (MW, loss of lock, the IF time
+        /// difference, the GF jump) or the gap re-entry response.  A drop latched only by a RAIM refloat (T4 or
+        /// T3), whose kept value is roughly right, and the other drop sites do not take it; the blanket floor on
+        /// every drop is @ref amb_float_drop_var_m2.  0 (default): no floor.  Read only on the float vehicle.
+        double amb_float_drop_declared_var_m2{ 0.0 };
         /// Warm-up gate on @ref amb_float_drop_var_m2 (RF-3c): the floor applies only to
         /// a drop taken at processed epoch >= this value; before it, a drop restores
         /// @c max(var_birth, var_first, amb_float_birth_var_m2).  0 (default) = no gate,
@@ -2400,6 +2625,11 @@ namespace GnssProcessor {
         /// 1 in @c deriveClosedLoopConsumerConfig: this is a producer-side lever, and
         /// the consumer's own code weighting is a separate graded variable.
         double extra_band_code_sigma_scale{ 1.0 };
+        /// Multiplier on the phase sigma of an extra-band signal in the network solve, the phase twin of
+        /// @c extra_band_code_sigma_scale (a diagnostic lever: which of the third band's rows reach the shared
+        /// states).  The default 1.0 is byte-identical (never applied); values below 1 are refused at load; the
+        /// closed-loop consumer is pinned to 1.
+        double extra_band_phase_sigma_scale{ 1.0 };
         /// Anchor-slip handover (docs/record/SPEC_event_harness.md §12.7): when a slip
         /// response frees the arc that anchors a (sat, signal) phase-bias family, stage
         /// the one-epoch candidacy ban so that the same epoch's election hands the
@@ -3171,6 +3401,22 @@ namespace GnssProcessor {
          */
         std::string disc_mark_scope{ "sat" };
         /**
+         * @brief Declare each phase step by its class on the families listed
+         *        (@c network.disc_step_class_pairs, entries "<constellation>:<signal>/<signal>").
+         *
+         * At every emission each listed family's satellites have their step classified on the
+         * level a user's phase reads (products/PhaseStepClassTest.hpp: quiet, whole,
+         * ionosphere-like, fraction), and the signals of a whole or fraction step carry a
+         * phase discontinuity-counter increment in place of the value test; a quiet or
+         * ionosphere-like step carries none.  A key of no listed family, or not classified
+         * at an emission, keeps the value test.  A family's code signals are its phase
+         * signals with L read as C.  Emit side only.  Empty (default): off, byte-identical.
+         */
+        std::vector<std::string> disc_step_class_pairs;
+        /// @c network.disc_step_class_tol_cyc: the class test's tolerance (cycles, in (0, 0.5);
+        /// default 0.15, the stream-step read's own).
+        double disc_step_class_tol_cyc{ 0.15 };
+        /**
          * @brief Hold the emitted phase bias of a (satellite, signal) at the first value
          *        of its generation (@c network.emit_pb_hold).
          *
@@ -3617,6 +3863,18 @@ namespace GnssProcessor {
         /// Measure-only.  Inert unless @c network.phase_datum_eq34.  Off by default,
         /// byte-identical when off.
         bool trace_rpb_states{ false };
+        /// Emit @c network_windup_arcs.csv: each station's wind-up accumulator per arc, a row at the
+        /// arc's start and one at every anchor epoch with the accumulated angle, so that two runs'
+        /// integers can be compared with each arc's whole-cycle wind-up difference removed
+        /// (network/diag/WindupArcs.hpp).  Measure-only; empty unless
+        /// @c estimation.accumulate_phase_windup.  Off by default, byte-identical when off.
+        bool trace_windup_arcs{ false };
+        /// @c network.zwd_event_inflate_m: the wet delay's event response (a slip latch at the station, a RAIM per-arc
+        /// attribution, a RAIM flag on the wet delay's own prior row) keeps the carried wet delay and adds this
+        /// standard deviation (m) to it in quadrature, instead of erasing it and re-seeding it from one epoch.  0
+        /// (default): erase, as before.  Read only where the event response is armed (the float vehicle with
+        /// @c network.carry_zwd_in_block).
+        double zwd_event_inflate_m{ 0.0 };
         bool trace_events{ false };       ///< Emit @c network_events.csv (L2): one structured long-format row per discrete QC action (tiers T1 IF-slip … T6 clock-monitor, plus GATE / SIGMA0 / PIVOT / RETRO), in place of scraping spdlog with regular expressions for which satellite, station or arc was acted on and when.  Pivot handover and retro-bump arming are logged nowhere else.  Rows are written even on epochs that are later withheld (they are part of the disposition record).  O(QC events); off by default, byte-identical when off (no new file).
         /// Replay a product file that has no S contract line.  Such a
         /// wire (from before the S contract line) replays with the default emitter (no

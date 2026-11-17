@@ -706,6 +706,23 @@ int Application::runConsumerReplay() {
     consumer.logRosterConsumerSummary("end of replay");
     consumer.logPbHoldPresenceSummary("end of replay");   // held-key presence edges, silent unless armed
     consumer.logInnovationScreenSummary("end of replay");   // pre-update innovation screen, silent unless armed
+    consumer.logUnrecordedGateSummary("end of replay");     // satellites without a stream record, silent unless armed
+    // The phase-visible step test on the replay's own emitter (silent unless the file's S
+    // line declares discpv=).  A replay from the file's first epoch reproduces the
+    // producer's run-end counts of the test.
+    if (emitter.discPhaseVisibleMinSats() > 0) {
+        const PhaseVisibleCounters& pvc = emitter.phaseVisibleCounters();
+        const NetworkProductEmitter::PhaseVisibleEdges& pve = emitter.phaseVisibleEdges();
+        log->info("Consumer replay: phase-visible step test (discpv={}) on the replay emitter: "
+                  "group-epochs {} ({} against the median, {} below the minimum count); keys "
+                  "tested {}, declared {} ({} below the minimum); legacy verdicts on the tested "
+                  "keys {}; first records {}, returns {} against an older baseline and {} past "
+                  "the horizon, forced {}, without a clock {}.",
+                  emitter.discPhaseVisibleMinSats(), pvc.groups, pvc.groups_median,
+                  pvc.groups_below_min, pvc.keys_tested, pvc.keys_stepped,
+                  pvc.keys_stepped_below_min, pve.legacy_would_step, pve.first_records,
+                  pve.returns_fresh, pve.returns_stale, pve.forced, pve.no_clock);
+    }
     consumer.logArObserveSummary("end of replay");   // observe-mode integer search totals, silent unless armed
     consumer.logReinflateSummary("end of replay");   // re-inflation summary
 

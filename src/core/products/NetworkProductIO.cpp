@@ -350,6 +350,8 @@ struct LineAssembler {
                             c.age_scale_k = std::stod(f[k].substr(5));      // age-scaling coeff (M4)
                         } else if (f[k].rfind("discfrac=", 0) == 0) {
                             c.disc_threshold_frac_cycles = std::stod(f[k].substr(9));  // per-λ jump gate (H3)
+                        } else if (f[k].rfind("discpv=", 0) == 0) {
+                            c.disc_phase_visible_min_sats = std::stoi(f[k].substr(7));  // phase-visible step test
                         } else if (f[k].rfind("discscope=", 0) == 0) {
                             c.disc_mark_scope_channel = (f[k].substr(10) == "channel");  // disc mark scope
                         } else if (f[k].rfind("wumode=", 0) == 0) {
@@ -473,9 +475,9 @@ void NetworkProductWriter::writeSLine_(const SbasisContract& contract) {
     //     disc_thresh_m,emit_clock_disc,apriori_product_id[,<const>:<pivot_sat>...]
     //     [,gid=<generation_id>][,stale=<staleness_horizon_s>]
     //     [,frame=<frame_id>][,cepoch=<coord_epoch>][,atx=<atx_id>][,oref=<orbit_ref>]
-    // The replay emitter's seven construction parameters all come from this line:
+    // The replay emitter's eight construction parameters all come from this line:
     // disc_thresh_m, emit_clock_disc, the optional stale= horizon (RTA-11), cbjump=,
-    // clkset=, discfrac= and discscope=.  A consumer therefore replays
+    // clkset=, discfrac=, discscope= and discpv=.  A consumer therefore replays
     // the counters with no out-of-band producer config
     // (NetworkProductReader::makeReplayEmitter).  Trailing fields 12+ are
     // distinguished by shape: a field with ':' is a realized pivot entry, and
@@ -531,6 +533,13 @@ void NetworkProductWriter::writeSLine_(const SbasisContract& contract) {
     // discontinuities.
     if (contract.disc_threshold_frac_cycles > 0.0)
         out_ << ",discfrac=" << fmt::format("{}", contract.disc_threshold_frac_cycles);
+    // The phase-visible step test (network.disc_phase_visible): written only when armed,
+    // so a producer without it writes the S line byte-for-byte.  A replay-emitter
+    // parameter (makeReplayEmitter applies it, checkContract compares it), and the
+    // statement that the phase declarations assume a user of between-satellite
+    // differences (see SbasisContract::disc_phase_visible_min_sats).
+    if (contract.disc_phase_visible_min_sats > 0)
+        out_ << ",discpv=" << contract.disc_phase_visible_min_sats;
     // The statistic the H heartbeat's sigma0 field carries (H-rider).  Written only
     // when non-empty, so a producer on the RTA-10 default writes the S line
     // byte-for-byte.  It is an interpretation hint (a consumer thresholding σ̂₀ needs
@@ -661,7 +670,7 @@ void NetworkProductWriter::writeHeader_(const SbasisContract* contract) {
             "# S,ref_rx,bias_sign,windup_id,amb_datum,isb_datum,emit_cb,cb_datum,disc_thresh_m,"
             "emit_clock_disc,apriori_id[,<const>:<pivot_sat>...][,gid=<n>][,stale=<s>][,cbjump=1]"
             "[,clkset=1][,frame=<id>][,cepoch=<e>][,atx=<f>][,oref=<CoM|APC>][,pdr=<rx>][,agek=<k>]"
-            "[,discfrac=<c>][,hsig=<src>][,cbpin=<const>:<s1>-<s2>...]"
+            "[,discfrac=<c>][,discpv=<n>][,hsig=<src>][,cbpin=<const>:<s1>-<s2>...]"
             "[,gfpin=<const>:<s1>-<s2>...][,sat_gf_datum=<mode>]"
             "[,discscope=channel][,pbhold=1][,wumode=<off|fractional|accumulated>]"
             "   (B6 S-basis contract)\n"
@@ -1053,6 +1062,11 @@ bool NetworkProductReader::checkContract(const SbasisContract& file,
     if (file.disc_threshold_frac_cycles != expected.disc_threshold_frac_cycles)
         note(fmt::format("disc_threshold_frac_cycles: file {} vs expected {}",
                          file.disc_threshold_frac_cycles, expected.disc_threshold_frac_cycles));
+    // The phase-visible step test: a replay without it declares on the phase bias alone
+    // (and the reverse), so its counters diverge from the producer's.
+    if (file.disc_phase_visible_min_sats != expected.disc_phase_visible_min_sats)
+        note(fmt::format("disc_phase_visible_min_sats: file {} vs expected {}",
+                         file.disc_phase_visible_min_sats, expected.disc_phase_visible_min_sats));
     // The per-channel mark scope.  A mismatch means the producer declared
     // a different channel population from the one the replay reconstructs.  Even a
     // match does not make the replay exact, because the R record carries no channel
@@ -1125,7 +1139,8 @@ NetworkProductEmitter NetworkProductReader::makeReplayEmitter(const SbasisContra
                                  contract.code_bias_jump_test,
                                  contract.clock_disc_on_set_change,
                                  contract.disc_threshold_frac_cycles,
-                                 contract.disc_mark_scope_channel);   // disc mark scope
+                                 contract.disc_mark_scope_channel,    // disc mark scope
+                                 contract.disc_phase_visible_min_sats);   // phase-visible step test
 }
 
 bool NetworkProductReader::admitsWire(const SbasisContract& file, bool allow_undeclared,

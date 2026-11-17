@@ -1370,6 +1370,10 @@ namespace GnssProcessor {
         return gnss_corrections_.wuRestarts();
     }
 
+    std::vector<std::pair<std::string, GnssCorrections::WindUpArc>> Antenna::windUpArcs() const {
+        return gnss_corrections_.windUpArcs();
+    }
+
     void Antenna::setWindUpSatStateProvider(GnssCorrections::SatStateProvider provider) {
         gnss_corrections_.setSatStateProvider(std::move(provider));
     }

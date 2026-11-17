@@ -132,6 +132,31 @@ bool zwdEventErase(net::StationTable& sta_rows, int station, ZwdEdgeCause cause,
                    const std::string& via = {});
 
 /**
+ * @brief The event response's action on one station's carried wet delay: erase it
+ *        (@ref GnssProcessor::zwdEventErase "zwdEventErase"), or, when @p inflate_m is positive,
+ *        keep its value and add @p inflate_m to its standard deviation in quadrature.
+ *
+ * Either way the decoupling edge opens the station's record (@ref GnssProcessor::zwdEdgeDecouple
+ * "zwdEdgeDecouple"), and the entry's next fold closes it at the harvest as a re-coupling.  An
+ * inflation keeps the carried value as the column's prior, so the station's wet delay is not
+ * re-seeded from one epoch (standing invariant 1); it counts in
+ * @c ZwdCarryCounters::n_zwd_event_inflated.
+ *
+ * @param sta_rows  The station table (written: the station's zwd entry and zwd_edge record).
+ * @param station   Station roster index.
+ * @param cause     The feed (@c SlipLatch, @c RaimArc or @c RaimPrior).
+ * @param now_s     Continuous-GPS second of the event.
+ * @param inflate_m The added standard deviation (m; network.zwd_event_inflate_m); 0 erases.
+ * @param counters  The run's counters (written).
+ * @param sat       The satellite of a RAIM per-arc event (empty otherwise).
+ * @param via       The drop cause of a RAIM per-arc event (empty otherwise).
+ * @return True when the station carried an entry (erased or inflated); false otherwise.
+ */
+bool zwdEventRespond(net::StationTable& sta_rows, int station, ZwdEdgeCause cause, double now_s,
+                     double inflate_m, ZwdCarryCounters& counters, const std::string& sat = {},
+                     const std::string& via = {});
+
+/**
  * @brief The re-coupling edge: counts one closed edge by cause and writes its identity row.
  *
  * The row is tier @c ZWD of @c network_events.csv: event @c first_fold for a first sighting
@@ -238,6 +263,7 @@ struct ZwdCarryCounters {
     long long n_zwd_event_drop_slip   = 0;  ///< stations whose carried wet delay was erased at a slip latch (this epoch's fold had no prior)
     long long n_zwd_event_drop_raim   = 0;  ///< stations whose carried wet delay was erased at a RAIM per-arc attribution or a prior-channel line-of-sight flag (the next epoch's fold had no prior)
     long long n_zwd_event_drop_prior  = 0;  ///< stations whose carried wet delay was erased at a prior-channel flag on its own block row (the next epoch's fold had no prior)
+    long long n_zwd_event_inflated    = 0;  ///< of the event responses above, those that kept the carried wet delay with an inflated sigma (network.zwd_event_inflate_m) instead of erasing it
     long long n_zwd_recouple          = 0;  ///< re-coupling folds, every cause (the sum of n_zwd_recouple_by without its first-sighting cell)
     /// Folds that closed an open edge, by the edge's cause (ZwdEdgeCause): the first fold of an
     /// entry re-created after an erase or a gap prune, a fold after an absence within the

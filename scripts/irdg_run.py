@@ -51,9 +51,12 @@ NO_LINK = "network.phase_datum_eq34_rpb_q_m2s=0"
 # arm code -> (arm of ird_make_arms.py, the one knob under test or None)
 ARM = {"f0": ("A1krhRsm_link", None), "fl": ("A1krhRsm_floor", None), "r1": ("R1", None),
        "q0": ("A1krhRsm_link", NO_LINK), "b": ("A1krhRsm_link", KEY), "g": ("G", None)}
-# The A1 family of ird_make_arms.py as defined since the adoption, and the one arm of it that runs for 2 h.
+# The A1 family of ird_make_arms.py as defined since the adoption, and the one arm of it that runs for 2 h.  Since
+# the wet-delay set was adopted on the same arms (2026-11-14, card IRDU section 11.5) the group makes each arm's
+# variant without it, <arm>_nozwd (ADOPTED_SUFFIX), the arm card IRDG section 8 checked; the tags keep the arm names.
 ADOPTED = ("A1", "A1k", "A1kr", "A1krh", "A1krhR", "A1krhRs", "A1krhRsm")
 ADOPTED_2H = "A1krhRsm"
+ADOPTED_SUFFIX = "_nozwd"
 # bed code -> bed of ird_make_arms.py
 BED = {"r3c": "r3c", "gs": "golden", "gf": "field", "mic": "microscope", "r2": "r2", "r3b": "r3b",
        "rv16": "ird_rv16", "rg": "ird_rg", "rgm": "ird_rg_mic", "t1": "ird_t1", "tr": "ird_tr",
@@ -100,8 +103,8 @@ def adopted_rows():
     out = []
     for name, hours in [(a, 0.1) for a in ADOPTED] + [(ADOPTED_2H, 2.0)]:
         t = "irdg_ad%s_%s_r3c" % ("s" if hours < 1.0 else "", name.lower())
-        out.append((t, [sys.executable, HERE + "/ird_make_arms.py", "make", "--arm", name, "--bed", "r3c",
-                        "--tag", t, "--hours", str(hours)]))
+        out.append((t, [sys.executable, HERE + "/ird_make_arms.py", "make", "--arm", name + ADOPTED_SUFFIX,
+                        "--bed", "r3c", "--tag", t, "--hours", str(hours)]))
     return out
 
 
@@ -234,9 +237,10 @@ def selftest():
         and c[c.index("--bed") + 1] == "ird_rg",
         "the no-link arm sets the time link's q to 0 on the time-link arm (the loader refuses q 0 with the key)")
     import ird_make_arms
-    chk(all(ird_make_arms.compose(ARM["b"][0], BED[b], knob=KEY) == ird_make_arms.compose(ADOPTED_2H, BED[b])
-            for _, b in GROUPS["key"]),
-        "on every bed of the card, arm A1krhRsm as now defined is the key arm b, knob for knob")
+    chk(all(ird_make_arms.compose(ARM["b"][0], BED[b], knob=KEY)
+            == ird_make_arms.compose(ADOPTED_2H + ADOPTED_SUFFIX, BED[b]) for _, b in GROUPS["key"]),
+        "on every bed of the card, arm A1krhRsm as adopted on 2026-11-10 (A1krhRsm_nozwd) is the key arm b, "
+        "knob for knob")
     ad = adopted_rows()
     chk(len(ad) == len(ADOPTED) + 1 and [cmd[cmd.index("--hours") + 1] for _, cmd in ad] == ["0.1"] * len(ADOPTED) + ["2.0"]
         and ad[-1][0] == "irdg_ad_a1krhrsm_r3c" and len({t for t, _ in ad}) == len(ad)

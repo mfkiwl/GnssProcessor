@@ -311,6 +311,33 @@ bool networkLliCredibilityStep(bool credible_in, double frac_ewma, long count,
 // Qualification pass (serial, station-ordered → deterministic)
 // =====================================================================
 
+std::pair<double, double> rawSlipBandJumps(const RawSlipObs& r, const RawSlipVerdict& v) {
+    if (!v.measured || v.pair_changed) return {0.0, 0.0};
+    return {std::abs(v.d_l1c1), r.dual ? std::abs(v.d_l1c1 - v.d_gf + v.d_gf_code) : 0.0};
+}
+
+void networkRawSlipBandJumps(const RawSlipEpoch& ep, std::map<std::pair<int, std::string>, BandBreak>& out) {
+    for (std::size_t i = 0; i < ep.rows.size() && i < ep.verdict.size(); ++i)
+        for (const RawSlipObs& r : ep.rows[i]) {
+            const auto it = ep.verdict[i].find(r.satellite);
+            if (it == ep.verdict[i].end() || !it->second.measured || it->second.pair_changed) continue;
+            const auto [j1, j2] = rawSlipBandJumps(r, it->second);
+            out[{static_cast<int>(i), r.satellite + "_" + r.sig1}] = BandBreak{j1, BandBreakKind::Adjacent, false};
+            if (r.dual)
+                out[{static_cast<int>(i), r.satellite + "_" + r.sig2}] = BandBreak{j2, BandBreakKind::Adjacent, false};
+        }
+}
+
+void networkGapBandBreaks(const RawSlipEpoch& ep, std::map<std::pair<int, std::string>, BandBreak>& out) {
+    for (const GapResumption& g : ep.resumptions)
+        for (const auto& [sig, step] : g.lmc_step_m)
+            out[{g.station, g.satellite + "_" + sig}] = BandBreak{std::abs(step), BandBreakKind::Gap, g.shifted};
+    for (const SigResumption& g : ep.sig_resumptions)
+        if (g.lmc_measured)
+            out[{g.station, g.satellite + "_" + g.signal}] =
+                BandBreak{std::abs(g.lmc_step_m), BandBreakKind::Gap, g.shifted};
+}
+
 void networkQualifyRawObservables(const std::vector<std::vector<PppObservation>>& modeled,
                                   const std::vector<bool>& present,
                                   int n_sta_total,
@@ -352,6 +379,8 @@ void networkQualifyRawObservables(const std::vector<std::vector<PppObservation>>
                               || (pit->second.obs.sig2 != r.sig2);
                 v.d_mw = r.mw_m - pit->second.obs.mw_m;
                 v.d_gf = r.gf_m - pit->second.obs.gf_m;
+                v.d_l1c1 = r.l1_c1_m - pit->second.obs.l1_c1_m;
+                v.d_gf_code = r.gf_code_m - pit->second.obs.gf_code_m;
                 mw_abs.push_back(std::abs(v.d_mw));
                 gf_abs.push_back(std::abs(v.d_gf));
             }
@@ -470,6 +499,14 @@ void networkQualifyRawObservables(const std::vector<std::vector<PppObservation>>
                     g.shifted = (gate_mw > 0.0 && std::abs(g.d_mw) > gate_mw)
                              || (gate_gf > 0.0 && std::abs(g.d_gf) > gate_gf);
                 }
+                // Each returning signal's own level step, matched by signal: the pair may change across
+                // the gap, and a shift common to both bands is invisible to d_gf.
+                for (const RawSigObs& s : r.sigs)
+                    for (const RawSigObs& q : pit->second.obs.sigs)
+                        if (q.sig == s.sig) {
+                            g.lmc_step_m[s.sig] = (s.phase_m - s.code_m) - (q.phase_m - q.code_m);
+                            break;
+                        }
                 ++cnt.gap_resumptions;
                 if (!g.measurable)   ++cnt.gap_unmeasurable;
                 else if (g.shifted)  ++cnt.gap_shifted;
@@ -513,6 +550,9 @@ void networkQualifyRawObservables(const std::vector<std::vector<PppObservation>>
                     g.gap_epochs = epoch_idx - wit->second.last_epoch - 1;
                     g.lli        = s.lli;
                     g.gate_gf    = gate_gf_sig;
+                    // The signal's own (phase - code) step across the gap, needing no partner.
+                    g.lmc_measured = true;
+                    g.lmc_step_m   = (s.phase_m - s.code_m) - (wit->second.phase_m - wit->second.code_m);
                     // --- The witness, in priority order -----------
                     // First choice: a partner that tracked through the gap, i.e.
                     // present continuously from at or before the candidate's
@@ -582,6 +622,7 @@ void networkQualifyRawObservables(const std::vector<std::vector<PppObservation>>
                         rec.run_start = epoch_idx;
                     rec.last_epoch = epoch_idx;
                     rec.phase_m    = s.phase_m;
+                    rec.code_m     = s.code_m;
                     rec.lli        = s.lli;
                     rec.gf_snap.clear();
                     for (const auto& o : r.sigs)

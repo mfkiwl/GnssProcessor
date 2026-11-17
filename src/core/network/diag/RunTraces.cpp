@@ -63,8 +63,10 @@ NetworkRunTraces::NetworkRunTraces(std::filesystem::path log_dir)
       rx_states_trace_path(log_dir_ / "network_rx_states.csv"),
       chain_edges_trace_path(log_dir_ / "network_chain_edges.csv"),
       chain_frame_trace_path(log_dir_ / "network_chain_frame.csv"),
+      ring_fix_trace_path(log_dir_ / "network_ring_fix.csv"),
       pb_prehold_trace_path(log_dir_ / "network_pb_prehold.csv"),
       rpb_states_trace_path(log_dir_ / "network_rpb_states.csv"),
+      windup_arcs_trace_path(log_dir_ / "network_windup_arcs.csv"),
       station_res_trace_path(log_dir_ / "network_station_residuals.csv"),
       raim_redun_trace_path(log_dir_ / "network_raim_redundancy.csv"),
       station_factor_trace_path(log_dir_ / "network_station_factor.csv"),
@@ -1068,6 +1070,14 @@ void NetworkRunTraces::openAll(const GnssConfig& config_, const NetworkConfig& n
         else
             log->warn("Network: failed to open chain-frame trace {}", chain_frame_trace_path.string());
     }
+    if (nc.ring_fix.enable && chain_run) {
+        ring_fix_trace.open(ring_fix_trace_path);
+        if (ring_fix_trace)
+            ring_fix_trace << "week,tow,station,sat,sig1,sig2,ring,candidate,state,refused,f1,f2,n_if,sigma_if,"
+                              "frac_if,wl,frac_wl,n1,n2,lat1,lat2,resid_if_m,streak,audit\n";
+        else
+            log->warn("Network: failed to open ring-fix trace {}", ring_fix_trace_path.string());
+    }
     if (nc.trace_pb_prehold) {
         pb_prehold_trace.open(pb_prehold_trace_path);
         if (pb_prehold_trace)
@@ -1085,6 +1095,13 @@ void NetworkRunTraces::openAll(const GnssConfig& config_, const NetworkConfig& n
         else
             log->warn("Network: failed to open receiver phase-bias trace {}",
                       rpb_states_trace_path.string());
+    }
+    if (nc.trace_windup_arcs) {
+        windup_arcs_trace.open(windup_arcs_trace_path);
+        if (windup_arcs_trace)
+            windup_arcs_trace << "week,tow,station,sat,kind,cycles,start_tow\n";
+        else
+            log->warn("Network: failed to open wind-up arc trace {}", windup_arcs_trace_path.string());
     }
     if (nc.trace_station_residuals) {
         station_res_trace.open(station_res_trace_path);

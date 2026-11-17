@@ -16,6 +16,7 @@
 #include "network/emit/SolPrep.hpp"
 
 #include "network/qc/RhsAttrib.hpp"   // flight-recorder trip latch (INC-5)
+#include "network/ar/RingFix.hpp"     // the settled flags (network.ring_fix.settled_flags)
 
 #include "network/state/RunContext.hpp"            // ctx.* aliases
 #include "common/GnssIdentity.hpp"              // systemOfSat, letterOfSat
@@ -917,6 +918,8 @@ NetworkSolPrepResult networkSolPrep(NetworkRun& run, const NetworkEpoch& ep, Epo
                 } else {
                     mark.insert(sat);
                     if (continued) ++ctx.counters.n_if_pin_continued_declared;
+                    if (nc.ring_fix.code_event_window_s > 0.0)
+                        net::putSat(entities, sat, &net::SatelliteState::code_ref_event_s) = pl_now_s;
                 }
                 if (events_trace.is_open())
                     emitEvent("CLK_BASIS", cont ? "reselect_continued" : "reselect", sat, "",
@@ -983,6 +986,9 @@ NetworkSolPrepResult networkSolPrep(NetworkRun& run, const NetworkEpoch& ep, Epo
                 emitter.markSatDiscontinuity(fresh,
                                              NetworkProductEmitter::kDiscChanCodeBias
                                                  | NetworkProductEmitter::kDiscChanClock);
+            if (nc.ring_fix.code_event_window_s > 0.0)
+                for (const auto& s : mark)
+                    net::putSat(entities, s, &net::SatelliteState::code_ref_event_s) = pl_now_s;
             retro_emit_sats.insert(mark.begin(), mark.end());
             // Count the re-seed discs that land on the first post-resume epoch (RS-3,
             // SPEC_event_harness §21.7): a direct readout of whether the restored
@@ -1349,6 +1355,11 @@ NetworkSolPrepResult networkSolPrep(NetworkRun& run, const NetworkEpoch& ep, Epo
         ctx.counters.wire_fill.code  += f.code;
         ++ctx.counters.wire_fill_epochs;
     }
+
+    // --- The settled flags (network.ring_fix.settled_flags) ---------------------------------
+    // After the wire fill, so a filled record carries the flags of its own signal.
+    if (ctx.carry.ring_fix && ctx.carry.ring_fix->settled_flags_on)
+        ringFixStampSettledFlags(sol, *ctx.carry.ring_fix);
 
     return { std::move(sol), std::move(epoch_withheld_consts), global_bump,
              std::move(serialized_consts), std::move(retro_emit_sats) };

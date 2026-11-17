@@ -69,6 +69,9 @@ NetworkKnobs NetworkKnobs::snapshot(const GnssConfig& config_, const NetworkConf
     // Variance floor applied at the drop only; resolves to 0 off the vehicle.
     k.amb_drop_var_floor  = k.amb_float_kf
                                 ? config_.getNetworkConfig().amb_float_drop_var_m2 : 0.0;
+    k.amb_drop_jump_k     = k.amb_float_kf ? nc.amb_float_drop_jump_k : 0.0;
+    k.amb_drop_gap_cover  = k.amb_float_kf ? nc.amb_float_drop_gap_cover : NetworkAmbGapCover::Off;
+    k.amb_drop_declared_var = k.amb_float_kf ? nc.amb_float_drop_declared_var_m2 : 0.0;
     // The drop floor's warm-up gate has no meaning without the floor, so it
     // resolves to 0 when the floor is off; a site reads the pair as "floor, from epoch N".
     k.amb_drop_floor_after_ep =
@@ -172,6 +175,7 @@ NetworkKnobs NetworkKnobs::snapshot(const GnssConfig& config_, const NetworkConf
     // The wet delay's event response belongs to the float vehicle's in-block route; the F3
     // lineage of the level vehicle keeps its behaviour.
     k.zwd_event_on    = k.zwd_blk_on && k.amb_float_kf;
+    k.zwd_event_inflate_m = k.zwd_event_on ? nc.zwd_event_inflate_m : 0.0;
     k.iono_blk_on     = k.iono_blk && k.pl_blk_on;
     k.rxclk_blk_on    = k.rxclk_blk && k.pl_blk_on;
     k.rxcb_blk_on     = k.rxcb_blk && k.pl_blk_on && k.rx_cb_on;
@@ -391,6 +395,7 @@ NetworkKnobs NetworkKnobs::snapshot(const GnssConfig& config_, const NetworkConf
     k.trace_chain_datum = k.phase_datum_eq34 && nc.trace_chain_datum;
     k.trace_rpb_states  = k.phase_datum_eq34 && nc.trace_rpb_states;
     k.trace_pb_prehold  = nc.trace_pb_prehold;
+    k.trace_windup_arcs = nc.trace_windup_arcs;
     k.phase_datum_prioritized = config_.networkPhaseDatumPrioritized() || k.phase_datum_eq34;
     // Resolved once for the run: the datum-station slip path exists only under
     // the legacy pivot datum.  Every no-pivot datum already runs the slip loops from

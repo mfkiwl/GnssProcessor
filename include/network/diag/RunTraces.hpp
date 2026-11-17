@@ -699,6 +699,10 @@ namespace GnssProcessor {
         const std::filesystem::path chain_edges_trace_path;   ///< path of network_chain_edges.csv
         std::ofstream chain_frame_trace;                      ///< the chord table each epoch
         const std::filesystem::path chain_frame_trace_path;   ///< path of network_chain_frame.csv
+        /// The ring fix's decisions, holds and audit, one row per pair-family chord each epoch
+        /// (network.ring_fix.enable, network/ar/RingFix.hpp).
+        std::ofstream ring_fix_trace;
+        const std::filesystem::path ring_fix_trace_path;      ///< path of network_ring_fix.csv
         /// Every emitted satellite phase bias immediately before the phase-bias hold
         /// (network.trace_pb_prehold).
         std::ofstream pb_prehold_trace;
@@ -706,6 +710,10 @@ namespace GnssProcessor {
         /// Every receiver phase-bias state of an eq34 run (network.trace_rpb_states).
         std::ofstream rpb_states_trace;
         const std::filesystem::path rpb_states_trace_path;   ///< path of network_rpb_states.csv
+        /// The stations' wind-up accumulators per arc: each arc's start and its accumulated angle at
+        /// every anchor epoch (network.trace_windup_arcs; network/diag/WindupArcs.hpp).
+        std::ofstream windup_arcs_trace;
+        const std::filesystem::path windup_arcs_trace_path;  ///< path of network_windup_arcs.csv
         /// Per-station residual field (L13; network.trace_station_residuals): every
         /// post-fit RAIM cell (non-pivot station x sat) with s_raw, s_norm and σ̂0.
         /// A heavy, opt-in trace.

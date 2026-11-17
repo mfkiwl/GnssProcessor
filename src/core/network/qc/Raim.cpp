@@ -1076,13 +1076,16 @@ void networkPostFitRaim(NetworkRun& run, const NetworkEpoch& ep, NetworkPostFitH
             // delay on it would be a network-wide decoupling.  This site runs after the
             // harvest, so the next epoch is the first fold that can act on it.
             if (statistical_arc && ctx.knobs.zwd_event_on
-                && zwdEventErase(entities.stations, i, ZwdEdgeCause::RaimArc,
-                                 TimeUtils::continuousGpsSeconds(se.time), ctx.counters, sat,
-                                 drop_cause)) {
+                && zwdEventRespond(entities.stations, i, ZwdEdgeCause::RaimArc,
+                                   TimeUtils::continuousGpsSeconds(se.time),
+                                   ctx.knobs.zwd_event_inflate_m, ctx.counters, sat, drop_cause)) {
                 ++ctx.counters.n_zwd_event_drop_raim;
                 prmRespond(ctx.counters.prm_resp, ResponseSite::ZwdRaimErase);
+                const bool kept = ctx.knobs.zwd_event_inflate_m > 0.0;
                 traces.emitEvent(se.time, "ZWD", "raim_attribution", sat, stations[i].name,
-                                 std::nullopt, std::nullopt, "erase", "no_prior_next_epoch");
+                                 std::nullopt, std::nullopt, kept ? "inflate" : "erase",
+                                 kept ? fmt::format("kept;sigma_added_m={:.3f}", ctx.knobs.zwd_event_inflate_m)
+                                      : std::string("no_prior_next_epoch"));
             }
             return n;
         };
@@ -1215,19 +1218,24 @@ void networkPostFitRaim(NetworkRun& run, const NetworkEpoch& ep, NetworkPostFitH
             for (std::size_t c : prior_sel.zwd) {
                 const RaimPriorRow& r = prior_rows[prior_sel.cell_row[c]];
                 const bool erased =
-                    zwdEventErase(entities.stations, r.station, ZwdEdgeCause::RaimPrior,
-                                  TimeUtils::continuousGpsSeconds(se.time), ctx.counters);
+                    zwdEventRespond(entities.stations, r.station, ZwdEdgeCause::RaimPrior,
+                                    TimeUtils::continuousGpsSeconds(se.time), ctx.knobs.zwd_event_inflate_m,
+                                    ctx.counters);
                 if (erased) {
                     ++prior_tally.zwd_erases;
                     ++ctx.counters.n_zwd_event_drop_prior;
                     prmRespond(ctx.counters.prm_resp, ResponseSite::ZwdRaimErase);
+                    const bool kept = ctx.knobs.zwd_event_inflate_m > 0.0;
                     traces.emitEvent(se.time, "ZWD", "raim_prior", std::string(),
                                      stations[r.station].name, std::nullopt, std::nullopt,
-                                     "erase", "no_prior_next_epoch");
+                                     kept ? "inflate" : "erase",
+                                     kept ? fmt::format("kept;sigma_added_m={:.3f}", ctx.knobs.zwd_event_inflate_m)
+                                          : std::string("no_prior_next_epoch"));
                 } else {
                     ++prior_tally.zwd_no_entry;
                 }
-                prior_event("prior_zwd", c, erased ? "erase" : "no_entry", "");
+                prior_event("prior_zwd", c, erased ? (ctx.knobs.zwd_event_inflate_m > 0.0 ? "inflate" : "erase")
+                                                   : "no_entry", "");
             }
             for (std::size_t c : prior_sel.unwired)
                 prior_event("prior_unwired", c, "none", "");

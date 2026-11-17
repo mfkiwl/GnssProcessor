@@ -649,6 +649,7 @@ void passARawObservables(const PassAView& v) {
     std::vector<bool>& present = v.present;
     SlipQcChannel& qc = v.qc;
     const int n_sta_total = v.n_sta_total;
+    RelevelEpochState& relevel = v.slip_ev.relevel;   // written: band_break (network.amb_float_drop_jump_k, amb_float_drop_gap_cover)
 
     // Shared raw slip observables (docs/record/SPEC_slip_qc_hardening.md §1), computed once
     // per epoch, here: after present[] is final and before both the drains (the LLI corroboration
@@ -734,9 +735,13 @@ void passARawObservables(const PassAView& v) {
         // The qualification pass (empirical step gates, LLI credibility, arc
         // resumptions) runs only for a decision mechanism; with only the trace armed the
         // observables are pure output and nothing is adjudicated.
-        if (qc.decisionInstrumentArmed())
+        if (qc.decisionInstrumentArmed()) {
             networkQualifyRawObservables(modeled, present, n_sta_total, qc.epoch_idx,
                                          qc.params, qc.hist, qc.epoch, qc.counters);
+            // The size of each band's step, for the float vehicle's drop of a latched arc.
+            if (ctx.knobs.amb_drop_jump_k > 0.0) networkRawSlipBandJumps(qc.epoch, relevel.band_break);
+            if (ctx.knobs.amb_drop_gap_cover != NetworkAmbGapCover::Off) networkGapBandBreaks(qc.epoch, relevel.band_break);
+        }
         passAIonoCsAdvance(v);
     }
 }

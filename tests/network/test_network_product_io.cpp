@@ -966,6 +966,7 @@ TEST(NetworkProductIoTest, HeaderLegendDeclaresEveryEmittedField) {
     c.age_scale_k                = 1e-6;
     c.cb_pin_pair["G"]           = "C1C-C2L";
     c.gf_pin_pair["G"]           = "C1C-C2L";
+    c.disc_phase_visible_min_sats = 4;   // the phase-visible step test (discpv=)
     c.present                    = true;
 
     // An epoch arming every optional record / field channel.

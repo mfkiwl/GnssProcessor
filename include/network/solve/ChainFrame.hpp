@@ -295,6 +295,7 @@ struct ChainEdgeObs {
     bool        incumbent_flipped{false};  ///< This arc was an incumbent tree edge attaching the other endpoint.
     bool        from_incumbent{false};  ///< Grown from the incumbent seed.
     bool        second_pass{false};     ///< Admitted only in the walk's second pass.
+    bool        held_first{false};      ///< A new edge the walk took because the ring fix holds its integer (network.ring_fix.held_first).
     double      sigma_scale{1.0};       ///< The pin's sigma multiplier (a soft pin above 1).
     std::string life_stamp;             ///< The arc's life stamp, as a token.
     // Filled by the classification.
@@ -673,6 +674,15 @@ bool chainKeptEdgeMoved(const ChainEdgeObs& e, const double* remembered);
  * @param ep  The epoch after the solve and the harvests.
  */
 void networkChainFrameObserve(NetworkRun& run, const NetworkEpoch& ep);
+
+/**
+ * @brief The keys the chain declares moved at this epoch: every (satellite, phase signal) of the moved
+ *        side of each cut release, the declared_keys rows of the event trace.
+ *
+ * @param obs The epoch's chain record.
+ * @return (satellite, signal) pairs, e.g. ("E14", "L1C"); empty when nothing was released.
+ */
+std::set<std::pair<std::string, std::string>> chainDeclaredKeys(const ChainEpochObs& obs);
 
 /**
  * @brief Run-end report: the frame census of the eq34 chain datum.

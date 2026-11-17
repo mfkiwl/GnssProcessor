@@ -224,6 +224,12 @@ namespace GnssProcessor {
         }
         /// @brief Clear the restart ledger (the drain's consume edge).
         void clearWuRestarts() { antenna_.clearWuRestarts(); }
+        /// @brief The wind-up accumulator of every satellite this model's receiver has seen
+        ///        (see GnssCorrections::windUpArcs).
+        /// @return One entry per satellite, sorted by identifier; empty in fractional mode.
+        std::vector<std::pair<std::string, GnssCorrections::WindUpArc>> windUpArcs() const {
+            return antenna_.windUpArcs();
+        }
         /// @brief The wind-up gap-bridge counters for this model's receiver (zero unless
         ///        @c estimation.phase_windup_gap_bridge is on).
         /// @return Reference to the counters; valid for the lifetime of this model.

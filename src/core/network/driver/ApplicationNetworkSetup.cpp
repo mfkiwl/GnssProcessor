@@ -1460,8 +1460,41 @@ int Application::networkSetup_(NetworkSetupResult& setup) {
                           config_.networkCodeBiasDiscJumpTest(),
                           config_.networkClockDiscOnSetChange(),
                           config_.networkDiscThresholdFracCycles(),
-                          nc.disc_mark_scope == "channel");  // per-channel mark scope
+                          nc.disc_mark_scope == "channel",   // per-channel mark scope
+                          config_.networkDiscPhaseVisible() ? kPhaseVisibleMinSats : 0);  // discpv=
     NetworkProductEmitter& emitter = *setup.emitter;
+    if (!nc.disc_step_class_pairs.empty()) {
+        emitter.setStepClassTest(nc.disc_step_class_pairs, nc.disc_step_class_tol_cyc);
+        std::string fams;
+        for (const auto& f : nc.disc_step_class_pairs) fams += (fams.empty() ? "" : ", ") + f;
+        log->warn("Network: STEP-CLASS DECLARATION on {} (tolerance {:.3f} cycle): a whole or fraction "
+                  "step of a family's level declares its signals on the phase channel in place of the "
+                  "value test; quiet and ionosphere-like steps declare nothing; every satellite signal the "
+                  "chain releases is declared at its release epoch.", fams,
+                  nc.disc_step_class_tol_cyc);
+    }
+    if (nc.ring_fix.enable && nc.ring_fix.unsettled_steps) {
+        emitter.setUnsettledSteps(nc.ring_fix.pairs);
+        std::string fams;
+        for (const auto& f : nc.ring_fix.pairs) fams += (fams.empty() ? "" : ", ") + f;
+        log->warn("Network (ring fix): UNSETTLED STEPS on {}: while a held family's two signals are not both flagged "
+                  "settled, both step their phase counters at every emission, and once more when both become "
+                  "flagged.", fams);
+        if (nc.ring_fix.unsettled_steps_unheld) {
+            emitter.setUnsettledStepsUnheld(true);
+            log->warn("Network (ring fix): UNSETTLED STEPS OF THE SIGNALS OF NO HELD FAMILY: a phase signal that belongs "
+                      "to none of {} is never settled, so its phase counter steps at every emission.", fams);
+        }
+        if (nc.ring_fix.continuity_guard_cyc > 0.0) {
+            emitter.setContinuityGuard(nc.ring_fix.continuity_guard_cyc, nc.ring_fix.continuity_guard_hold,
+                                       nc.ring_fix.continuity_guard_min_run);
+            log->warn("Network (ring fix): CONTINUITY GUARD on {}: a satellite whose level moves more than {:.3f} "
+                      "narrow-lane cycle while both its flags stay up and neither counter steps (after {} emissions "
+                      "of the run) has both flags lowered for {} emissions; the unsettled steps step its counters.",
+                      fams, nc.ring_fix.continuity_guard_cyc, nc.ring_fix.continuity_guard_min_run,
+                      nc.ring_fix.continuity_guard_hold);
+        }
+    }
 
     // --- Optional on-disk product serialization -----------------------------
     // A reusable per-epoch dump of the emitted solution (the same pre-emit
@@ -1607,6 +1640,8 @@ int Application::networkSetup_(NetworkSetupResult& setup) {
             pending_contract.clock_disc_on_set_change = config_.networkClockDiscOnSetChange();
             pending_contract.disc_threshold_frac_cycles = config_.networkDiscThresholdFracCycles();  // per-λ jump gate, discfrac= (H3)
             pending_contract.disc_mark_scope_channel = (nc.disc_mark_scope == "channel");  // per-channel mark scope, discscope=
+            pending_contract.disc_phase_visible_min_sats =          // phase-visible step test, discpv=
+                config_.networkDiscPhaseVisible() ? kPhaseVisibleMinSats : 0;
             pending_contract.emit_pb_hold = nc.emit_pb_hold;  // the phase-bias hold reading rule, pbhold=
             pending_contract.emit_pb_hold_phase_clock =       // pbhold=2: the phase-visible clock is held
                 nc.emit_pb_hold && nc.emit_pb_hold_phase_clock;

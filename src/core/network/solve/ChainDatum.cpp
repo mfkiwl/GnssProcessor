@@ -266,6 +266,10 @@ struct ChainElection {
     int n_pins = 0, gauge_dim = 0;
     // The tree edges kept across a row gap while their carry lives (extend-only): replaces the arcs' retained edges.
     std::set<std::pair<int, std::string>> new_retained_edges;
+    /// The bands elected so far at this election ("<constellation key>|<signal>"): a cascade's third band reads its
+    /// pair's trees of this election from @ref this_epoch_anchor and @ref new_rx_parent when they are here, else from
+    /// the last election's maps (network.ring_fix.cascade_tree).
+    std::set<std::string> elected_bands;
 
     /// True when a row that releases edges (the returning, the rehost, the slip or the merge and split row) is armed.
     bool cutsEdges() const { return returning_row || rehost_row || slip_row || merge_split_row; }
@@ -558,6 +562,23 @@ struct ChainSeeds {
 /// by the topology.  In a pair family an arc is slipped when either band's integer may have
 /// changed, an arc named by both bands' maps is seeded and counted once, and a de-seeded arc
 /// counts once however many maps named it.  In a one-band family every map entry counts.
+/// The arc of a move of the re-attachment of untied satellites (network.ring_fix.reattach) for one satellite on one
+/// band of a family: the chosen station's arc in this election's graph, when it exists and is not slipped on the
+/// family's bands; -1 otherwise (no move, or nothing to take: the incumbent then stays).
+int untiedMoveArc(const ChainElection& el, const ChainGraph& cg, const ChainFamily& fam, const std::string& signal,
+                  const std::string& sat) {
+    const NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->reattach) return -1;
+    const auto m = rf->untied_moves.find({signal, sat});
+    if (m == rf->untied_moves.end() || m->second.station < 0) return -1;
+    const auto ni = cg.slot_of_name.find(el.stations[static_cast<std::size_t>(m->second.station)].name);
+    const auto ki = cg.slot_of_sat.find(sat);
+    if (ni == cg.slot_of_name.end() || ki == cg.slot_of_sat.end()) return -1;
+    const int arc = arcgraph::arcIndex(cg.graph, ni->second, ki->second);
+    if (arc < 0 || arcgraph::slippedIn(cg.graph, arc, fam.mask())) return -1;
+    return arc;
+}
+
 ChainSeeds seedIncumbents(ChainElection& el, const ChainFamily& fam, const ChainGraph& cg) {
     ChainSeeds seeds;
     seeds.band.resize(fam.bands.size());
@@ -586,6 +607,8 @@ ChainSeeds seedIncumbents(ChainElection& el, const ChainFamily& fam, const Chain
             const std::string& sta = *srow.anchor_incumbent;
             if (sid.sat == SatId{} || sid.signal == SignalId{}) continue;   // a row that names no arc
             if (sid.sat.sys != fam.sys || net::signalKey(sid.signal) != band.signal) continue;
+            // The re-attachment (network.ring_fix.reattach): a move's chosen arc replaces the satellite's incumbent.
+            if (untiedMoveArc(el, cg, fam, band.signal, net::satKey(sid.sat)) >= 0) continue;
             seedEdge(sta, net::satKey(sid.sat), true);
         }
         // The receiver-side parents of this band, in station-name order (O3: the order of the
@@ -755,16 +778,157 @@ arcgraph::ForestRules chainForestRules(const ChainElection& el, std::uint8_t ban
     return rules;
 }
 
+/// The arcs of a family's graph whose integers the ring fix holds (network.ring_fix.held_first): a
+/// held link not latched this epoch, its monitor not tripped, on the family's bands.  The walk tries
+/// them first whenever a vertex needs a new edge, so a re-attachment keeps the held integers' frame.
+/// Empty without the option (the walk as built).
+std::vector<char> chainHeldArcs(const ChainElection& el, const ChainFamily& fam, const ChainGraph& cg) {
+    std::vector<char> held;
+    const NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->held_first) return held;
+    const auto& free_ambs = el.events.slip.relevel.free_ambs;
+    std::set<std::string> fam_sigs;
+    for (const ChainBand& b : fam.bands) fam_sigs.insert(b.signal);
+    std::set<std::pair<std::size_t, std::string>> ok;   // (station index, satellite)
+    for (const auto& [id, L] : rf->links) {
+        if (!L.held || L.monitor_trip) continue;
+        if (!fam_sigs.count(id.sig1) && !fam_sigs.count(id.sig2)) continue;
+        if (free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig1)}) != 0
+            || free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig2)}) != 0)
+            continue;
+        ok.insert({static_cast<std::size_t>(id.station), id.sat});
+    }
+    if (ok.empty()) return held;
+    held.assign(cg.graph.rows.size(), 0);
+    bool any = false;
+    for (std::size_t a = 0; a < cg.graph.rows.size(); ++a)
+        if (ok.count({cg.staIdx(cg.graph.row_station[a]), cg.satName(cg.graph.row_sat[a])}) != 0) held[a] = 1, any = true;
+    if (!any) held.clear();   // no held arc in this family's graph: the walk as built
+    return held;
+}
+
+/// The arcs of a family's graph that are tree edges of one band of its constellation: at this election when that
+/// band was elected already (this_epoch_anchor and new_rx_parent), else at the last election (anchor_incumbent and
+/// eq34_rx_parent).  Per arc of @p cg: 1 for a tree edge.
+std::vector<char> chainBandTreeArcs(const ChainElection& el, const ChainGraph& cg, System sys,
+                                    const std::string& signal) {
+    std::vector<char> tree(cg.graph.rows.size(), 0);
+    const std::string cell = constellationKey(sys) + "|" + signal;   // the band's key, "<constellation key>|<signal>"
+    const bool now = el.elected_bands.count(cell) != 0;
+    const auto mark = [&](int s, int k) {
+        const int arc = arcgraph::arcIndex(cg.graph, s, k);
+        if (arc >= 0) tree[static_cast<std::size_t>(arc)] = 1;
+    };
+    // The satellite-side edges: each satellite's parent station.
+    for (int k = 0; k < static_cast<int>(cg.graph.sats.size()); ++k) {
+        const std::string amb = StateKeys::makeAmbiguityKey(cg.satName(k), signal);
+        const std::string* sta = nullptr;
+        if (now) {
+            const auto it = el.this_epoch_anchor.find(amb);
+            if (it != el.this_epoch_anchor.end()) sta = &it->second;
+        } else {
+            sta = net::getSig(el.sig_rows, amb, &net::SatSignalState::anchor_incumbent);
+        }
+        if (sta == nullptr) continue;
+        if (const auto ni = cg.slot_of_name.find(*sta); ni != cg.slot_of_name.end()) mark(ni->second, k);
+    }
+    // The receiver-side edges: each station's parent satellite.
+    for (int s = 0; s < static_cast<int>(cg.graph.stations.size()); ++s) {
+        const std::size_t ri = cg.staIdx(s);
+        const std::string* sat = nullptr;
+        if (now) {
+            const auto it = el.new_rx_parent.find(el.stations[ri].name + "|" + cell);
+            if (it != el.new_rx_parent.end()) sat = &it->second;
+        } else {
+            sat = net::get(el.entities.stations, StationId{static_cast<int>(ri)}, &net::StationState::signals, cell,
+                           &net::StationSignalState::eq34_rx_parent);
+        }
+        if (sat == nullptr) continue;
+        if (const auto ki = cg.slot_of_sat.find(*sat); ki != cg.slot_of_sat.end()) mark(s, ki->second);
+    }
+    return tree;
+}
+
+/// A cascade's third band grown on its pair's forest (network.ring_fix.cascade_tree): the cascade, and the lead rank
+/// of every arc of the band's graph.
+struct ChainCascadeLead {
+    const RingFixCascade* cascade{nullptr};   ///< The cascade whose third band the family is (null: none).
+    std::vector<char>     rank;               ///< Per arc: its lead rank (ringFixCascadeLeadRank); empty: no lead arc.
+};
+
+/// The lead ranks of a family that is the one band of a cascade's third signal, with the option armed: per arc,
+/// whether it is a tree edge of both bands of the cascade's pair (chainBandTreeArcs), a link the pair holds (held, its
+/// monitor not tripped, neither signal freed this epoch), an incumbent of the band (the seed), slipped on the band, and
+/// an eligible host.  Empty otherwise.
+ChainCascadeLead chainCascadeLead(const ChainElection& el, const ChainFamily& fam, const ChainGraph& cg,
+                                  const ChainSeeds& seeds) {
+    ChainCascadeLead lead;
+    const NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->cascade_tree || fam.bands.size() != 1) return lead;
+    const std::string ck = constellationKey(fam.sys);
+    for (const RingFixCascade& c : rf->cascades)
+        if (c.ck == ck && c.s3 == fam.bands[0].signal) lead.cascade = &c;
+    if (lead.cascade == nullptr) return lead;
+    const RingFixCascade& c = *lead.cascade;
+    const std::size_t n_arcs = cg.graph.rows.size();
+    const std::vector<char> tree1 = chainBandTreeArcs(el, cg, fam.sys, c.s1);
+    const std::vector<char> tree2 = chainBandTreeArcs(el, cg, fam.sys, c.s2);
+    std::vector<char> held(n_arcs, 0);
+    const auto& free_ambs = el.events.slip.relevel.free_ambs;
+    for (const auto& [id, L] : rf->links) {
+        if (!L.held || L.monitor_trip || id.sig1 != c.s1 || id.sig2 != c.s2 || id.sat.empty() || id.sat[0] != c.letter)
+            continue;
+        if (free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig1)}) != 0
+            || free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig2)}) != 0)
+            continue;
+        const auto ni = cg.slot_of_name.find(el.stations[static_cast<std::size_t>(id.station)].name);
+        const auto ki = cg.slot_of_sat.find(id.sat);
+        if (ni == cg.slot_of_name.end() || ki == cg.slot_of_sat.end()) continue;
+        const int arc = arcgraph::arcIndex(cg.graph, ni->second, ki->second);
+        if (arc >= 0) held[static_cast<std::size_t>(arc)] = 1;
+    }
+    std::vector<char> incumbent(n_arcs, 0);
+    for (int a : seeds.family)
+        if (a >= 0 && static_cast<std::size_t>(a) < n_arcs) incumbent[static_cast<std::size_t>(a)] = 1;
+    lead.rank.assign(n_arcs, 0);
+    bool any = false;
+    for (std::size_t a = 0; a < n_arcs; ++a) {
+        const int r = ringFixCascadeLeadRank(tree1[a] != 0 && tree2[a] != 0, held[a] != 0, incumbent[a] != 0,
+                                            arcgraph::slippedIn(cg.graph, static_cast<int>(a), fam.mask()),
+                                            cg.graph.rows[a].eligible_host);
+        lead.rank[a] = static_cast<char>(r);
+        any = any || r > 0;
+    }
+    if (!any) lead.rank.clear();   // no lead arc: the walk as built
+    return lead;
+}
+
+/// The third band's tree edges of this election by how the walk took them, into the cascade's run counters.
+void tallyCascadeTree(ChainElection& el, const RingFixCascade& c, const ChainFamilyPlan& plan) {
+    RingFixCascadeCounters& CC = el.ctx.carry.ring_fix->cascade_counters[c.name];
+    for (const ChainComponentPlan& cp : plan.comps)
+        for (const arcgraph::TreeEdge& e : cp.forest.edges) {
+            ++CC.tree_edges;
+            if (e.lead == 1)      ++CC.tree_pair;
+            else if (e.lead >= 2) ++CC.tree_held;
+            else                  ++CC.tree_other;
+        }
+}
+
 /// The family's components, each with its datum receiver and forest, in component order.  The
 /// connected components come in the order of their roots: under the shared link rule (a station
 /// is united under a satellite, arc by arc) every root is a satellite, so the components come in
 /// the string order of their root satellites; legacyChainVertexRank also orders the second pass's
-/// frontier (receivers by the decimal string of their roster index, then satellites).
+/// frontier (receivers by the decimal string of their roster index, then satellites).  With
+/// @p lead_rank (a cascade's third band on its pair's forest) the walk takes the lead arcs first.
 ChainFamilyPlan planChainFamily(const ChainElection& el, const ChainFamily& fam, const ChainGraph& cg,
                                 const ChainSeeds& seeds, const std::vector<int>& chain_rank,
-                                const std::vector<int>& station_rank) {
+                                const std::vector<int>& station_rank, const std::vector<char>& lead_rank) {
     ChainFamilyPlan fp;
-    const arcgraph::ForestRules rules = chainForestRules(el, fam.mask());
+    arcgraph::ForestRules rules = chainForestRules(el, fam.mask());
+    const std::vector<char> held = chainHeldArcs(el, fam, cg);
+    if (!held.empty()) rules.held_arcs = &held;
+    if (!lead_rank.empty()) rules.lead_rank = &lead_rank;
     std::size_t best_comp = 0;
     for (const arcgraph::Component& comp : arcgraph::arcComponents(cg.graph, fam.mask(), chain_rank)) {
         std::optional<ChainComponentPlan> plan =
@@ -1298,6 +1462,78 @@ void applyReturningRow(ChainElection& el, System sys, const ChainBand& band, std
     d.frame_shiftable = false;
 }
 
+/// Remedy (a) (network.ring_fix.rehost_keep_carry): the integer the ring fix holds on arc (ri, sat) for the band,
+/// when the link is held and usable (held, its residual monitor not tripped, neither of its bands in this epoch's
+/// free-epoch latch); none otherwise, and none without the option.
+std::optional<long long> chainHeldInteger(const ChainElection& el, const ChainBand& band, std::size_t ri,
+                                          const std::string& sat) {
+    const NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->rehost_keep_carry) return std::nullopt;
+    const auto& free_ambs = el.events.slip.relevel.free_ambs;
+    for (const auto& [id, L] : rf->links) {
+        if (id.station != static_cast<int>(ri) || id.sat != sat) continue;
+        if (id.sig1 != band.signal && id.sig2 != band.signal) continue;
+        if (!L.held || L.monitor_trip) return std::nullopt;
+        if (free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig1)}) != 0
+            || free_ambs.count({id.station, StateKeys::makeAmbiguityKey(id.sat, id.sig2)}) != 0)
+            return std::nullopt;
+        return id.sig1 == band.signal ? L.n1 : L.n2;
+    }
+    return std::nullopt;
+}
+
+/// The held third-signal integer of a cascade link on arc (ri, sat) of a cascade's third band, and its cascade
+/// (network.ring_fix.cascade_rehost_keep; ringFixCascadeKeepInteger); none without the option, for a band that is no
+/// cascade's third signal, or when the link is not held, its monitor tripped or a signal freed this epoch.
+std::optional<std::pair<long long, const RingFixCascade*>> chainCascadeHeldInteger(const ChainElection& el,
+                                                                                   const ChainBand& band,
+                                                                                   std::size_t ri,
+                                                                                   const std::string& sat) {
+    const NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->cascade_rehost_keep || sat.empty()) return std::nullopt;
+    const auto& free_ambs = el.events.slip.relevel.free_ambs;
+    for (const RingFixCascade& c : rf->cascades) {
+        if (c.letter != sat[0] || c.s3 != band.signal) continue;
+        const auto it = rf->cascade_links.find(RingFixLinkId{static_cast<int>(ri), sat, c.ref, c.s3});
+        if (it == rf->cascade_links.end()) return std::nullopt;
+        const int sta = static_cast<int>(ri);
+        const std::optional<long long> n3 = ringFixCascadeKeepInteger(
+            it->second, free_ambs.count({sta, StateKeys::makeAmbiguityKey(sat, c.ref)}) != 0,
+            free_ambs.count({sta, StateKeys::makeAmbiguityKey(sat, c.s3)}) != 0);
+        if (!n3) return std::nullopt;
+        return std::make_pair(*n3, &c);
+    }
+    return std::nullopt;
+}
+
+/// Remedy (a): a re-host onto a held link is kept only when the new host's carry sits on the held integer to
+/// within this many cycles (the hold's own residual, micrometres on the simulator and on DOY 144 and 145; card
+/// NRF sections 41 and 42).
+constexpr double kRehostKeepZeroStepCyc = 1e-4;
+
+/// The outcome of remedy (a)'s keep test.
+enum class RehostKeep : std::uint8_t {
+    Kept,        ///< The new host's carry sits on the held integer and the draft's step is known: kept at a step of 0.
+    OffInteger,  ///< Released: the carry is kRehostKeepZeroStepCyc or more off the held integer.
+    NotKept,     ///< Released for another cause: no carry at the new host, or an unknown draft step.
+};
+
+/// Remedy (a)'s keep test of a re-host onto a link held at integer @p n: when kept, the draft takes the integer at a
+/// step of 0 (its as-built facts kept for the observatory); otherwise the draft is left as it is.
+RehostKeep keepOnHeldInteger(const ChainBand& band, long long n, PinDraft& d) {
+    const double target = static_cast<double>(n) * band.lambda_m;
+    const bool   carry  = band.lambda_m > 0.0 && std::isfinite(d.carry_val);
+    const bool   on_int = carry && std::abs(target - d.carry_val) < kRehostKeepZeroStepCyc * band.lambda_m;
+    if (on_int && d.known) {
+        d.as_built = asBuilt(d);
+        d.held     = true;
+        d.target   = target;
+        d.pinmove  = 0.0;
+        return RehostKeep::Kept;
+    }
+    return carry && !on_int ? RehostKeep::OffInteger : RehostKeep::NotKept;
+}
+
 /// The rehost row of the chain's event table, applied to a pin after the as-built draft, the kept row
 /// and the returning row.  A tree edge is released (the cut release of its moved side) when all of
 /// these hold:
@@ -1314,7 +1550,17 @@ void applyReturningRow(ChainElection& el, System sys, const ChainBand& band, std
 /// side and drops the receiver phase-bias carries of its receivers, and releaseCutCarries erases the
 /// leveling carries that touch it.  The draft's facts are kept in @c d.as_built for the observatory.
 ///
-/// @param d The draft; replaced in place when the edge is released.
+/// One exception (network.ring_fix.rehost_keep_carry): when the new edge's arc is a link the ring fix holds and
+/// the new host's carry sits on the held integer (within kRehostKeepZeroStepCyc: the hold's own residual), the
+/// re-host changes nothing physical: the edge takes the held integer, the step is 0, and the moved side keeps its
+/// carries.  A held link whose carry is off its integer (one decided at the previous epoch, before the hold has
+/// pulled its carry) is released as above: a fractional step carried into the moved side would move every chord
+/// through it off its integer, held links included, and the ring fix sees no cut to re-express them by (card NRF
+/// section 42).  Kept only where the host's carry exists and the draft's step was known otherwise (no unpinned
+/// root handover).  With network.ring_fix.cascade_rehost_keep the same holds for a re-host of a cascade's third band
+/// onto a link the cascade holds, at its held third-signal integer.
+///
+/// @param d The draft; replaced in place when the edge is released or kept on a held integer.
 void applyRehostRow(ChainElection& el, const ChainBand& band, std::size_t ri, const std::string& sat,
                     const std::string& amb, bool sat_is_child, PinDraft& d) {
     if (d.held) return;
@@ -1325,6 +1571,23 @@ void applyRehostRow(ChainElection& el, const ChainBand& band, std::size_t ri, co
     if (el.events.slip.relevel.free_ambs.count({static_cast<int>(ri), amb}) != 0) {
         ++cnt.eq34_rh_not_freed;
         return;
+    }
+    // Kept on a held integer (remedy (a)): the host's carry on the held integer, a step of 0; a pair's held link
+    // first, else (network.ring_fix.cascade_rehost_keep) a held cascade link of a third band.
+    if (const std::optional<long long> held = chainHeldInteger(el, band, ri, sat); held.has_value()) {
+        RingFixCounters& C = el.ctx.carry.ring_fix->counters;
+        switch (keepOnHeldInteger(band, *held, d)) {
+            case RehostKeep::Kept:       ++C.rehost_kept; return;
+            case RehostKeep::OffInteger: ++C.rehost_off_integer; break;
+            case RehostKeep::NotKept:    ++C.rehost_not_kept; break;
+        }
+    } else if (const auto held3 = chainCascadeHeldInteger(el, band, ri, sat); held3.has_value()) {
+        RingFixCascadeCounters& CC = el.ctx.carry.ring_fix->cascade_counters[held3->second->name];
+        switch (keepOnHeldInteger(band, held3->first, d)) {
+            case RehostKeep::Kept:       ++CC.rehost_kept; return;
+            case RehostKeep::OffInteger: ++CC.rehost_off_integer; break;
+            case RehostKeep::NotKept:    ++CC.rehost_not_kept; break;
+        }
     }
     // Released.  What the as-built draft would have done is tallied and kept for the observatory.
     ++cnt.eq34_rh_released;
@@ -1649,6 +1912,7 @@ void traceTreeEdge(ChainElection& el, const ChainFamily& fam, const ChainBand& b
                                                   : ChainLegacyCause::FirstSighting;
     o.from_incumbent = edge.from_incumbent;
     o.second_pass = edge.pass == 2;
+    o.held_first = edge.held_first;
     const auto sc = el.stations[ri].pinned_amb_sigma_scale.find(amb);
     if (sc != el.stations[ri].pinned_amb_sigma_scale.end() && sc->second > 1.0) {
         o.sigma_scale = sc->second;
@@ -2022,7 +2286,9 @@ void extendBand(ChainElection& el, const ChainFamily& fam, const ChainGraph& cg,
                 const std::vector<int>& station_rank, BandWalk& walk) {
     const ChainBand& band = fam.bands[static_cast<size_t>(b)];
     const auto bit = static_cast<std::uint8_t>(1u << b);
-    const arcgraph::ForestRules rules = chainForestRules(el, bit);
+    arcgraph::ForestRules rules = chainForestRules(el, bit);
+    const std::vector<char> held = chainHeldArcs(el, fam, cg);
+    if (!held.empty()) rules.held_arcs = &held;
     for (const arcgraph::Component& comp : arcgraph::arcComponents(cg.graph, bit, chain_rank)) {
         std::vector<int> in_pair, band_only;   // the component's vertices, in ascending vertex id
         for (int s : comp.stations) {
@@ -2116,6 +2382,70 @@ void noteDeseats(ChainElection& el, const ChainFamily& fam, const ChainGraph& cg
 /// family, the band's extension), and the band's remembered datum receiver.  The band loop is
 /// outside the component loop, so a family whose bands' graphs coincide records its rows and
 /// counts band by band, each in the order a one-band family has.
+/// One move of the re-attachment the walk is asked to take on one band (network.ring_fix.reattach).
+struct UntiedLead {
+    std::string       signal;   ///< The band's signal.
+    std::string       sat;      ///< The satellite.
+    int               arc{-1};  ///< The chosen arc in this election's graph.
+    RingFixUntiedMove move;     ///< The move (chosen station, family).
+};
+
+/// The moves of the re-attachment on this family's bands (network.ring_fix.reattach): each chosen arc becomes a lead
+/// arc of rank 1, so the walk takes it as soon as its station is attached, before any incumbent, held or new edge
+/// (the satellite's incumbent was not seeded, seedIncumbents).  A move whose arc is absent or slipped is missed at once,
+/// its incumbent seeded as usual.
+std::vector<UntiedLead> untiedLeads(ChainElection& el, const ChainFamily& fam, const ChainGraph& cg,
+                                    std::vector<char>& lead_rank) {
+    std::vector<UntiedLead> out;
+    NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    if (rf == nullptr || !rf->reattach || rf->untied_moves.empty()) return out;
+    const std::string ck = constellationKey(fam.sys);
+    for (const ChainBand& band : fam.bands) {
+        for (auto it = rf->untied_moves.begin(); it != rf->untied_moves.end();) {
+            const std::string signal = it->first.first;
+            const std::string sat = it->first.second;
+            if (signal != band.signal || constellationKey(systemOfSat(sat)) != ck) {
+                ++it;
+                continue;
+            }
+            const int arc = untiedMoveArc(el, cg, fam, signal, sat);
+            if (arc < 0) {
+                ++rf->counters.untied_missed;
+                rf->untied_outcomes.push_back({it->second.family, signal, sat, it->second.station, -1, false});
+                it = rf->untied_moves.erase(it);
+                continue;
+            }
+            if (lead_rank.empty()) lead_rank.assign(cg.graph.rows.size(), 0);
+            lead_rank[static_cast<std::size_t>(arc)] = 1;
+            out.push_back({signal, sat, arc, it->second});
+            ++it;
+        }
+    }
+    return out;
+}
+
+/// What the walk did with this family's moves (network.ring_fix.reattach): applied when the satellite's tree edge is
+/// the chosen arc, missed otherwise (it was reached another way first).  The outcomes go to the ring fix's events and
+/// the moves are consumed.
+void tallyUntiedMoves(ChainElection& el, const ChainGraph& cg, const ChainFamilyPlan& plan,
+                      const std::vector<UntiedLead>& leads) {
+    NetworkRingFix* rf = el.ctx.carry.ring_fix.get();
+    std::map<std::string, int> edge_of;   // satellite -> the arc that attaches it at this election
+    for (const ChainComponentPlan& cp : plan.comps)
+        for (const arcgraph::TreeEdge& e : cp.forest.edges)
+            if (e.attaches_sat) edge_of[cg.satName(cg.graph.row_sat[static_cast<std::size_t>(e.arc)])] = e.arc;
+    for (const UntiedLead& l : leads) {
+        const auto e = edge_of.find(l.sat);
+        const int taken = e == edge_of.end()
+                              ? -1
+                              : static_cast<int>(cg.staIdx(cg.graph.row_station[static_cast<std::size_t>(e->second)]));
+        const bool applied = e != edge_of.end() && e->second == l.arc;
+        ++(applied ? rf->counters.untied_applied : rf->counters.untied_missed);
+        rf->untied_outcomes.push_back({l.move.family, l.signal, l.sat, l.move.station, taken, applied});
+        rf->untied_moves.erase({l.signal, l.sat});
+    }
+}
+
 void electFamily(ChainElection& el, const ChainGroups& groups, const ChainFamily& fam) {
     const ChainGraph cg = buildChainGraph(el, groups, fam);
     const ChainSeeds seeds = seedIncumbents(el, fam, cg);
@@ -2123,7 +2453,12 @@ void electFamily(ChainElection& el, const ChainGroups& groups, const ChainFamily
     std::vector<int> station_rank;   // per station slot: the coverage
     for (int s = 0; s < static_cast<int>(cg.graph.stations.size()); ++s)
         station_rank.push_back(chainCoverage(el, fam.sys, cg.staIdx(s)));
-    const ChainFamilyPlan plan = planChainFamily(el, fam, cg, seeds, chain_rank, station_rank);
+    const ChainCascadeLead lead = chainCascadeLead(el, fam, cg, seeds);   // empty unless a cascade's third band
+    std::vector<char> lead_rank = lead.rank;
+    const std::vector<UntiedLead> untied = untiedLeads(el, fam, cg, lead_rank);   // network.ring_fix.reattach
+    const ChainFamilyPlan plan = planChainFamily(el, fam, cg, seeds, chain_rank, station_rank, lead_rank);
+    if (lead.cascade != nullptr) tallyCascadeTree(el, *lead.cascade, plan);
+    if (!untied.empty()) tallyUntiedMoves(el, cg, plan, untied);
     for (std::size_t b = 0; b < fam.bands.size(); ++b) {
         BandWalk walk(cg);
         if (el.root_row) buildRootKeepers(el, fam.bands[b], plan.comps);
@@ -2135,6 +2470,7 @@ void electFamily(ChainElection& el, const ChainGroups& groups, const ChainFamily
         if (!plan.best_datum_rx.empty())
             net::put(el.entities.constellations, fam.sys, &net::ConstellationState::channels,
                      fam.bands[b].signal, &net::ChannelState::datum_rx) = plan.best_datum_rx;
+        el.elected_bands.insert(fam.bands[b].dr_key);
     }
 }
 

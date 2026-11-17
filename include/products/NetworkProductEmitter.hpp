@@ -53,6 +53,8 @@
  * reads from, and tests do not modify global state.
  */
 
+#include "products/PhaseStepClassTest.hpp"     // the step-class declaration (network.disc_step_class_pairs)
+#include "products/PhaseVisibleStepTest.hpp"   // the phase-visible step test (network.disc_phase_visible)
 #include "rtcm/RtcmTypes.hpp"   // GnssTime, SSR record structs
 
 #include <cstdint>
@@ -270,13 +272,24 @@ public:
     ///        channel that a mark did not name.
     ///        Default false = the legacy satellite-wide scope (byte-identical).
     ///        Travels in the S contract (@c discscope=) for @c makeReplayEmitter.
+    /// @param disc_phase_visible_min_sats When > 0 (@c network.disc_phase_visible), the
+    ///        phase value test declares a step on what a user of between-satellite
+    ///        differences sees: the change of the phase-visible correction (clock less
+    ///        phase bias) less the median of that change over the satellites of the same
+    ///        constellation and signal, against the same threshold (see
+    ///        products/PhaseVisibleStepTest.hpp).  The value is the minimum number of
+    ///        voting satellites for the median (@ref kPhaseVisibleMinSats when armed); a key
+    ///        without a clock in this or its previous emission keeps the legacy test.
+    ///        Default 0 = the legacy test on the phase bias alone (byte-identical).
+    ///        Travels in the S contract (@c discpv=) for @c makeReplayEmitter.
     explicit NetworkProductEmitter(double disc_threshold_m = kDefaultDiscThresholdM,
                                    bool emit_clock_disc = false,
                                    double staleness_horizon_s = 0.0,
                                    bool code_bias_jump_test = false,
                                    bool clock_disc_on_set_change = false,
                                    double disc_threshold_frac_cycles = 0.0,
-                                   bool disc_mark_scope_channel = false);
+                                   bool disc_mark_scope_channel = false,
+                                   int disc_phase_visible_min_sats = 0);
 
     /// Product channels that a per-satellite discontinuity mark applies to.
     /// A bit mask, so a marking site that moves two channels names both, and two
@@ -324,6 +337,181 @@ public:
     /// @return True when constructed with @c disc_mark_scope_channel; false is the legacy
     ///         satellite-wide scope.
     bool discMarkScopeChannel() const { return disc_mark_scope_channel_; }
+
+    /// @brief The phase-visible step test's minimum voter count.
+    /// @return 0 when the legacy phase test is in force (@c network.disc_phase_visible off),
+    ///         else the minimum number of voting satellites for the median.
+    int discPhaseVisibleMinSats() const { return disc_pv_min_sats_; }
+
+    /**
+     * @brief Arm the step-class declaration (@c network.disc_step_class_pairs).
+     *
+     * At every emission each family's satellites have their phase step classified against
+     * their previous emission (products/PhaseStepClassTest.hpp), and the signals of a whole
+     * or fraction step are declared on the phase channel in place of the value test; a
+     * classified key whose step is quiet or ionosphere-like is not declared.  A key of no
+     * family, or not classified at an emission (no previous emission of the stream within
+     * 45 s, the satellite absent from it, a code or phase bias or the clock missing, the
+     * family below @ref kStepClassMinSats), keeps the value test.  Forced marks are
+     * unchanged.  The baselines are not carried across a warm resume: the first emission
+     * after a restore re-seeds them.
+     *
+     * @param pairs   Families, "<constellation>:<phase signal>/<phase signal>" ("E:L1X/L5X");
+     *                each family's code signals are its phase signals with L read as C.
+     *                Empty disarms the test.
+     * @param tol_cyc The class tolerance (cycles, in (0, 0.5)).
+     * @throws std::invalid_argument on a malformed entry, a band without a nominal frequency
+     *         or a tolerance out of range.
+     */
+    void setStepClassTest(const std::vector<std::string>& pairs, double tol_cyc);
+    /// @brief Whether the step-class declaration is armed.
+    /// @return True when @ref setStepClassTest named at least one family.
+    bool stepClassArmed() const { return !sc_families_.empty(); }
+    /// @brief The step-class declaration's tolerance.
+    /// @return Cycles.
+    double stepClassTolCyc() const { return sc_tol_cyc_; }
+    /// @brief The step-class declaration's run-end counters (every family and emission so far).
+    /// @return The counters.
+    const StepClassCounters& stepClassCounters() const { return sc_counters_; }
+    /// @brief Phase-key increments the step-class declaration raised.
+    /// @return Count over emissions.
+    long long stepClassKeysStepped() const { return sc_keys_stepped_; }
+    /// @brief Classified keys the value test would have declared and the class test did not.
+    /// @return Count over emissions.
+    long long stepClassValueOnly() const { return sc_value_only_; }
+    /// @brief Classified keys the class test declared and the value test would not have.
+    /// @return Count over emissions.
+    long long stepClassClassOnly() const { return sc_class_only_; }
+
+    /**
+     * @brief Declare satellite signals the chain released at this epoch (the step declaration's release
+     *        increments).
+     *
+     * Under the step-class declaration (@ref setStepClassTest) every key named here steps its phase counter
+     * at the next emission that carries it, in addition to the class rule: the chain freed the key's level,
+     * and the freed level re-converges over the following epochs in steps each under the class tolerance.  A
+     * key absent from that emission stays pending until it is emitted; one emitted without a baseline (a
+     * first sighting) is consumed without an increment.  Ignored while the declaration is not armed.  The
+     * pending marks are not carried across a warm resume (as the class baselines).
+     *
+     * @param keys (satellite, phase signal) pairs, e.g. ("E14", "L1C").
+     */
+    void markReleasedSignals(const std::set<std::pair<std::string, std::string>>& keys);
+    /// @brief Release marks received (the chain's declared keys, every emission so far).
+    /// @return Count over the run.
+    long long stepClassReleaseMarks() const { return sc_release_marks_; }
+    /// @brief Release marks consumed on an emitted key with a baseline (each one an increment).
+    /// @return Count over the run.
+    long long stepClassReleaseLanded() const { return sc_release_landed_; }
+    /// @brief Landed release marks whose key neither a forced mark nor the class or value test stepped.
+    /// @return Count over the run.
+    long long stepClassReleaseOnly() const { return sc_release_only_; }
+    /// @brief Release marks consumed on an emitted key without a baseline (no increment).
+    /// @return Count over the run.
+    long long stepClassReleaseNoBaseline() const { return sc_release_no_baseline_; }
+    /// @brief Release marks waiting for their key's next emission.
+    /// @return Count now.
+    std::size_t stepClassReleasePending() const { return sc_release_pending_.size(); }
+
+    /**
+     * @brief Arm the unsettled steps (@c network.ring_fix.unsettled_steps).
+     *
+     * For each family and satellite at every emission: while the family's two phase signals are not both flagged
+     * settled (signal_integer on both P records), both signals step their phase counters; at the first emission at
+     * which both are flagged after one at which they were not, they step once more; while both stay flagged only the
+     * other rules step them.  A family signal absent from the emission counts as not flagged; a key without a
+     * baseline (a first sighting) does not step.  Signals of no family are untouched.  The previous emission's state
+     * is not carried across a warm resume: an unknown previous state counts as not settled, so a family flagged at
+     * the first emission after a restore takes the settling step.
+     *
+     * @param families "<constellation>:<phase signal>/<phase signal>" ("E:L1X/L5X"), the ring fix's held families.
+     * @throws std::invalid_argument on a malformed family.
+     */
+    void setUnsettledSteps(const std::vector<std::string>& families);
+    /**
+     * @brief Arms the unsettled steps of the signals of no held family (network.ring_fix.unsettled_steps_unheld).
+     *
+     * With @ref setUnsettledSteps armed, a phase signal that belongs to no family it named (for the satellite's
+     * constellation) is never settled, so its phase counter steps at every emission that finds a baseline, filled
+     * copies included.  Its steps are counted under "<constellation>:no held family" in
+     * @ref unsettledStepCounts.  Without @ref setUnsettledSteps nothing happens.
+     *
+     * @param on True to arm.
+     */
+    void setUnsettledStepsUnheld(bool on) { us_unheld_ = on; }
+    /// @brief Whether the unsettled steps are armed.
+    /// @return True when @ref setUnsettledSteps named at least one family.
+    bool unsettledStepsArmed() const { return !us_families_.empty(); }
+    /// @brief The phase-key steps the unsettled steps raised, per family: (while unsettled, at the settling).
+    /// @return Family name ("E:L1X/L5X") -> the two counts over the run.
+    const std::map<std::string, std::pair<long long, long long>>& unsettledStepCounts() const { return us_counts_; }
+
+    /**
+     * @brief Arm the stream's continuity guard (@c network.ring_fix.continuity_guard_cyc).
+     *
+     * Needs @ref setUnsettledSteps (its families are the guarded families).  At every emission, per family and
+     * satellite with both phase signals, both code biases of the same bands (C for L in the signal code) and a clock,
+     * the satellite's level in narrow-lane cycles is formed from the emitted values,
+     * E_b = (c0 - pb_b + mu_b x) / lambda_b with x = ((c0 - cb_1) - (c0 - cb_2)) / (1 - gamma) and mu_1 = 1,
+     * mu_2 = gamma, combined as (f1 E_1 - f2 E_2) / (f1 - f2) after the family's datum is removed (the running sum of
+     * the median epoch-to-epoch step of E_1 and of E_2 over the satellites at both emissions, 4 or more).  A run is a
+     * sequence of emissions with both flags up, neither counter stepped and no hold; after @p min_run emissions of a
+     * run, a level more than @p thr_cyc away from its value at the run's start trips the guard: both flags are lowered
+     * at that emission and the next @p hold - 1, and both counters step at that emission; the unsettled steps then
+     * step them while lowered and once more when the flags rise.  The state is not carried across a warm resume (a
+     * restored emitter starts every run afresh).
+     *
+     * @param thr_cyc Threshold in narrow-lane cycles, > 0.
+     * @param hold    Emissions the flags stay lowered, >= 1.
+     * @param min_run Emissions of a run before its level is compared, >= 1.
+     * @throws std::invalid_argument when the unsettled steps are not armed or a value is out of range.
+     */
+    void setContinuityGuard(double thr_cyc, int hold, int min_run);
+    /// @brief Whether the continuity guard is armed.
+    /// @return True after @ref setContinuityGuard.
+    bool continuityGuardArmed() const { return cg_thr_cyc_ > 0.0; }
+    /// @brief Trips of the continuity guard, per family.
+    /// @return Family name ("E:L1X/L5X") -> trips over the run.
+    const std::map<std::string, long long>& continuityGuardTrips() const { return cg_trips_; }
+    /// @brief Phase-key emissions whose flag the continuity guard lowered, over the run.
+    /// @return The count.
+    long long continuityGuardLoweredKeys() const { return cg_lowered_keys_; }
+    /**
+     * @brief Lower, in @p sol, the flags the continuity guard lowered at the last @ref emitToStore.
+     *
+     * The store's records carry the guard's flags from @ref emitToStore; the product file is written from the
+     * solution record, so the emit seam applies them to @p sol after the emission and before the file write, and the
+     * file then says what the store says.  Nothing happens when the guard is off or lowered nothing.
+     *
+     * @param sol The epoch's solution as emitted (its P-record flags are lowered in place).
+     */
+    void applyContinuityGuardFlags(NetworkSolutionEpoch& sol) const;
+
+    /**
+     * @brief Both edges of the phase-visible step test (standing invariant 7), counted over
+     *        the emitter's life.  All zero when the test is off.
+     */
+    struct PhaseVisibleEdges {
+        long long first_records{0};      ///< Keys emitted with a clock and no phase-visible baseline: seeded, not tested.
+        long long returns_fresh{0};      ///< Keys tested against a baseline older than the previous emission (not voting).
+        long long returns_stale{0};      ///< Keys whose baseline is past the staleness horizon: re-seeded, not tested.
+        long long forced{0};             ///< Keys under a forced mark: declared by the mark, not voting.
+        long long no_clock{0};           ///< Keys emitted without a clock, or after one: the legacy test applies.
+        long long vote_entries{0};       ///< Keys voting this emission that did not vote at the previous one.
+        long long vote_exits{0};         ///< Keys that voted at the previous emission and do not vote at this one.
+        long long below_min_entries{0};  ///< Groups below the minimum count this emission and not at the previous one.
+        long long below_min_exits{0};    ///< Groups below the minimum count at the previous emission and not at this one.
+        long long legacy_would_step{0};  ///< Tested keys the legacy test (the phase bias alone) would have declared.
+        long long stepped_not_legacy{0}; ///< Tested keys declared here that the legacy test would not have declared.
+    };
+
+    /// @brief Counters of the phase-visible step test (groups, medians, declarations).
+    /// @return A reference into the emitter; all zero when the test is off.
+    const PhaseVisibleCounters& phaseVisibleCounters() const { return pv_counters_; }
+
+    /// @brief Edge counters of the phase-visible step test.
+    /// @return A reference into the emitter; all zero when the test is off.
+    const PhaseVisibleEdges& phaseVisibleEdges() const { return pv_edges_; }
 
     /**
      * @brief Channel mask of the marks pending for one satellite.
@@ -680,6 +868,101 @@ private:
     /// clock_disc_on_set_change_ is armed, so with it off the emitter carries no
     /// extra state and the serialized emitter section is unchanged.
     std::map<char, std::set<std::string>> prev_clock_satset_;
+
+    // --- The phase-visible step test (network.disc_phase_visible; 0 = off) ---------
+    // All of this state is populated only when the test is armed, so with it off the
+    // emitter carries no extra state and its serialized section is unchanged.
+    int disc_pv_min_sats_{0};          ///< Minimum voters for the median; 0 = the legacy phase test.
+
+    // --- The step-class declaration (network.disc_step_class_pairs; no family = off) -------
+    // Populated only when armed, so with it off the emitter carries no extra state.
+    /// One family: two phase signals on two bands, their code signals and frequencies.
+    struct StepClassFamily {
+        char        constellation{0};  ///< RINEX letter.
+        std::string p1, p2;            ///< Phase signals of bands 1 and 2.
+        std::string c1, c2;            ///< Code signals of bands 1 and 2.
+        double      f1_hz{0.0};        ///< Band 1's nominal frequency (Hz).
+        double      f2_hz{0.0};        ///< Band 2's nominal frequency (Hz).
+    };
+    /// One satellite's levels on one family at its last emission.
+    struct StepClassBaseline {
+        double e1{0.0};                ///< E_1 (cycles).
+        double e2{0.0};                ///< E_2 (cycles).
+        double epoch_s{0.0};           ///< Product time of that emission (s).
+    };
+    std::vector<StepClassFamily> sc_families_;              ///< The families; empty = off.
+    double sc_tol_cyc_{0.15};                               ///< The class tolerance (cycles).
+    std::map<std::string, StepClassBaseline> last_sc_;      ///< "<family index>|sat" -> baseline.
+    bool   sc_have_prev_{false};                            ///< An armed emission preceded this one.
+    double sc_prev_epoch_s_{0.0};                           ///< Its product time (s).
+    StepClassCounters sc_counters_;                         ///< Run-end counters.
+    long long sc_keys_stepped_{0};                          ///< Increments the class test raised.
+    long long sc_value_only_{0};                            ///< Classified keys only the value test declares.
+    long long sc_class_only_{0};                            ///< Classified keys only the class test declares.
+    std::set<std::string> sc_release_pending_;              ///< "sat|signal" keys released, waiting for their next emission.
+    long long sc_release_marks_{0};                         ///< Release marks received.
+    long long sc_release_landed_{0};                        ///< Release marks landed on a key with a baseline.
+    long long sc_release_only_{0};                          ///< Landed marks no other trigger stepped.
+    long long sc_release_no_baseline_{0};                   ///< Release marks consumed on a first sighting.
+
+    // --- The unsettled steps (network.ring_fix.unsettled_steps; no family = off) -------------------------------
+    /// One held family: its constellation and its two phase signals.
+    struct UnsettledFamily {
+        char        constellation{0};  ///< RINEX letter.
+        std::string p1, p2;            ///< Phase signals of bands 1 and 2.
+        std::string name;              ///< "<c>:<p1>/<p2>".
+    };
+    std::vector<UnsettledFamily> us_families_;                         ///< The families; empty = off.
+    std::map<std::string, bool> us_prev_both_;                          ///< "<family>|sat" -> both flagged at its last emission.
+    std::map<std::string, std::pair<long long, long long>> us_counts_;  ///< Family -> (unsettled steps, settling steps).
+    bool us_unheld_{false};                                           ///< The signals of no held family step too.
+    std::map<char, std::string> us_unheld_names_;                      ///< Constellation -> "<c>:no held family".
+
+    // --- The continuity guard (network.ring_fix.continuity_guard_cyc; threshold 0 = off) ------------------------
+    /// One satellite's run under the guard.
+    struct GuardRun {
+        double ref{0.0};   ///< The level (narrow-lane cycles) at the run's first emission.
+        int    n{0};       ///< Emissions of the run; 0 = no run.
+    };
+    double cg_thr_cyc_{0.0};                                         ///< Threshold; 0 = off.
+    int    cg_hold_{20};                                             ///< Emissions a trip lowers the flags.
+    int    cg_min_run_{4};                                           ///< Emissions before a run is compared.
+    std::map<std::string, std::pair<double, double>> cg_prev_e_;     ///< "<family>|sat" -> (E_1, E_2) at the last emission.
+    std::map<std::string, std::pair<double, double>> cg_datum_;      ///< Family -> running datum of E_1 and E_2.
+    std::map<std::string, GuardRun> cg_run_;                         ///< "<family>|sat" -> its run.
+    std::map<std::string, int> cg_hold_left_;                        ///< "sat|signal" -> emissions still lowered.
+    std::map<std::string, long long> cg_trips_;                      ///< Family -> trips.
+    long long cg_lowered_keys_{0};                                   ///< Phase-key emissions lowered by the guard.
+    std::set<std::string> cg_lowered_last_;                          ///< "sat|signal" keys lowered at the last emission.
+    /**
+     * @brief Whether the continuity guard holds a phase key's flag lowered at this emission.
+     * @param key "sat|signal".
+     * @return True while a trip's hold lasts (always false when the guard is off).
+     */
+    bool continuityGuardLowered_(const std::string& key) const;
+    /**
+     * @brief The continuity guard's run test for one satellite, after its phase records are formed: continues,
+     *        restarts or ends each family's run, and on a trip lowers both flags and steps both counters in @p rec.
+     * @param s       The satellite's solution.
+     * @param rec     Its phase-bias record of this emission (modified on a trip).
+     * @param level   "<family>|sat" -> the level of this emission (narrow-lane cycles, less the family's datum).
+     * @param stepped "sat|signal" keys stepped at this emission by any rule.
+     */
+    void continuityGuardRun_(const NetworkSatSolution& s, SsrPhaseBias& rec, const std::map<std::string, double>& level,
+                             const std::set<std::string>& stepped);
+    /// One key's phase-visible baseline: its clock less phase bias at its last emission
+    /// with a clock, and that emission's product time.
+    struct PvBaseline {
+        double cmp_m{0.0};             ///< Clock less phase bias (m).
+        double epoch_s{0.0};           ///< Product time of that emission (s).
+    };
+    std::map<std::string, PvBaseline> last_pv_;   ///< "sat|signal" -> baseline.
+    bool   have_prev_emit_{false};     ///< An emission preceded this one (the test's clock of "consecutive").
+    double prev_emit_epoch_s_{0.0};    ///< Product time of the previous emission (s).
+    std::set<std::string> pv_prev_voters_;     ///< Keys that voted at the previous emission.
+    std::set<std::string> pv_prev_below_min_;  ///< "const|signal" groups below the minimum at the previous emission.
+    PhaseVisibleCounters pv_counters_{};       ///< See phaseVisibleCounters().
+    PhaseVisibleEdges    pv_edges_{};          ///< See phaseVisibleEdges().
 };
 
 } // namespace GnssProcessor

@@ -68,7 +68,8 @@
  *   - StashTail: inside SB_STASH_STATUS, after networkClockLevelMonitor, before
  *     networkBufferedTraceDrains.  The carry-state drain is the first point after every row
  *     source has run: the leveling harvest and the gap prune (SB_LEVELING), the T4 / T3
- *     refloats (SB_RAIM) and the phase-anchor carry re-reference (the datum block).
+ *     refloats (SB_RAIM) and the phase-anchor carry re-reference (the datum block).  The
+ *     wind-up arc trace reads the accumulators the epoch's models advanced; it shares no state.
  *
  * The order constraints within a slot (the table is walked top to bottom):
  *   - RosterTail: the parameters-as-armed table before the contributions-as-armed table
@@ -129,7 +130,7 @@ struct NetworkEpochObserverRow {
 };
 
 /// The number of rows of @ref kNetworkEpochObservers.
-inline constexpr std::size_t kNetworkEpochObserverCount = 24;
+inline constexpr std::size_t kNetworkEpochObserverCount = 25;
 
 /// The observers in spine order (defined in network/driver/EpochObservers.cpp).
 extern const std::array<NetworkEpochObserverRow, kNetworkEpochObserverCount> kNetworkEpochObservers;

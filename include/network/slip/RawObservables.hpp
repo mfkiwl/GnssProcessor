@@ -42,6 +42,7 @@
 #include "common/PppObservation.hpp"
 #include "common/PppUtils.hpp"
 #include "network/slip/GfArcJump.hpp"   // GfArcJumpParams / GfArcJumpArc / GfArcJumpCounters
+#include "network/slip/BandBreak.hpp"   // BandBreak (the measured break of a band, read by the drop)
 
 #include <array>
 #include <functional>
@@ -197,6 +198,8 @@ struct RawSlipVerdict {
     bool   gf_step{false};    ///< |ΔGF| exceeded the empirical GF gate.
     double d_mw{0.0};         ///< ΔMW across the epoch (m); 0 when !measured or !dual.
     double d_gf{0.0};         ///< ΔGF across the epoch (m); 0 when !measured or !dual.
+    double d_l1c1{0.0};       ///< Δ(sig1 phase minus sig1 code) across the epoch (m); 0 when !measured.
+    double d_gf_code{0.0};    ///< ΔGF of the code (P1 - P2) across the epoch (m); 0 when !measured.
     double gate_mw{0.0};      ///< Effective MW gate applied (m): max(k·scale, floor).
     double gate_gf{0.0};      ///< Effective GF gate applied (m).
     /// The adjacent predecessor used a different (sig1, sig2) pair, so @ref d_mw
@@ -239,6 +242,10 @@ struct GapResumption {
     /// docs/record/SPEC_slip_qc_hardening.md §12.1).
     int         lli1{0};
     int         lli2{0};          ///< …for @ref sig2 (0 when the return row is single-band).
+    /// Each returning phase signal present on both sides of the break → its (phase - code) now minus the same
+    /// at the pre-gap epoch (m): the band's own level step, whatever the other band did and whether or not the
+    /// pair changed across the gap.  A shift common to both bands cancels in @ref d_gf but not here.
+    std::map<std::string, double> lmc_step_m;
 };
 
 /**
@@ -275,6 +282,8 @@ struct SigResumption {
     double      d_gf{0.0};         ///< GF level change across the break (m); 0 when !measurable.
     double      gate_gf{0.0};      ///< The gate applied (m), max(k_gf·scale, gf_floor_m).
     int         lli{0};            ///< RINEX LLI byte for @ref signal on the return epoch.
+    bool        lmc_measured{false}; ///< The signal's matching code was present on both sides of the break.
+    double      lmc_step_m{0.0};   ///< Its (phase - code) now minus the same at its last-seen epoch (m).
 };
 
 /**
@@ -315,6 +324,7 @@ struct RawSlipHistory {
         long long last_epoch{-1};   ///< Last processed epoch at which this signal's phase (and matching code) was present.
         long long run_start{-1};    ///< Epoch at which the current continuous run of this signal began.
         double    phase_m{0.0};     ///< Phase (m) at @ref last_epoch.
+        double    code_m{0.0};      ///< Matching code (m) at @ref last_epoch.
         int       lli{0};           ///< RINEX LLI byte at @ref last_epoch.
         /// other signal → phase_m(this) − phase_m(other), at @ref last_epoch.
         std::map<std::string, double> gf_snap;
@@ -1179,6 +1189,40 @@ void networkComputeRawObservables(const std::vector<std::vector<PppObservation>>
  *                    else filled.
  * @param cnt         Run-end counters; accumulated into.
  */
+/**
+ * @brief The phase-minus-code step of each band of one raw row across the epoch (m, absolute values).
+ *
+ * The primary band's step is the step of its phase minus its code; the second band's is that step less the
+ * phase GF step plus the code GF step (L2 - C2 = (L1 - C1) - GF + GF_code).  Each is the band's carrier step
+ * (a slip, in metres) plus code noise, whatever the other band did.
+ * @param r The epoch's raw row.
+ * @param v Its step verdict (@ref networkQualifyRawObservables).
+ * @return {primary band, second band}; both 0 when the step was not measured or the pair changed.
+ */
+std::pair<double, double> rawSlipBandJumps(const RawSlipObs& r, const RawSlipVerdict& v);
+
+/**
+ * @brief Records the phase-minus-code step of each band of every row with a measured step between adjacent
+ *        epochs (@ref rawSlipBandJumps) as a BandBreakKind::Adjacent break, keyed (station index,
+ *        "<satellite>_<signal>") like the free-epoch latch.
+ * @param ep  The epoch's raw rows and verdicts.
+ * @param out The breaks (written; existing keys overwritten).
+ */
+void networkRawSlipBandJumps(const RawSlipEpoch& ep, std::map<std::pair<int, std::string>, BandBreak>& out);
+
+/**
+ * @brief Records the phase-minus-code step across the gap of every returning signal (the row-level and the
+ *        per-signal resumptions of the epoch) as a BandBreakKind::Gap break, with the instrument's verdict
+ *        on whether the return is shifted, keyed like the free-epoch latch.
+ *
+ * A row-level return declares the shift for the row (its MW or GF change beyond the gate), so every returning
+ * signal of the row carries that verdict; a per-signal return carries its own.  Written after
+ * @ref networkRawSlipBandJumps, so a key measured both ways keeps the gap's record.
+ * @param ep  The epoch's resumptions (@ref networkQualifyRawObservables).
+ * @param out The breaks (written; existing keys overwritten).
+ */
+void networkGapBandBreaks(const RawSlipEpoch& ep, std::map<std::pair<int, std::string>, BandBreak>& out);
+
 void networkQualifyRawObservables(const std::vector<std::vector<PppObservation>>& modeled,
                                   const std::vector<bool>& present,
                                   int n_sta_total,

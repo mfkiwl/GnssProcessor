@@ -61,6 +61,7 @@
 #include "network/slip/RawObservables.hpp" // IonoCsState, the CS-GF authority (successor to QUEUE 8b)
 #include "network/slip/SlipOracle.hpp"  // NetworkSlipOracle (sim-only oracle slip response)
 #include "network/slip/OraclePin.hpp"  // NetworkOraclePin (sim-only oracle ambiguity pin)
+#include "network/ar/RingFix.hpp"      // NetworkRingFix (integer fixing ring by ring)
 #include "network/solve/Sbasis.hpp"     // NetworkSbasis::Plan (lifecycle-fn params)
 #include "network/assembly/BiasAdmission.hpp" // latched W6 code-bias admission census, ctx.admission (CB-ADM)
 #include "network/carry/Inject.hpp"        // NetworkInjectState: the event-harness fault schedule and ledger
@@ -225,6 +226,15 @@ namespace GnssProcessor {
         /// birth stash reads @ref amb_birth_var_floor alone.  Resolved to 0 off the
         /// float_kf vehicle.  0.0 (default) adds no drop floor (RF-3a).
         double amb_drop_var_floor{};
+        /// network.amb_float_drop_jump_k: the drop of a slip-latched arc covers k times the band's
+        /// phase-minus-code step (m) in its variance (network/ar/AmbFloat.cpp); 0 off, and off the vehicle.
+        double amb_drop_jump_k{};
+        /// network.amb_float_drop_gap_cover: how the drop answers a band latched at its return after a gap
+        /// (network/ar/AmbFloat.cpp); Off off the vehicle.
+        NetworkAmbGapCover amb_drop_gap_cover{NetworkAmbGapCover::Off};
+        /// network.amb_float_drop_declared_var_m2: the floor of a drop latched by a declared break (m^2 at zenith);
+        /// 0 off, and off the vehicle.
+        double amb_drop_declared_var{};
         bool   amb_drop_decouple_always{};   ///< network.amb_float_drop_decouple_always: a drop clears the arc's regression and block row even at birth strength
         // The per-line-of-sight phase nuisance state.  pc_on is the
         // knob as the loader validated it (float vehicle, phase_leveling, conditional
@@ -393,6 +403,9 @@ namespace GnssProcessor {
         /// no prior for one epoch (network/carry/ZwdCarry.hpp, networkZwdEventResponse and
         /// zwdEventDrop).  False on every run without network.carry_zwd_in_block.
         bool zwd_event_on{};
+        /// network.zwd_event_inflate_m: when positive, the event response keeps the carried wet delay with this
+        /// sigma (m) added in quadrature instead of erasing it (network/carry/ZwdCarry.hpp, zwdEventRespond).
+        double zwd_event_inflate_m{};
         /// The carried slant-iono columns join the F3 block: @ref iono_blk and @ref pl_blk_on.
         /// Read by networkPassB_ and networkLocalCarryHarvest.
         bool iono_blk_on{};
@@ -913,6 +926,9 @@ namespace GnssProcessor {
         /// network.trace_pb_prehold: network_pb_prehold.csv, the emitted phase biases just before
         /// the phase-bias hold (any datum).
         bool trace_pb_prehold{};
+        /// network.trace_windup_arcs: network_windup_arcs.csv, the stations' wind-up accumulators
+        /// per arc (any datum; empty in fractional wind-up mode).
+        bool trace_windup_arcs{};
         bool phase_datum_prioritized{};   ///< network.phase_datum_prioritized, or implied by @ref GnssProcessor::NetworkKnobs::phase_datum_eq34 "phase_datum_eq34": per-(satellite, signal) anchor stations elected by descending coverage, decoupled from the clock pivot
         // --- eq34 reattach hygiene ---
         // All four are resolved against the datum mode: the loader already disarms them
@@ -1704,6 +1720,12 @@ namespace GnssProcessor {
         /// satellite, signal).  Not snapshotted: a diagnostic, and a resumed leg re-reads
         /// the fixture anyway.
         std::unique_ptr<NetworkOraclePin> oracle_pin;
+        /// The ring fix (network.ring_fix.*, include/network/ar/RingFix.hpp): its links, the held
+        /// set, this epoch's hold table and the run-end counters.  Null on every run without
+        /// network.ring_fix.enable; every call site and the PASS-B row test the pointer first, so
+        /// the off path is structurally byte-identical (standing invariant 6).  Not snapshotted: a
+        /// resumed leg starts with nothing held, which is the conservative direction.
+        std::unique_ptr<NetworkRingFix> ring_fix;
         // zwd_carry: moved to net::StationState::zwd (network/state/Entities.hpp).
         /// Seam-scoped ZWD re-seed window (network.zwd_seam_reseed): emitted epochs
         /// remaining in the post-resume inject window.  Armed by networkTryWarmResume when

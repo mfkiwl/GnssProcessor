@@ -221,7 +221,7 @@ TEST(NetworkContributionsTest, NamesReadApartAndNameTheirRole) {
         const std::string n = s.name;
         if (n.rfind("prior_", 0) != 0 && n.rfind("block_", 0) != 0) continue;
         EXPECT_TRUE(endsWith(n, "_carry") || endsWith(n, "_datum") || endsWith(n, "_datum_pre_pd")
-                    || endsWith(n, "_oracle_pin"))
+                    || endsWith(n, "_oracle_pin") || endsWith(n, "_ring_hold"))
             << n;
     }
 }
@@ -566,9 +566,18 @@ TEST(NetworkContributionsTest, TablePrintsEveryKindTheUnitsAndTheIntegrityLines)
     ContributionTally run = ep;
     run.merge(ep);
     const std::vector<std::string> lines = contributionsTable(ep, run, "first emitted epoch");
-    // A header, the column line, one line per kind, eight integrity lines.
-    ASSERT_EQ(lines.size(), 2u + kContributionKinds + 8u);
+    // A header, the column line, one line per printed kind, eight integrity lines.  A kind
+    // printed only when it folded (the ring fix's hold row) has no line on a run that never folded it.
+    std::size_t printed = 0;
+    for (const ContributionSpec& s : contributionSpecs())
+        if (!printedOnlyWhenFolded(s.kind)) ++printed;
+    EXPECT_EQ(printed + 1u, kContributionKinds);
+    ASSERT_EQ(lines.size(), 2u + printed + 8u);
     for (const ContributionSpec& s : contributionSpecs()) {
+        if (printedOnlyWhenFolded(s.kind)) {
+            EXPECT_EQ(lineStarting(lines, std::string(s.name) + " "), nullptr) << s.name;
+            continue;
+        }
         const std::string* l = lineStarting(lines, std::string(s.name) + " ");
         ASSERT_NE(l, nullptr) << s.name;
         EXPECT_NE(l->find(std::string(" ") + contributionUnitName(s.unit) + " "), std::string::npos)
@@ -598,11 +607,24 @@ TEST(NetworkContributionsTest, TablePrintsEveryKindTheUnitsAndTheIntegrityLines)
     EXPECT_TRUE(anyLineHas(lines, "shared folds without a kind: 0"));
     const std::string json = contributionsJson(ep, run, "first_emitted_epoch");
     EXPECT_NE(json.find("\"record\":\"contributions\""), std::string::npos);
+    EXPECT_EQ(json.find("prior_ambiguity_ring_hold"), std::string::npos);
+    // Once the hold row folded, its kind is printed in the table and the record.
+    {
+        ContributionTally ep2 = ep;
+        ep2.kinds[static_cast<std::size_t>(CK::PriorAmbiguityRingHold)] = ContributionCount{4, 1};
+        ContributionTally run2 = ep2;
+        const std::vector<std::string> lines2 = contributionsTable(ep2, run2, "first emitted epoch");
+        EXPECT_EQ(lines2.size(), 2u + kContributionKinds + 8u);
+        EXPECT_NE(lineStarting(lines2, "prior_ambiguity_ring_hold "), nullptr);
+        EXPECT_NE(contributionsJson(ep2, run2, "run").find("prior_ambiguity_ring_hold"), std::string::npos);
+    }
     EXPECT_NE(json.find("\"unset_tags\":[0,0]"), std::string::npos);
     EXPECT_NE(json.find("\"counter_mismatches\":[0,0]"), std::string::npos);
     EXPECT_NE(json.find("\"unclassified_rows\":[0,0]"), std::string::npos);
-    for (const ContributionSpec& s : contributionSpecs())
+    for (const ContributionSpec& s : contributionSpecs()) {
+        if (printedOnlyWhenFolded(s.kind)) continue;   // printed once it folded (checked above)
         EXPECT_NE(json.find(std::string("\"kind\":\"") + s.name + "\""), std::string::npos) << s.name;
+    }
 }
 
 TEST(NetworkContributionsTest, TallyMergeSumsAndExtendsTheTimeRange) {

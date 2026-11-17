@@ -13,6 +13,10 @@
 
 #include "network/slip/PassASlipScan.hpp"
 
+#include <optional>
+#include <utility>
+#include <vector>
+
 namespace GnssProcessor {
 
 /**
@@ -124,6 +128,45 @@ void passAGapReentryStage(const PassAView& v, RelevelEpochState* relevel_ptr,
  * @param relevel_pend The epoch's bridge pends, updated in place; left untouched when
  *                     @p relevel_ptr is null.
  */
+/**
+ * @brief Simulation only (@c network.ring_fix.mask_slip_*): the masked arc's carried ambiguity
+ *        entries before this epoch's slip drains.
+ */
+struct SlipMaskSnapshot {
+    bool active{false};   ///< The mask applies at this epoch.
+    /// Every phase signal of the masked (station, satellite) in the arc table, with its carried
+    /// ambiguity entry before the drains (empty optional: none).
+    std::vector<std::pair<net::ArcTuple, std::optional<LocalCarry>>> amb;
+};
+
+/**
+ * @brief Take the masked arc's carried entries before the epoch's slip drains (simulation only).
+ *
+ * Active while the ring fix's slip mask is armed, this epoch is at or after its first masked epoch
+ * and fewer than its epoch count have been masked.
+ *
+ * @param v The PASS A view of the epoch (the run context and the arc table are read through it).
+ * @return The snapshot; inactive otherwise (and always when the mask is off).
+ */
+SlipMaskSnapshot passASlipMaskSnapStage(const PassAView& v);
+
+/**
+ * @brief Undo the epoch's slip response on the masked arc (simulation only), so that its phase
+ *        steps under a hold with no latch.
+ *
+ * Restores the arc's carried entries to the snapshot and takes every phase signal of the arc out
+ * of the free-epoch latch (with its cause), the slip funnel and the bridge pends; writes one
+ * RINGFIX @c mask_slip event and the ring fix's mask counters.  The detectors' own traces and
+ * counters keep what they saw.  A no-op when @p snap is inactive.
+ *
+ * @param v            The PASS A view of the epoch (the arc table, the slip funnel and the traces).
+ * @param relevel_ptr  The epoch's free-epoch latch, or nullptr when the latch is off.
+ * @param relevel_pend The epoch's bridge pends, updated in place.
+ * @param snap         The snapshot taken before the drains.
+ */
+void passASlipMaskApplyStage(const PassAView& v, RelevelEpochState* relevel_ptr,
+                             std::map<net::ArcTuple, RelevelPend>& relevel_pend, const SlipMaskSnapshot& snap);
+
 void passAInjectedFreeStage(const PassAView& v, RelevelEpochState* relevel_ptr,
                             std::map<net::ArcTuple, RelevelPend>& relevel_pend);
 

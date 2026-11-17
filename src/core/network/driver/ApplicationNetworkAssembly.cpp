@@ -294,6 +294,8 @@ void Application::networkPassASlipScan_(NetworkRun& run, const NetworkEpoch& ep,
     passADatumStationMwDetect(v, datum_detect_on);
     passAFoldMwAdmission(v);    // MW admission census into the run counters
 
+    // Simulation only (network.ring_fix.mask_slip_*): the masked arc's carried entries before the drains.
+    const SlipMaskSnapshot slip_mask = passASlipMaskSnapStage(v);
     // Serial slip-QC drains (INC-6), implemented in network/slip/SlipQc.cpp: the
     // phase-leveling T0 repair drain, the MW-detect / LLI refloat and the IF-phase
     // TD driver, in that order.
@@ -335,6 +337,7 @@ void Application::networkPassASlipScan_(NetworkRun& run, const NetworkEpoch& ep,
     passAWindupRestartStage(v, relevel_ptr, relevel_pend);
     passAGapReentryStage(v, relevel_ptr, relevel_pend);
     passAInjectedFreeStage(v, relevel_ptr, relevel_pend);
+    passASlipMaskApplyStage(v, relevel_ptr, relevel_pend, slip_mask);
     net::assignRelevelPend(entities, relevel_pend);
 }
 

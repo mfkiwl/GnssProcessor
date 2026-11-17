@@ -477,15 +477,23 @@ void networkSplitStation(const GnssConfig& config_, NetStation& st, const Networ
     // Off byte-identity: at the default 1.0 the whole block is skipped, so `w`
     // keeps the exact cwiseInverse result with no additional floating-point
     // operations.
-    const double eb_scale = config_.networkExtraBandCodeSigmaScale();
-    if (eb_scale > 1.0) {
+    //
+    // The phase twin (network.extra_band_phase_sigma_scale, a diagnostic lever) applies the same rule to the
+    // extra band's phase rows; at its default 1.0 the phase rows are skipped before any test, so the code
+    // path above is unchanged.
+    const double eb_scale  = config_.networkExtraBandCodeSigmaScale();
+    const double ebp_scale = config_.networkExtraBandPhaseSigmaScale();
+    if (eb_scale > 1.0 || ebp_scale > 1.0) {
         const Eigen::Index mr = std::min<Eigen::Index>(
             m, static_cast<Eigen::Index>(rows.signal_types.size()));
         std::map<char, NetworkPinBands> pin_by_sys;
-        long long n_eb = 0, n_nopin = 0;
+        long long n_eb = 0, n_ebp = 0, n_nopin = 0;
         for (Eigen::Index r = 0; r < mr; ++r) {
             const std::string& sig = rows.signal_types[static_cast<std::size_t>(r)];
-            if (sig.empty() || obsTypeOf(sig) == ObsType::Phase) continue;   // phase untouched
+            if (sig.empty()) continue;
+            const bool   phase = obsTypeOf(sig) == ObsType::Phase;
+            const double scale = phase ? ebp_scale : eb_scale;
+            if (!(scale > 1.0)) continue;                          // this kind's rows untouched
             if (r >= static_cast<Eigen::Index>(rows.satellite_ids.size())) break;
             const std::string& sat = rows.satellite_ids[static_cast<std::size_t>(r)];
             if (sat.empty()) continue;
@@ -495,13 +503,14 @@ void networkSplitStation(const GnssConfig& config_, NetStation& st, const Networ
                 pit = pin_by_sys.emplace(cons, networkPinBandsFor(cons)).first;
             // A constellation with no resolvable pin pair is counted (eb_rows_no_pin),
             // not treated as all-extra-band or as all-primary.
-            if (!pit->second.valid()) { ++n_nopin; continue; }
+            if (!pit->second.valid()) { if (!phase) ++n_nopin; continue; }   // the code report's count
             if (!networkSignalIsExtraBand(sig, pit->second)) continue;
-            w(r) /= eb_scale * eb_scale;                           // σ × scale
-            ++n_eb;
+            w(r) /= scale * scale;                                 // σ × scale
+            ++(phase ? n_ebp : n_eb);
         }
-        st.eb_rows_deweighted += n_eb;
-        st.eb_rows_no_pin     += n_nopin;
+        st.eb_rows_deweighted       += n_eb;
+        st.eb_phase_rows_deweighted += n_ebp;
+        st.eb_rows_no_pin           += n_nopin;
     }
     // --- Second-code rows ----------------------------------
     // Two tasks share one walk because both need the same test: which rows route

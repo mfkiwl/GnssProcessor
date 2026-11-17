@@ -75,6 +75,7 @@ namespace GnssProcessor {
         PriorZwdCarry,            ///< Diagonal carried prior on the wet delay (B9).
         PriorRxCbCarry,           ///< Diagonal carried prior on a receiver code bias (rx-CB carry).
         PriorAmbiguityOraclePin,  ///< Simulation-only oracle ambiguity pin (diagonal).
+        PriorAmbiguityRingHold,   ///< The ring fix's hold row on a decided chord's ambiguity (diagonal; network.ring_fix).
         PriorRxCbDatum,           ///< Zero-mean receiver DCB datum on the post-PD channel (RXCB-DATUM, pre-PD routing off).
         PriorRxCbDatumPrePd,      ///< Zero-mean receiver DCB datum on the pre-PD channel (RXCB-DATUM, network.station_prior_before_pd).
         // --- Shared rows ---------------------------------------------------------------

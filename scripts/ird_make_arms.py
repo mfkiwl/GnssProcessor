@@ -32,6 +32,13 @@ without the key (the diagonal time link, the arm as defined on 2026-11-09), and 
 defined before 2026-11-09 (the floor at 1 m, the time link).  The loader refuses the key with a zero
 network.phase_datum_eq34_rpb_q_m2s, so a no-link reading (q 0) is made on <arm>_link.
 
+The wet delay carried in the station block with its pair, the phase colour state, was adopted on the chain's
+simulator arms by the author on 2026-11-14 (card IRDU section 11.5): A1, every arm derived from it and card IRDU's
+holds-off arm add ZWD_SET, the four keys exactly as the current reference configuration arms them
+(network.carry_zwd, network.carry_zwd_in_block, network.zwd_carry_q 5e-08, network.phase_colour_state; the
+reference configuration pinned at GOLDEN_REV predates them).  <arm>_nozwd is the arm without the set, as defined
+from 2026-11-10 to 2026-11-14; <arm>_link and <arm>_floor keep their dates' definitions, without the set.
+
 An arm is refused when it sets a key the config loader does not read (a quoted literal in
 src/core/config/*.cpp): the loader ignores an unknown key without a word, so such an arm would
 silently be its base.
@@ -106,12 +113,27 @@ FLOOR_ON = ["network.phase_datum_eq34_rpb_prior_sigma_m=1.0"]
 # of 2026-11-10 (card IRDG section 8), A1 and every arm derived from it.  Each of those arms keeps a variant
 # on the time link, <arm>_link: the arm as it was defined on 2026-11-09.
 RPB_IN_BLOCK = ["network.phase_datum_eq34_rpb_in_block=true"]
+# The wet delay carried in the station block with its pair, the phase colour state: the four keys exactly as the
+# current reference configuration arms them (main, config/golden/golden_sim_refound.json; the ledger arms them only
+# together), absent from the golden pinned at GOLDEN_REV.  Adopted on A1, its descendants and card IRDU's holds-off
+# arm by the author's ruling of 2026-11-14 (card IRDU section 11.5); <arm>_nozwd is each arm without it.
+ZWD_SET = ["network.carry_zwd=true", "network.carry_zwd_in_block=true", "network.zwd_carry_q=5e-08",
+           "network.phase_colour_state=true"]
 A1_FAMILY =("A1", "A1k", "A1kr", "A1krh", "A1krhR", "A1krhRs", "A1krhRsm")
+# Card IRDU (the user's integers on the chain's stream): the emission holds off, so the wire is the network's own
+# estimate.  The phase-bias hold, its trip generation (off at the pinned golden's loader default, written out) and
+# the phase-clock hold.  The consumer's side of the holds (closed_loop.pb_hold_presence_flip) is a user-run setting.
+HOLDS_OFF = ["network.emit_pb_hold=false", "network.emit_pb_hold_trip_generation=false",
+             "network.emit_pb_hold_phase_clock=false"]
+# Card IRDU's arms derived from the A1 family (they carry its in-block key): arm -> the A1-family arm it extends.
+IRDU_A1_ARMS = {"A1krhRsmh": "A1krhRsm"}
 
 # name -> (knob list on top of the base, what it is)
 ARMS = {
     "G": ([], "the golden unchanged (the negative control, card IRD section 13)"),
     "R1": (SLIP_SET + SEARCH_LOG + IRD_TRACES, "reference: golden + slip set + search + traces"),
+    "R1h": (SLIP_SET + SEARCH_LOG + IRD_TRACES + HOLDS_OFF,
+            "R1 with the emission holds off (card IRDU: the chain-off wire as the network estimates it)"),
     "A0": (SLIP_SET + SEARCH_LOG + IRD_TRACES + BUNDLE_A0, "R1 + bundle A0"),
     "A0q": (SLIP_SET + SEARCH_LOG + BUNDLE_A0,
             "A0 without the IRD traces (the traces-off twin of IRD-1 gate 2)"),
@@ -193,6 +215,13 @@ ARMS = {
                  + ["network.phase_datum_eq34_family=pair",
                     'network.phase_datum_eq34_event_rows=["kept","returning","rehost","root","slip","merge_split"]'] + FLOOR_OFF + RPB_IN_BLOCK,
                  "A1krhRs + the merge and split row (IRD-4)"),
+    # Card IRDU: the chain as built with the emission holds off, the wire on which the theory predicts integer
+    # between-satellite ambiguities at a user.
+    "A1krhRsmh": (SLIP_SET + SEARCH_LOG + IRD_TRACES + BUNDLE_A0
+                  + ["network.phase_datum_eq34_family=pair",
+                     'network.phase_datum_eq34_event_rows=["kept","returning","rehost","root","slip","merge_split"]']
+                  + FLOOR_OFF + RPB_IN_BLOCK + HOLDS_OFF,
+                  "A1krhRsm with the emission holds off (card IRDU)"),
     "A0fkrhRsm": (SLIP_SET + SEARCH_LOG + IRD_TRACES + BUNDLE_A0
                   + ["network.phase_datum_eq34_rpb_prior_sigma_m=0",
                      'network.phase_datum_eq34_event_rows=["kept","returning","rehost","root","slip","merge_split"]'],
@@ -221,6 +250,12 @@ for _name in A1_FAMILY:
                              % _name)
     ARMS[_name + "_floor"] = ([kv for kv in _link if kv not in FLOOR_OFF] + FLOOR_ON,
                               "%s as defined before 2026-11-09: the RPB floor on at 1 m, the time link" % _name)
+# The wet-delay set adopted on 2026-11-14 (card IRDU section 11.5), after the variants above so that they keep their
+# dates' definitions.  <arm>_nozwd: the arm as defined from 2026-11-10 to 2026-11-14, without the set.
+for _name in A1_FAMILY + tuple(IRDU_A1_ARMS):
+    _sets, _what = ARMS[_name]
+    ARMS[_name + "_nozwd"] = (list(_sets), "%s as defined from 2026-11-10 to 2026-11-14: no wet-delay set" % _name)
+    ARMS[_name] = (list(_sets) + ZWD_SET, _what + " + the wet-delay set (adopted 2026-11-14, card IRDU section 11.5)")
 # Card IRD section 6 fixtures.  The slip fixtures are generated under FIXTURES_ROOT; the gap fixtures
 # are rung 3b with one station blanked; the one-band fixture of IRD-3 (card IRDC section 5) is rung 3b
 # with one station's L2 blanked.  TOW = 261030 + 30 (epoch - 1).
@@ -356,7 +391,136 @@ BEDS = {
                     "IRD msr on the microscope", pure_cut_ops(CUT_ROOT, CUT_ROOT_BRIDGE)),
     "ird_msr_ctl_mic": ("sim", "runs/simarl_r1c", ARL_GPS_ONLY + MICROSCOPE,
                         "IRD msr's control on the microscope", pure_cut_ops(CUT_ROOT, CUT_ROOT_BRIDGE, split=False)),
+    # Card NRF stage N2b-3: rung 3c with one scripted, unflagged slip at TOW 265830 (80 min), made by
+    # scripts/nrf_slip_bed.py under FIXTURES_ROOT (simnrf_<name>); the links are named from N2-r3c's trace.
+    "nrf_s1": ("sim", FIXTURES_ROOT + "/simnrf_s1", ARL_GPS_ONLY,
+               "NRF s1: L1C +25 on S05000SIM G26 (a chord held 62 min in N2-r3c), TOW 265830", []),
+    "nrf_s2": ("sim", FIXTURES_ROOT + "/simnrf_s2", ARL_GPS_ONLY,
+               "NRF s2: L1C +1 and L2W +1 on S05000SIM G26 (a chord held 62 min in N2-r3c), TOW 265830", []),
+    "nrf_s3": ("sim", FIXTURES_ROOT + "/simnrf_s3", ARL_GPS_ONLY,
+               "NRF s3: L1C +1 and L2W +1 on S03000SIM G25, a tree edge in both bands all run with 15 vertices below "
+               "it and 38 held links across it at the slip in N2-r3c, TOW 265830", []),
 }
+
+# Card IRDU section 11 B: the no-re-seat bed, rung 3c with only the arcs the network tracked through the whole 2 h
+# (scripts/irdu_static_bed.py writes the arcs file from the post-fit rows of arm R1 on r3c; the arc of the scripted
+# slip, S43000SIM G22, is dropped as well).  One whole-run strip op per station.
+IRDU_NR_ARCS = ROOT + "/config/sim/irdu/irdu_nr_arcs.json"
+
+
+def irdu_nr_ops(extra=()):
+    """The strip ops of the no-re-seat bed (one per station), then `extra` (an injected event); [] without the file."""
+    if not os.path.isfile(IRDU_NR_ARCS):
+        return []
+    with open(IRDU_NR_ARCS) as fh:
+        arcs = json.load(fh)
+    return ["strip;types=???;stations=%s;sats=%s" % (st, ",".join(sats))
+            for st, sats in sorted(arcs["strip"].items()) if sats] + list(extra)
+
+
+if os.path.isfile(IRDU_NR_ARCS):
+    BEDS["irdu_nr"] = ("sim", "runs/simarl_r3c", ARL_GPS_ONLY,
+                       "IRDU no re-seat: r3c with only the arcs tracked through the whole 2 h (no rise, set, return "
+                       "or slip)", irdu_nr_ops())
+    # section 11 C: one injected re-seat on the no-re-seat bed at 35 min (epoch 71, TOW 263130, the event rule of
+    # section 11), the arc blanked to the run end; targets from the bed's tree (root S30000SIM, unchanged over the run)
+    IRDU_C_TOW = 263130
+    BEDS["irdu_nr_c1"] = ("sim", "runs/simarl_r3c", ARL_GPS_ONLY,
+                          "IRDU C1: irdu_nr, G24 (7 vertices below it) loses its host S27000SIM at epoch 71",
+                          irdu_nr_ops(["strip;types=???;stations=S27000SIM;sats=G24;tow_from=%d" % IRDU_C_TOW]))
+    BEDS["irdu_nr_c2"] = ("sim", "runs/simarl_r3c", ARL_GPS_ONLY,
+                          "IRDU C2: irdu_nr, S02000SIM (two child satellites) loses its parent G06 at epoch 71",
+                          irdu_nr_ops(["strip;types=???;stations=S02000SIM;sats=G06;tow_from=%d" % IRDU_C_TOW]))
+
+
+# A setting group taken as the one change of a case (card IRDU section 11.3): keys that the ledger arms only together,
+# written exactly as the current reference configuration arms them (the selftest compares them with
+# config/golden/golden_sim_refound.json at HEAD).  A group never changes an arm's definition.
+KNOB_GROUPS = {
+    # the wet delay carried in the station block with its pair, the phase colour state (ledger rows network.carry_zwd,
+    # network.carry_zwd_in_block, network.zwd_carry_q and network.phase_colour_state: armed together on 2026-11-09,
+    # "arm the three keys together, never this link alone")
+    "zwd_set": list(ZWD_SET),
+}
+# Card IRDU section 12: the simulation-only oracle pin in the chain's frame on the bed without re-seats, one group per
+# case: an `oracle_pin` event from the run's first epoch (scope all, sigma 1e-4 m), the fixture as the truth root and
+# the case's frame-target file (scripts/irdu_frame_targets.py: every tree link, and the chords of the rings named).
+# The three keys work only together (the loader refuses the file without the event and the event without the root).
+IRDU_FRAME_PIN_TOW = 261030
+IRDU_FRAME_PIN_FILES = {"all": "fpin_nr3_all.csv", "r2": "fpin_nr3_r2.csv", "r23": "fpin_nr3_r23.csv",
+                        "r234": "fpin_nr3_r234.csv"}
+for _case, _file in IRDU_FRAME_PIN_FILES.items():
+    KNOB_GROUPS["fpin_nr3_" + _case] = [
+        'network.inject={"enable": true, "events": [{"kind": "oracle_pin", "tow": %d, "scope": "all", '
+        '"sigma_m": 0.0001}]}' % IRDU_FRAME_PIN_TOW,
+        "network.cycle_slip.oracle_truth_root=" + os.path.realpath(ROOT + "/runs/simarl_r3c").replace(os.sep, "/"),
+        "network.cycle_slip.oracle_pin_frame_file=" + ROOT + "/config/sim/irdu/" + _file]
+# Card IRDU section 13 (part 5): one key on top of Q1 (the arm with the group fpin_nr3_all).  The generator takes one
+# change per arm and Q1 is itself a group, so each case is Q1's keys plus the key under test; on the plain chain arm
+# the same key is the arm's --knob.
+IRDU_P5_KEYS = {"iftd_off": "network.cycle_slip.if_phase_td=false",
+                "disc_off": "network.disc_threshold_frac_cycles=1000",
+                "rxclk": "network.carry_rx_clock_in_block=true",
+                "pv": "network.disc_phase_visible=true"}
+for _name, _kv in IRDU_P5_KEYS.items():
+    KNOB_GROUPS["fpin_nr3_all_" + _name] = KNOB_GROUPS["fpin_nr3_all"] + [_kv]
+# Card NRF (integer fixing in the network, ring by ring): the mechanism with its audit against the bed's frame-target
+# file (every tree link and chord of irdu_nr, whose tree is one for the whole run), under the frozen rule (nrf_g) and
+# under the negative control's plain rounding (nrf_p).
+KNOB_GROUPS["nrf_g"] = ["network.ring_fix.enable=true",
+                        "network.ring_fix.audit_frame_file=" + ROOT + "/config/sim/irdu/fpin_nr3_all.csv"]
+KNOB_GROUPS["nrf_p"] = KNOB_GROUPS["nrf_g"] + ["network.ring_fix.rule=plain"]
+# Card NRF section 10 (stage N1b): change O (the order: every chord with a float a candidate, the most certain first,
+# at most 3 per epoch) with the frozen gate, and changes O and L (the odds gate).
+KNOB_GROUPS["nrf_o"] = KNOB_GROUPS["nrf_g"] + ["network.ring_fix.order=certain"]
+KNOB_GROUPS["nrf_ol"] = KNOB_GROUPS["nrf_o"] + ["network.ring_fix.gate=odds"]
+# Card NRF section 12 (stage N2): N1b-OL with the truth of the bed's own fixture (the audit in every epoch's frame; no
+# frame file, which holds only for the bed without re-seats), and with the oracle phase for the whole run (the ceiling,
+# _c) or for the first 30 min (the steady-state harness, _s).  On irdu_nr the frame file is kept beside the truth: the
+# truth model is checked against it.
+NRF_N2_BEDS = ("irdu_nr", "r3c", "ird_t2", "ird_tr", "ird_t3", "ird_rv16", "ird_rg", "ird_ms", "ird_msx")
+
+
+def _nrf_fixture(bed):
+    fx = BEDS[bed][1]
+    return (fx if os.path.isabs(fx) else os.path.realpath(ROOT + "/" + fx)).replace(os.sep, "/")
+
+
+for _bed in NRF_N2_BEDS:
+    if _bed not in BEDS or BEDS[_bed][1] is None:
+        continue
+    _base = ["network.ring_fix.enable=true", "network.ring_fix.order=certain", "network.ring_fix.gate=odds"]
+    if _bed == "irdu_nr":
+        _base = KNOB_GROUPS["nrf_ol"][:]
+    KNOB_GROUPS["nrf_olt_" + _bed] = _base + ["network.ring_fix.truth_root=" + _nrf_fixture(_bed)]
+    KNOB_GROUPS["nrf_olc_" + _bed] = KNOB_GROUPS["nrf_olt_" + _bed] + ["network.ring_fix.oracle_until_s=1000000"]
+    KNOB_GROUPS["nrf_ols_" + _bed] = KNOB_GROUPS["nrf_olt_" + _bed] + ["network.ring_fix.oracle_until_s=1800"]
+# Card NRF section 14 (stage N2b): held-first re-attachment (_hf) on N2's beds and on the slip beds of N2b-3, and the
+# log rule on r3c (the frozen rule traced, nothing held; its products are the key off's).
+NRF_N2B_SLIP_BEDS = ("nrf_s1", "nrf_s2", "nrf_s3")
+for _bed in NRF_N2_BEDS + NRF_N2B_SLIP_BEDS:
+    if _bed not in BEDS or BEDS[_bed][1] is None:
+        continue
+    if _bed in NRF_N2B_SLIP_BEDS:
+        KNOB_GROUPS["nrf_olt_" + _bed] = ["network.ring_fix.enable=true", "network.ring_fix.order=certain",
+                                          "network.ring_fix.gate=odds",
+                                          "network.ring_fix.truth_root=" + _nrf_fixture(_bed)]
+    KNOB_GROUPS["nrf_hf_" + _bed] = KNOB_GROUPS["nrf_olt_" + _bed] + ["network.ring_fix.held_first=true"]
+KNOB_GROUPS["nrf_log_r3c"] = KNOB_GROUPS["nrf_olt_r3c"] + ["network.ring_fix.rule=log"]
+# Card NRF stage N3: the 6 h golden sim bed from a cold start; the bed keeps the golden's own fixture, which is also
+# the truth of the audit.
+NRF_GOLDEN_FIXTURE = "C:/GnssProcessor/runs/simnet60_quiet_col_24h"
+KNOB_GROUPS["nrf_olt_golden"] = ["network.ring_fix.enable=true", "network.ring_fix.order=certain",
+                                 "network.ring_fix.gate=odds", "network.ring_fix.truth_root=" + NRF_GOLDEN_FIXTURE]
+KNOB_GROUPS["nrf_hf_golden"] = KNOB_GROUPS["nrf_olt_golden"] + ["network.ring_fix.held_first=true"]
+# Card NRF stage N3b: the held-first arm of the 6 h bed started one hour later (to the same end with --hours 5).
+KNOB_GROUPS["nrf_hf_golden_late"] = KNOB_GROUPS["nrf_hf_golden"] + ["network.start_offset_hours=1.504167"]
+# Card NRF stage N2c: s4 = the s2 bed with the producer's slip flags of S05000SIM-G26 masked at the slip's epoch
+# (simulation only); its key-off arm is the log rule with the mask (nothing held).
+NRF_MASK_S4 = ["network.ring_fix.mask_slip_arc=S05000SIM:G26", "network.ring_fix.mask_slip_tow=265830"]
+KNOB_GROUPS["nrf_logm_nrf_s2"] = KNOB_GROUPS["nrf_olt_nrf_s2"] + ["network.ring_fix.rule=log"] + NRF_MASK_S4
+KNOB_GROUPS["nrf_oltm_nrf_s2"] = KNOB_GROUPS["nrf_olt_nrf_s2"] + NRF_MASK_S4
+KNOB_GROUPS["nrf_hfm_nrf_s2"] = KNOB_GROUPS["nrf_hf_nrf_s2"] + NRF_MASK_S4
 
 
 def sha256_bytes(b):
@@ -419,9 +583,9 @@ def compose(arm, bed, knob=None):
                 raise SystemExit("arm %s on bed %s sets %s twice with different values" % (arm, bed, k))
             vals[k] = v
         sets = ["%s=%s" % kv for kv in vals.items()]
-    if knob:
-        k = knob.split("=", 1)[0]
-        sets = [kv for kv in sets if kv.split("=", 1)[0] != k] + [knob]
+    for kn in ([knob] if isinstance(knob, str) else list(knob or [])):
+        k = kn.split("=", 1)[0]
+        sets = [kv for kv in sets if kv.split("=", 1)[0] != k] + [kn]
     return sets
 
 
@@ -431,6 +595,8 @@ def no_link_refused(arm, knob):
     column's own process noise), so the no-link reading is made on the arm's time-link variant."""
     if not knob or RPB_IN_BLOCK[0] not in ARMS[arm][0]:
         return False
+    if not isinstance(knob, str):
+        return any(no_link_refused(arm, kn) for kn in knob)
     key, value = knob.split("=", 1)
     try:
         return key == "network.phase_datum_eq34_rpb_q_m2s" and float(value) == 0.0
@@ -452,6 +618,13 @@ def duration_sets(base, hours):
 
 def make(a):
     which, fixture, _, _, rinex = BEDS[a.bed]
+    if getattr(a, "knob_group", None):
+        if a.knob:
+            raise SystemExit("refused: --knob and --knob-group together would be two changes")
+        a.knob = list(KNOB_GROUPS[a.knob_group])
+        if compose(a.arm, a.bed, a.knob) == compose(a.arm, a.bed):
+            raise SystemExit("refused: arm %s already carries the group %s, so the case would change nothing"
+                             % (a.arm, a.knob_group))
     if no_link_refused(a.arm, a.knob):
         raise SystemExit("refused: the loader does not take network.phase_datum_eq34_rpb_in_block with a zero "
                          "network.phase_datum_eq34_rpb_q_m2s; the no-link reading is made on arm %s_link" % a.arm)
@@ -463,6 +636,10 @@ def make(a):
         # end the blanked station's file after epoch 186 and make the station leave again.  The duration
         # is set directly and the file stays whole.
         sets += duration_sets(base, a.hours)
+    # Run settings (card IRDU): not part of the arm's posture (thread caps and the like), the same on every arm a
+    # card compares, recorded apart from the arm's knob list.
+    run_sets = list(a.run_set or [])
+    sets += run_sets
     missing = unread(sets)
     if missing:
         raise SystemExit("refused: the loader does not read %s (an arm setting them would "
@@ -497,8 +674,9 @@ def make(a):
     prov = json.load(open(rj))
     prov["ird"] = {"golden_rev": GOLDEN_REV, "golden_path": GOLDEN[which][0],
                    "golden_sha256": GOLDEN[which][1], "bed": a.bed, "fixture": fixture,
-                   "arm": a.arm, "knob_under_test": a.knob, "hours": a.hours, "rinex": rinex,
-                   "sets": sets}
+                   "arm": a.arm, "knob_under_test": a.knob, "knob_group": getattr(a, "knob_group", None),
+                   "hours": a.hours, "rinex": rinex,
+                   "sets": [kv for kv in sets if kv not in run_sets], "run_sets": run_sets}
     with open(rj, "w") as fh:
         json.dump(prov, fh, indent=2)
     return 0
@@ -552,34 +730,47 @@ def selftest():
         == set(CHAIN_ON + FLOAT_REPIN_OFF), "R1C is R1 + the chain, A0 less every held knob")
     a1 = compose("A1", "r3c")
     chk(set(a1) - set(compose("A0", "r3c")) == {"network.phase_datum_eq34_family=pair"} | set(FLOOR_OFF + RPB_IN_BLOCK)
-        and set(compose("A0", "r3c")) <= set(a1) and len(a1) == len(compose("A0", "r3c")) + 3,
-        "A1 is A0 plus the pair family knob, the RPB floor off (D0 as ruled 2026-11-09) and the in-block key "
-        "(adopted 2026-11-10)")
+        | set(ZWD_SET) and set(compose("A0", "r3c")) <= set(a1) and len(a1) == len(compose("A0", "r3c")) + 3 + len(ZWD_SET),
+        "A1 is A0 plus the pair family knob, the RPB floor off (D0 as ruled 2026-11-09), the in-block key "
+        "(adopted 2026-11-10) and the wet-delay set (adopted 2026-11-14)")
     chk(all(FLOOR_OFF[0] in compose(n, "r3c") and FLOOR_ON[0] not in compose(n, "r3c")
-            and RPB_IN_BLOCK[0] in compose(n, "r3c") for n in A1_FAMILY),
-        "every arm of the A1 family has the RPB floor off and the RPB in the station block")
-    chk(all(set(compose(n, "r3c")) - set(compose(n + "_link", "r3c")) == set(RPB_IN_BLOCK)
-            and set(compose(n + "_link", "r3c")) <= set(compose(n, "r3c"))
-            and len(compose(n + "_link", "r3c")) == len(compose(n, "r3c")) - 1 for n in A1_FAMILY)
+            and RPB_IN_BLOCK[0] in compose(n, "r3c") and set(ZWD_SET) <= set(compose(n, "r3c")) for n in A1_FAMILY),
+        "every arm of the A1 family has the RPB floor off, the RPB in the station block and the wet-delay set")
+    adopted = A1_FAMILY + tuple(IRDU_A1_ARMS)
+    chk(all(compose(n + "_nozwd", "r3c") + ZWD_SET == compose(n, "r3c") for n in adopted)
+        and sorted(n for n in ARMS if n.endswith("_nozwd")) == sorted(n + "_nozwd" for n in adopted),
+        "each adopted arm is its variant without the set followed by the four keys in order, and no other arm has one")
+    chk(not any(kv in ZWD_SET for n in ARMS if n not in adopted for kv in compose(n, "r3c")),
+        "no arm outside the adopted ones carries a key of the wet-delay set (the A0 family and every variant)")
+    chk(all(set(compose(n + "_nozwd", "r3c")) - set(compose(n + "_link", "r3c")) == set(RPB_IN_BLOCK)
+            and set(compose(n + "_link", "r3c")) <= set(compose(n + "_nozwd", "r3c"))
+            and len(compose(n + "_link", "r3c")) == len(compose(n + "_nozwd", "r3c")) - 1 for n in A1_FAMILY)
         and sorted(n for n in ARMS if n.endswith("_link")) == sorted(n + "_link" for n in A1_FAMILY),
-        "each A1-family arm has a time-link variant that is the arm less the in-block key alone, and no other arm has one")
+        "each A1-family arm has a time-link variant that is the arm as defined until 2026-11-14 less the in-block key "
+        "alone, and no other arm has one")
     chk(all(set(compose(n + "_floor", "r3c")) - set(compose(n + "_link", "r3c")) == set(FLOOR_ON)
             and set(compose(n + "_link", "r3c")) - set(compose(n + "_floor", "r3c")) == set(FLOOR_OFF)
             and len(compose(n + "_floor", "r3c")) == len(compose(n + "_link", "r3c")) for n in A1_FAMILY)
         and sorted(n for n in ARMS if n.endswith("_floor")) == sorted(n + "_floor" for n in A1_FAMILY),
         "each A1-family arm has a floor-on variant that differs from its time-link variant in the floor's value alone, "
         "and no other arm has one")
-    chk(not any(kv.startswith("network.phase_datum_eq34_rpb_in_block") for n in ARMS if n not in A1_FAMILY
-                for kv in compose(n, "r3c")),
-        "no arm outside the A1 family sets the in-block key (the A0 family and the variants keep the time link)")
+    with_key = A1_FAMILY + tuple(IRDU_A1_ARMS) + tuple(n + "_nozwd" for n in A1_FAMILY + tuple(IRDU_A1_ARMS))
+    chk(not any(kv.startswith("network.phase_datum_eq34_rpb_in_block") for n in ARMS
+                if n not in with_key for kv in compose(n, "r3c")),
+        "no arm outside the A1 family and its _nozwd variants sets the in-block key (the A0 family and the _link and "
+        "_floor variants keep the time link)")
+    chk(all(set(compose(n, "r3c")) - set(compose(IRDU_A1_ARMS[n], "r3c")) == set(HOLDS_OFF) for n in IRDU_A1_ARMS)
+        and set(compose("R1h", "r3c")) - set(compose("R1", "r3c")) == set(HOLDS_OFF)
+        and len(compose("R1h", "r3c")) == len(compose("R1", "r3c")) + len(HOLDS_OFF),
+        "card IRDU's holds-off arms are their parent arm plus the three hold keys and nothing else")
     chk(set(compose("A1_floor", "r3c")) - set(compose("A0", "r3c"))
         == {"network.phase_datum_eq34_family=pair"} | set(FLOOR_ON),
         "A1_floor is A0 plus the pair family knob, the floor written out at its default (A1 before the rulings)")
     chk(set(compose("A1krhRsm_link", "r3c")) - set(compose("A0fkrhRsm", "r3c")) == {"network.phase_datum_eq34_family=pair"}
         and set(compose("A0fkrhRsm", "r3c")) <= set(compose("A1krhRsm_link", "r3c")),
         "A1krhRsm_link is A0fkrhRsm plus exactly the pair family knob")
-    chk(compose("A1krhRsm_link", "r3c", knob=RPB_IN_BLOCK[0]) == compose("A1krhRsm", "r3c"),
-        "A1krhRsm is its time-link variant with the in-block key as the one knob (the key arm card IRDG graded)")
+    chk(compose("A1krhRsm_link", "r3c", knob=RPB_IN_BLOCK[0]) == compose("A1krhRsm_nozwd", "r3c"),
+        "A1krhRsm_nozwd is its time-link variant with the in-block key as the one knob (the key arm card IRDG graded)")
     chk(not no_link_refused("A1krhRsm_link", "network.phase_datum_eq34_rpb_q_m2s=0")
         and not no_link_refused("A1krhRsm", None)
         and no_link_refused("A1krhRsm", "network.phase_datum_eq34_rpb_q_m2s=0")
@@ -655,6 +846,35 @@ def selftest():
     o = compose("A0", "r2", knob="network.phase_datum_min_stations=2")
     chk(o.count("network.phase_datum_min_stations=2") == 1
         and "network.phase_datum_min_stations=1" not in o, "the knob under test overrides the arm")
+    # card IRDU section 11.3: a setting group is the one change, each key once, and it is the current reference
+    # configuration's own values (config/golden/golden_sim_refound.json at HEAD)
+    g = compose("A1krhRsmh_nozwd", "r3c", knob=KNOB_GROUPS["zwd_set"])
+    gk = [kv.split("=", 1)[0] for kv in g]
+    chk(len(gk) == len(set(gk)) and g[-4:] == KNOB_GROUPS["zwd_set"]
+        and g[:-4] == compose("A1krhRsmh_nozwd", "r3c") and g == compose("A1krhRsmh", "r3c"),
+        "a setting group is appended once to the unchanged arm, and the wet-delay group on A1krhRsmh_nozwd is the "
+        "adopted A1krhRsmh key for key (the cases of card IRDU section 11.3 are the adopted arm)")
+    chk(all(os.path.isfile(KNOB_GROUPS["fpin_nr3_" + c][2].split("=", 1)[1]) for c in IRDU_FRAME_PIN_FILES)
+        and all(compose("A1krhRsmh", "irdu_nr", KNOB_GROUPS["fpin_nr3_" + c]) != compose("A1krhRsmh", "irdu_nr")
+                for c in IRDU_FRAME_PIN_FILES),
+        "card IRDU section 12's frame-pin groups name existing frame files and change the adopted arm")
+    try:
+        make(argparse.Namespace(bed="r3c", arm="A1krhRsmh", knob=None, knob_group="zwd_set", tag="_selftest_noop",
+                                hours=0.1, run_set=[], drop_station=[], dry_run=True))
+        chk(False, "a setting group the arm already carries is refused (a case that changes nothing)")
+    except SystemExit as e:
+        chk("already carries" in str(e), "a setting group the arm already carries is refused (a case that changes "
+            "nothing)")
+    with open(ROOT + "/config/golden/golden_sim_refound.json", encoding="utf-8") as fh:
+        cur = json.load(fh)
+    same = True
+    for kv in KNOB_GROUPS["zwd_set"]:
+        k, v = kv.split("=", 1)
+        node = cur
+        for part in k.split("."):
+            node = node.get(part) if isinstance(node, dict) else None
+        same &= node is not None and json.loads(v) == node
+    chk(same, "the wet-delay group is the current reference configuration's own four values")
     loader = loader_keys.LoaderKeys({"GnssConfigLoadNetwork.cpp":
                                      'a = "network.phase_datum_eq34"; b = "network.cycle_slip.gf_arc_jump";'})
     chk(unread(["network.phase_datum_eq34=true", "network.trace_chain_datum=true"], loader)
@@ -784,7 +1004,11 @@ def main():
     m.add_argument("--tag", required=True)
     m.add_argument("--hours", type=float, default=2.0)
     m.add_argument("--knob", default=None, help="the one knob under test, key=value")
+    m.add_argument("--knob-group", default=None, choices=sorted(KNOB_GROUPS),
+                   help="a setting group of KNOB_GROUPS taken as the one change (keys the ledger arms only together)")
     m.add_argument("--drop-station", action="append")
+    m.add_argument("--run-set", action="append",
+                   help="a run setting outside the arm's posture (a thread cap), key=value, repeatable")
     m.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     if a.selftest:

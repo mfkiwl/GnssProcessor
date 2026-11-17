@@ -1473,6 +1473,184 @@ namespace GnssProcessor {
                               + (ar.trace_lattice ? "  Lattice observatory ON." : ""));
             }
         }
+        // Integer fixing ring by ring on the eq34 chain (include/network/ar/RingFix.hpp).  The
+        // interlocks with the chain are checked once the chain's keys are read
+        // (loadNetworkSignalIntegrity_, after the eq34 keys).
+        {
+            auto& rf = network_config_.ring_fix;
+            rf.enable = jval<bool>(json, "network.ring_fix.enable", "network_ring_fix_enable", false);
+            rf.rule = jval<std::string>(json, "network.ring_fix.rule", "network_ring_fix_rule",
+                                        std::string("gated"));
+            rf.audit_frame_file = jval<std::string>(json, "network.ring_fix.audit_frame_file",
+                                                    "network_ring_fix_audit_frame_file", std::string{});
+            if (rf.rule != "gated" && rf.rule != "plain" && rf.rule != "log")
+                throw std::runtime_error("network.ring_fix.rule ('" + rf.rule
+                                         + "') must be \"gated\", \"plain\" or \"log\".");
+            rf.held_first = jval<bool>(json, "network.ring_fix.held_first", "network_ring_fix_held_first", false);
+            rf.order = jval<std::string>(json, "network.ring_fix.order", "network_ring_fix_order",
+                                         std::string("ring"));
+            rf.gate = jval<std::string>(json, "network.ring_fix.gate", "network_ring_fix_gate",
+                                        std::string("sigma"));
+            if (rf.order != "ring" && rf.order != "certain")
+                throw std::runtime_error("network.ring_fix.order ('" + rf.order
+                                         + "') must be \"ring\" or \"certain\".");
+            if (rf.gate != "sigma" && rf.gate != "odds")
+                throw std::runtime_error("network.ring_fix.gate ('" + rf.gate
+                                         + "') must be \"sigma\" or \"odds\".");
+            rf.truth_root = jval<std::string>(json, "network.ring_fix.truth_root", "network_ring_fix_truth_root",
+                                              std::string{});
+            rf.oracle_until_s = jval<double>(json, "network.ring_fix.oracle_until_s",
+                                             "network_ring_fix_oracle_until_s", 0.0);
+            if (!(rf.oracle_until_s >= 0.0))
+                throw std::runtime_error("network.ring_fix.oracle_until_s must be 0 or more.");
+            if (rf.oracle_until_s > 0.0 && rf.truth_root.empty())
+                throw std::runtime_error("network.ring_fix.oracle_until_s needs network.ring_fix.truth_root (the oracle "
+                                         "reads the fixture's truth; simulation only).");
+            // The pair families considered: "<constellation>:<signal>/<signal>", each signal a three-character
+            // phase code; empty is every family.
+            rf.pairs.clear();
+            if (jhas(json, "network.ring_fix.pairs", "network_ring_fix_pairs")) {
+                const nlohmann::json& arr = jsection(json, "network.ring_fix.pairs", "network_ring_fix_pairs");
+                if (!arr.is_array())
+                    throw std::runtime_error("network.ring_fix.pairs must be an array of \"<constellation>:<signal>/"
+                                             "<signal>\" entries (\"E:L1X/L5X\").");
+                for (const auto& v : arr) {
+                    const std::string e = v.is_string() ? v.get<std::string>() : std::string{};
+                    if (e.size() != 9 || e[1] != ':' || e[5] != '/' || e[2] != 'L' || e[6] != 'L')
+                        throw std::runtime_error("network.ring_fix.pairs: '" + e + "' is not of the form "
+                                                 "\"<constellation>:<signal>/<signal>\" (\"E:L1X/L5X\").");
+                    rf.pairs.push_back(e);
+                }
+            }
+            rf.wl_frac_max = jval<double>(json, "network.ring_fix.wl_frac_max", "network_ring_fix_wl_frac_max", 0.0);
+            if (!(rf.wl_frac_max >= 0.0 && rf.wl_frac_max < 0.5))
+                throw std::runtime_error("network.ring_fix.wl_frac_max must be 0 (no bound) or in (0, 0.5) cycle.");
+            rf.sigma_scale = jval<double>(json, "network.ring_fix.sigma_scale", "network_ring_fix_sigma_scale", 1.0);
+            if (!(rf.sigma_scale >= 1.0 && rf.sigma_scale <= 100.0))
+                throw std::runtime_error("network.ring_fix.sigma_scale must be in [1, 100] (a factor on the formal "
+                                         "sigmas of the odds gate).");
+            if (rf.sigma_scale != 1.0 && rf.gate != "odds")
+                throw std::runtime_error("network.ring_fix.sigma_scale scales the odds gate's sigmas: it needs "
+                                         "network.ring_fix.gate \"odds\".");
+            rf.code_event_window_s = jval<double>(json, "network.ring_fix.code_event_window_s",
+                                                  "network_ring_fix_code_event_window_s", 0.0);
+            if (!(rf.code_event_window_s >= 0.0 && rf.code_event_window_s <= 86400.0))
+                throw std::runtime_error("network.ring_fix.code_event_window_s must be in [0, 86400] s.");
+            rf.settled_flags = jval<bool>(json, "network.ring_fix.settled_flags", "network_ring_fix_settled_flags",
+                                          false);
+            if (rf.settled_flags && rf.pairs.empty())
+                throw std::runtime_error("network.ring_fix.settled_flags needs network.ring_fix.pairs (the held "
+                                         "families whose records it flags).");
+            rf.unsettled_steps = jval<bool>(json, "network.ring_fix.unsettled_steps",
+                                            "network_ring_fix_unsettled_steps", false);
+            if (rf.unsettled_steps && !rf.settled_flags)
+                throw std::runtime_error("network.ring_fix.unsettled_steps steps the signals the settled flags leave "
+                                         "unsettled: it needs network.ring_fix.settled_flags.");
+            rf.unsettled_steps_unheld = jval<bool>(json, "network.ring_fix.unsettled_steps_unheld",
+                                                   "network_ring_fix_unsettled_steps_unheld", false);
+            if (rf.unsettled_steps_unheld && !rf.unsettled_steps)
+                throw std::runtime_error("network.ring_fix.unsettled_steps_unheld extends the unsettled steps to the "
+                                         "signals of no held family: it needs network.ring_fix.unsettled_steps.");
+            // The stream's continuity guard (card NRF part 10, section 89): a flagged level that moves within a run of
+            // constant counters lowers its satellite's flags for a hold; the unsettled steps then step the counters.
+            rf.continuity_guard_cyc = jval<double>(json, "network.ring_fix.continuity_guard_cyc",
+                                                   "network_ring_fix_continuity_guard_cyc", 0.0);
+            if (!(rf.continuity_guard_cyc >= 0.0 && rf.continuity_guard_cyc <= 1.0))
+                throw std::runtime_error("network.ring_fix.continuity_guard_cyc must be in [0, 1] narrow-lane cycles "
+                                         "(0 is off).");
+            if (rf.continuity_guard_cyc > 0.0 && !rf.unsettled_steps)
+                throw std::runtime_error("network.ring_fix.continuity_guard_cyc lowers flags and leaves the counter "
+                                         "steps to the unsettled steps: it needs network.ring_fix.unsettled_steps.");
+            rf.continuity_guard_hold = jval<int>(json, "network.ring_fix.continuity_guard_hold",
+                                                 "network_ring_fix_continuity_guard_hold", 20);
+            if (rf.continuity_guard_hold < 1 || rf.continuity_guard_hold > 1000)
+                throw std::runtime_error("network.ring_fix.continuity_guard_hold must be in [1, 1000] emissions.");
+            rf.continuity_guard_min_run = jval<int>(json, "network.ring_fix.continuity_guard_min_run",
+                                                    "network_ring_fix_continuity_guard_min_run", 4);
+            if (rf.continuity_guard_min_run < 1 || rf.continuity_guard_min_run > 100)
+                throw std::runtime_error("network.ring_fix.continuity_guard_min_run must be in [1, 100] emissions.");
+            rf.settled_rule = jval<std::string>(json, "network.ring_fix.settled_rule", "network_ring_fix_settled_rule",
+                                                std::string("root"));
+            if (rf.settled_rule != "root" && rf.settled_rule != "largest")
+                throw std::runtime_error("network.ring_fix.settled_rule must be \"root\" or \"largest\".");
+            if (rf.settled_rule != "root" && !rf.settled_flags)
+                throw std::runtime_error("network.ring_fix.settled_rule chooses the settled flags' rule: it needs "
+                                         "network.ring_fix.settled_flags.");
+            rf.settled_wait_emissions = jval<int>(json, "network.ring_fix.settled_wait_emissions",
+                                                  "network_ring_fix_settled_wait_emissions", 0);
+            if (rf.settled_wait_emissions < 0)
+                throw std::runtime_error("network.ring_fix.settled_wait_emissions counts emissions: it must be 0 or more.");
+            if (rf.settled_wait_emissions > 0 && !rf.settled_flags)
+                throw std::runtime_error("network.ring_fix.settled_wait_emissions delays the settled flags' raise: it "
+                                         "needs network.ring_fix.settled_flags.");
+            rf.reattach = jval<bool>(json, "network.ring_fix.reattach", "network_ring_fix_reattach", false);
+            if (rf.reattach && !rf.settled_flags)
+                throw std::runtime_error("network.ring_fix.reattach moves the tree edges of satellites the settled "
+                                         "flags leave untied: it needs network.ring_fix.settled_flags.");
+            rf.form_configured_pairs = jval<bool>(json, "network.ring_fix.form_configured_pairs",
+                                                  "network_ring_fix_form_configured_pairs", false);
+            if (rf.form_configured_pairs && rf.pairs.empty())
+                throw std::runtime_error("network.ring_fix.form_configured_pairs forms the families of "
+                                         "network.ring_fix.pairs: it needs the pairs.");
+            rf.cascade.clear();
+            if (jhas(json, "network.ring_fix.cascade", "network_ring_fix_cascade")) {
+                const nlohmann::json& arr = jsection(json, "network.ring_fix.cascade", "network_ring_fix_cascade");
+                if (!arr.is_array())
+                    throw std::runtime_error("network.ring_fix.cascade must be an array of \"<constellation>:<signal>/"
+                                             "<signal>><signal>\" entries (\"G:L1C/L2W>L5Q\").");
+                for (const auto& v : arr) {
+                    const std::string e = v.is_string() ? v.get<std::string>() : std::string{};
+                    if (e.size() != 13 || e[1] != ':' || e[5] != '/' || e[9] != '>' || e[2] != 'L' || e[6] != 'L'
+                        || e[10] != 'L')
+                        throw std::runtime_error("network.ring_fix.cascade: '" + e + "' is not of the form "
+                                                 "\"<constellation>:<signal>/<signal>><signal>\" (\"G:L1C/L2W>L5Q\").");
+                    const std::string pair = e.substr(0, 9), s3 = e.substr(10, 3);
+                    if (std::find(rf.pairs.begin(), rf.pairs.end(), pair) == rf.pairs.end())
+                        throw std::runtime_error("network.ring_fix.cascade: '" + e + "' names the pair '" + pair +
+                                                 "', which is not one of network.ring_fix.pairs.");
+                    for (const std::string& p : rf.pairs)
+                        if (p[0] == e[0] && (p.substr(2, 3) == s3 || p.substr(6, 3) == s3))
+                            throw std::runtime_error("network.ring_fix.cascade: '" + e + "' carries to " + s3 +
+                                                     ", a signal of the pair '" + p + "': a third signal is decided "
+                                                     "by its cascade only.");
+                    rf.cascade.push_back(e);
+                }
+            }
+            rf.cascade_tree = jval<bool>(json, "network.ring_fix.cascade_tree", "network_ring_fix_cascade_tree", false);
+            if (rf.cascade_tree && rf.cascade.empty())
+                throw std::runtime_error("network.ring_fix.cascade_tree grows a cascade's third band on its pair's "
+                                         "forest: it needs network.ring_fix.cascade.");
+            rf.cascade_log = jval<bool>(json, "network.ring_fix.cascade_log", "network_ring_fix_cascade_log", false);
+            if (rf.cascade_log && rf.cascade.empty())
+                throw std::runtime_error("network.ring_fix.cascade_log traces the cascades' decisions without holding "
+                                         "them: it needs network.ring_fix.cascade.");
+            rf.cascade_rehost_keep = jval<bool>(json, "network.ring_fix.cascade_rehost_keep",
+                                                "network_ring_fix_cascade_rehost_keep", false);
+            if (rf.cascade_rehost_keep && rf.cascade.empty())
+                throw std::runtime_error("network.ring_fix.cascade_rehost_keep keeps a third band's re-hosts onto held "
+                                         "cascade links: it needs network.ring_fix.cascade.");
+            rf.max_decisions_per_epoch = jval<int>(json, "network.ring_fix.max_decisions_per_epoch",
+                                                   "network_ring_fix_max_decisions_per_epoch", 3);
+            if (rf.max_decisions_per_epoch < 0)
+                throw std::runtime_error("network.ring_fix.max_decisions_per_epoch must be 0 (no cap) or more.");
+            rf.rehost_keep_carry = jval<bool>(json, "network.ring_fix.rehost_keep_carry",
+                                              "network_ring_fix_rehost_keep_carry", false);
+            rf.mask_slip_arc = jval<std::string>(json, "network.ring_fix.mask_slip_arc",
+                                                 "network_ring_fix_mask_slip_arc", std::string{});
+            rf.mask_slip_tow = jval<double>(json, "network.ring_fix.mask_slip_tow", "network_ring_fix_mask_slip_tow",
+                                            -1.0);
+            rf.mask_slip_epochs = jval<int>(json, "network.ring_fix.mask_slip_epochs",
+                                            "network_ring_fix_mask_slip_epochs", 1);
+            if (!rf.mask_slip_arc.empty()) {
+                if (rf.truth_root.empty())
+                    throw std::runtime_error("network.ring_fix.mask_slip_arc needs network.ring_fix.truth_root (a "
+                                             "simulation-only test).");
+                if (rf.mask_slip_arc.find(':') == std::string::npos || rf.mask_slip_tow < 0.0
+                    || rf.mask_slip_epochs < 1)
+                    throw std::runtime_error("network.ring_fix.mask_slip_arc is \"<station>:<satellite>\" and needs "
+                                             "network.ring_fix.mask_slip_tow (>= 0) and mask_slip_epochs (>= 1).");
+            }
+        }
     }
 
     // =================================================================
@@ -2657,6 +2835,26 @@ namespace GnssProcessor {
                       network_config_.disc_mark_scope);
             network_config_.disc_mark_scope = "sat";
         }
+        // The step-class declaration: families "<constellation>:<signal>/<signal>" and a tolerance.
+        network_config_.disc_step_class_pairs.clear();
+        if (jhas(json, "network.disc_step_class_pairs", "network_disc_step_class_pairs")) {
+            const nlohmann::json& arr =
+                jsection(json, "network.disc_step_class_pairs", "network_disc_step_class_pairs");
+            if (!arr.is_array())
+                throw std::runtime_error("network.disc_step_class_pairs must be an array of \"<constellation>:"
+                                         "<signal>/<signal>\" entries (\"E:L1X/L5X\").");
+            for (const auto& v : arr) {
+                const std::string e = v.is_string() ? v.get<std::string>() : std::string{};
+                if (e.size() != 9 || e[1] != ':' || e[5] != '/' || e[2] != 'L' || e[6] != 'L' || e[3] == e[7])
+                    throw std::runtime_error("network.disc_step_class_pairs: '" + e + "' is not of the form "
+                                             "\"<constellation>:<signal>/<signal>\" on two bands (\"E:L1X/L5X\").");
+                network_config_.disc_step_class_pairs.push_back(e);
+            }
+        }
+        network_config_.disc_step_class_tol_cyc =
+            jval<double>(json, "network.disc_step_class_tol_cyc", "network_disc_step_class_tol_cyc", 0.15);
+        if (!(network_config_.disc_step_class_tol_cyc > 0.0 && network_config_.disc_step_class_tol_cyc < 0.5))
+            throw std::runtime_error("network.disc_step_class_tol_cyc must be in (0, 0.5) cycle.");
         if (network_config_.disc_mark_scope == "channel") {
             log->info("Network: network.disc_mark_scope = 'channel' — a per-satellite "
                       "discontinuity mark now bumps ONLY the generations of the channels the "
@@ -3153,6 +3351,8 @@ namespace GnssProcessor {
             jval<bool>(json, "network.trace_pb_prehold", "trace_pb_prehold", false);
         network_config_.trace_rpb_states =
             jval<bool>(json, "network.trace_rpb_states", "trace_rpb_states", false);
+        network_config_.trace_windup_arcs =
+            jval<bool>(json, "network.trace_windup_arcs", "trace_windup_arcs", false);
         if (network_config_.trace_chain_datum)
             log->info("Network: eq34 chain-frame observatory ENABLED — network_chain_edges.csv "
                       "(every tree edge with its chain-event row and legacy step), "
@@ -3168,6 +3368,9 @@ namespace GnssProcessor {
         if (network_config_.trace_rpb_states)
             log->info("Network: receiver phase-bias trace ENABLED — network_rpb_states.csv, with "
                       "the time-link NEES at the run end.");
+        if (network_config_.trace_windup_arcs)
+            log->info("Network: wind-up arc trace ENABLED: network_windup_arcs.csv, each station's wind-up "
+                      "accumulator at every arc start and every anchor epoch (network/diag/WindupArcs.hpp).");
         // Sink dependency (deferred from its arming block above,
         // because this toggle is parsed only here).  Invariant #4: an armed instrument
         // whose output has nowhere to go has to say so.
@@ -3516,6 +3719,18 @@ namespace GnssProcessor {
                        network_config_.extra_band_code_sigma_scale);
             network_config_.extra_band_code_sigma_scale = 1.0;
         }
+        // The phase twin (a diagnostic lever): the same rule on the extra band's phase rows.
+        network_config_.extra_band_phase_sigma_scale =
+            jval<double>(json, "network.extra_band_phase_sigma_scale",
+                         "extra_band_phase_sigma_scale", 1.0);
+        if (!(network_config_.extra_band_phase_sigma_scale >= 1.0)) {
+            log->error("Network: network.extra_band_phase_sigma_scale = {} is not at "
+                       "or above 1 (or is not a number) — falling back to 1.0 (no scaling).  "
+                       "The knob only ever DEWEIGHTS the phase rows of a signal whose band is "
+                       "neither band of the constellation's ionosphere-free pin pair.",
+                       network_config_.extra_band_phase_sigma_scale);
+            network_config_.extra_band_phase_sigma_scale = 1.0;
+        }
         // Second code channel.  A station contributes every allow-listed
         // band-1 code it reports besides the one its canonical latch selected, so the
         // C1C and C1W satellite families stop competing for the same stations.  The
@@ -3635,6 +3850,14 @@ namespace GnssProcessor {
                       network_config_.extra_band_code_sigma_scale,
                       network_config_.extra_band_code_sigma_scale
                           * network_config_.extra_band_code_sigma_scale);
+        if (network_config_.extra_band_phase_sigma_scale > 1.0)
+            log->info("Network: network.extra_band_phase_sigma_scale = {:.3f} — "
+                      "EXTRA-BAND phase rows fold at sigma x {:.3f} (information / {:.3f}) in "
+                      "the network solve; the closed-loop consumer stays at 1.",
+                      network_config_.extra_band_phase_sigma_scale,
+                      network_config_.extra_band_phase_sigma_scale,
+                      network_config_.extra_band_phase_sigma_scale
+                          * network_config_.extra_band_phase_sigma_scale);
 
         if (estimate_network_sat_code_bias_) {
             estimate_sat_biases_   = true;   // promote the satellite code bias to a state
@@ -4447,6 +4670,51 @@ namespace GnssProcessor {
         // stiff variance is handed back.
         network_config_.amb_float_drop_var_m2 =
             jval<double>(json, "network.amb_float_drop_var_m2", "amb_float_drop_var_m2", 0.0);
+        // A slipped band's drop that covers the band's observed step: 0 (default) is the drop as before.
+        network_config_.amb_float_drop_jump_k =
+            jval<double>(json, "network.amb_float_drop_jump_k", "amb_float_drop_jump_k", 0.0);
+        if (!(network_config_.amb_float_drop_jump_k >= 0.0 && network_config_.amb_float_drop_jump_k <= 10.0))
+            throw std::runtime_error("network.amb_float_drop_jump_k must be in [0, 10].");
+        if (network_config_.amb_float_drop_jump_k > 0.0)
+            log->warn("Network: network.amb_float_drop_jump_k {:.2f}: the drop of a slip-latched arc takes at least "
+                      "({:.2f} x the band's phase-minus-code step)^2 as its variance.",
+                      network_config_.amb_float_drop_jump_k, network_config_.amb_float_drop_jump_k);
+        // A band latched at its return after a gap: its drop covers the band's step across the gap, or frees a
+        // return the gap instrument declares shifted.  "off" (default) is the drop as before.
+        {
+            const std::string s = jval<std::string>(json, "network.amb_float_drop_gap_cover",
+                                                    "amb_float_drop_gap_cover", std::string{"off"});
+            if (s.empty() || s == "off")
+                network_config_.amb_float_drop_gap_cover = NetworkAmbGapCover::Off;
+            else if (s == "step")
+                network_config_.amb_float_drop_gap_cover = NetworkAmbGapCover::Step;
+            else if (s == "free")
+                network_config_.amb_float_drop_gap_cover = NetworkAmbGapCover::Free;
+            else
+                throw std::runtime_error("network.amb_float_drop_gap_cover must be one of off|step|free.");
+            if (network_config_.amb_float_drop_gap_cover == NetworkAmbGapCover::Step
+                && !(network_config_.amb_float_drop_jump_k > 0.0))
+                throw std::runtime_error("network.amb_float_drop_gap_cover \"step\" scales the step by "
+                                         "network.amb_float_drop_jump_k, which must then be positive.");
+            if (network_config_.amb_float_drop_gap_cover != NetworkAmbGapCover::Off)
+                log->warn("Network: network.amb_float_drop_gap_cover {}: the drop of a band latched at its return "
+                          "after a gap {}.", s,
+                          network_config_.amb_float_drop_gap_cover == NetworkAmbGapCover::Step
+                              ? "covers network.amb_float_drop_jump_k times the band's phase-minus-code step "
+                                "across the gap"
+                              : "frees the band when the gap instrument declares the return shifted");
+        }
+        // A floor on the drop of a band latched by a declared break (a slip detector or the gap re-entry response),
+        // never on a RAIM refloat: 0 (default) is no floor.
+        network_config_.amb_float_drop_declared_var_m2 =
+            jval<double>(json, "network.amb_float_drop_declared_var_m2", "amb_float_drop_declared_var_m2", 0.0);
+        if (!(network_config_.amb_float_drop_declared_var_m2 >= 0.0
+              && network_config_.amb_float_drop_declared_var_m2 <= 1.0e4))
+            throw std::runtime_error("network.amb_float_drop_declared_var_m2 must be in [0, 1e4].");
+        if (network_config_.amb_float_drop_declared_var_m2 > 0.0)
+            log->warn("Network: network.amb_float_drop_declared_var_m2 {:.1f}: the drop of a band latched by a declared "
+                      "break (a slip detector or a gap return) restores at least this variance (elevation-mapped); "
+                      "a RAIM refloat does not.", network_config_.amb_float_drop_declared_var_m2);
         network_amb_float_drop_decouple_always_ =
             jval<bool>(json, "network.amb_float_drop_decouple_always",
                        "amb_float_drop_decouple_always", false);
@@ -4808,6 +5076,16 @@ namespace GnssProcessor {
         // station-common direction the ambiguity rows already assert).  Validated below.
         network_carry_zwd_in_block_ =
             jval<bool>(json, "network.carry_zwd_in_block", "carry_zwd_in_block", false);
+        // The wet delay's event response: keep the carried value with an inflated sigma instead of erasing it
+        // (a re-seed from one epoch carries that epoch's error on; standing invariant 1).  0 (default): erase.
+        network_config_.zwd_event_inflate_m =
+            jval<double>(json, "network.zwd_event_inflate_m", "zwd_event_inflate_m", 0.0);
+        if (!(network_config_.zwd_event_inflate_m >= 0.0 && network_config_.zwd_event_inflate_m <= 1.0))
+            throw std::runtime_error("network.zwd_event_inflate_m must be in [0, 1] m.");
+        if (network_config_.zwd_event_inflate_m > 0.0)
+            log->warn("Network: network.zwd_event_inflate_m {:.3f} m: at a slip latch or a RAIM flag the station's "
+                      "carried wet delay is kept with this sigma added in quadrature, not erased.",
+                      network_config_.zwd_event_inflate_m);
         // The same rule applied to the per-LOS slant-iono columns (I-in-block; SPEC_amb_
         // iono_split_overcount §7 item 17).  It replaces the retired diagonal vehicle
         // network.carry_iono.  q is per epoch, m² at L1.
@@ -6172,6 +6450,9 @@ namespace GnssProcessor {
             sq.oracle_truth_root =
                 jval<std::string>(json, "network.cycle_slip.oracle_truth_root",
                                   "network_cycle_slip_oracle_truth_root", std::string{});
+            sq.oracle_pin_frame_file =
+                jval<std::string>(json, "network.cycle_slip.oracle_pin_frame_file",
+                                  "network_cycle_slip_oracle_pin_frame_file", std::string{});
             sq.oracle_noise_cyc =
                 jval<double>(json, "network.cycle_slip.oracle_noise_cyc",
                              "network_cycle_slip_oracle_noise_cyc", 0.0);
@@ -7972,6 +8253,10 @@ namespace GnssProcessor {
         network_disc_threshold_frac_cycles_ =
             jval<double>(json, "network.disc_threshold_frac_cycles",
                          "network_disc_threshold_frac_cycles", 0.0);
+        // The phase step declaration on what a user sees:
+        // false = the legacy value test on the phase bias alone (byte-identical).
+        network_disc_phase_visible_ =
+            jval<bool>(json, "network.disc_phase_visible", "network_disc_phase_visible", false);
         // Sticky clock-pivot selection and per-constellation scoping of the producer's
         // internal handover response (carry skip / oscillator clear; RTA-1/RTA-2).
         network_sticky_pivot_ =
@@ -10150,6 +10435,26 @@ namespace GnssProcessor {
                       network_disc_threshold_frac_cycles_ * Constants::GPS_L2_WAVELENGTH,
                       network_disc_threshold_frac_cycles_ * Constants::GPS_L5_WAVELENGTH);
         }
+        // The phase step declaration on what a user sees.  Under the emission hold the
+        // emitted phase bias is a generation constant and the generations declare the
+        // held steps (gen=), so the test has nothing to decide: disarmed, and the S
+        // contract carries no discpv= token.
+        if (network_disc_phase_visible_ && network_config_.emit_pb_hold) {
+            log->warn("Network: network.disc_phase_visible is INERT under network.emit_pb_hold "
+                      "(the hold declares its steps by generation, gen=): the phase-visible "
+                      "step test is not armed and the S contract carries no discpv= token.");
+            network_disc_phase_visible_ = false;
+        } else if (network_disc_phase_visible_) {
+            log->info("Network producer: phase-visible step test ON "
+                      "(network.disc_phase_visible) — a phase step is declared when a key's "
+                      "change of its clock less phase bias, less the median of that change over "
+                      "the satellites of its constellation and signal ({} or more voting "
+                      "satellites; below that each key is tested on its own change), exceeds the "
+                      "discontinuity threshold.  The declaration assumes a user that differences "
+                      "between satellites the stream corrects: a move common to every satellite "
+                      "of a signal is not declared.  Replay-reproducible via the S-contract "
+                      "discpv= field.", kPhaseVisibleMinSats);
+        }
         if (network_scoped_handover_response_)
             log->info("Network producer (RTA-2): scoped handover response ON — the internal D2 "
                       "carry skip / clock-oscillator clear / jump-test suppression on a pivot "
@@ -10740,6 +11045,35 @@ namespace GnssProcessor {
             log->warn("Network: network.trace_chain_datum / network.trace_rpb_states are INERT "
                       "without network.phase_datum_eq34 (there is no chain to observe); "
                       "nothing is written.");
+        // The ring fix reads the chain's record (its tree, chords and cut releases), which the
+        // election writes only with the chain trace armed; an audit file that does not exist is a
+        // mis-pointed path, not an empty audit.
+        if (network_config_.ring_fix.enable) {
+            if (!network_phase_datum_eq34_ || !network_config_.trace_chain_datum)
+                throw std::runtime_error(
+                    "network.ring_fix.enable needs network.phase_datum_eq34 and network.trace_chain_datum "
+                    "(the rings are read from the chain's record, which the election writes only with the "
+                    "chain trace armed).");
+            const std::string& af = network_config_.ring_fix.audit_frame_file;
+            if (!af.empty() && !std::filesystem::exists(af))
+                throw std::runtime_error("network.ring_fix.audit_frame_file ('" + af + "') does not exist.");
+            const std::string& tr = network_config_.ring_fix.truth_root;
+            if (!tr.empty() && !std::filesystem::exists(tr))
+                throw std::runtime_error("network.ring_fix.truth_root ('" + tr + "') does not exist.");
+            log->warn("Network: network.ring_fix ARMED (rule {}, audit {}): chord integers of the eq34 chain "
+                      "are decided ring by ring, held in the solve and released at every event "
+                      "(include/network/ar/RingFix.hpp).",
+                      network_config_.ring_fix.rule, af.empty() ? std::string("none") : af);
+        } else if (network_config_.ring_fix.rule != "gated" || !network_config_.ring_fix.audit_frame_file.empty()
+                   || network_config_.ring_fix.order != "ring" || network_config_.ring_fix.gate != "sigma"
+                   || !network_config_.ring_fix.truth_root.empty() || network_config_.ring_fix.oracle_until_s > 0.0
+                   || network_config_.ring_fix.held_first || !network_config_.ring_fix.pairs.empty()
+                   || network_config_.ring_fix.wl_frac_max > 0.0 || !network_config_.ring_fix.mask_slip_arc.empty()
+                   || network_config_.ring_fix.sigma_scale != 1.0) {
+            log->warn("Network: network.ring_fix.rule / order / gate / audit_frame_file / truth_root / oracle_until_s / "
+                      "held_first / pairs / wl_frac_max / mask_slip_arc / sigma_scale are INERT without "
+                      "network.ring_fix.enable.");
+        }
 
         // Two-edge continuous handover: inert guards, then the arming line.  Follows the
         // eq34-hygiene / pool-re-host precedent: an arm that cannot change anything is
@@ -12848,6 +13182,12 @@ namespace GnssProcessor {
             // byte-identical; neither reaches the producer's solve or its resume
             // fingerprint.
             clc.pb_disc_carry            = cl.value("pb_disc_carry", false);
+            // The consumer's rule for satellites without a stream record (derived into the
+            // consumer engine as processing.ssr_drop_unrecorded), and its extension to the
+            // phase biases (processing.ssr_drop_unrecorded_phase_bias).  Both default false ⇒
+            // byte-identical; neither reaches the producer's solve or its resume fingerprint.
+            clc.drop_unrecorded          = cl.value("drop_unrecorded", false);
+            clc.drop_unrecorded_phase_bias = cl.value("drop_unrecorded_phase_bias", false);
             // The presence edges of a held phase bias (derived into the
             // consumer engine as processing.ssr_pb_hold_presence_flip).  Same contract
             // as pb_disc_carry: default false, and it never reaches the producer's solve
@@ -13242,6 +13582,12 @@ namespace GnssProcessor {
         // on the base config is kept.
         if (cl.pb_disc_carry)
             c.ssr_phase_bias_disc_carry_ = true;
+        // The same derivation for the rule on satellites without a stream record.  Never
+        // cleared here: an explicit processing.ssr_drop_unrecorded on the base config is kept.
+        if (cl.drop_unrecorded)
+            c.ssr_drop_unrecorded_ = true;
+        if (cl.drop_unrecorded_phase_bias)
+            c.ssr_drop_unrecorded_phase_bias_ = true;
         // The same derivation for the presence edges of a held phase bias.
         // Never cleared here: an explicit processing.ssr_pb_hold_presence_flip on the
         // base config is kept.
@@ -13351,6 +13697,7 @@ namespace GnssProcessor {
         // consumer's band-5 code residual at its own weight).  Pinned at 1 so an arm of
         // this knob moves only the wire.
         c.network_config_.extra_band_code_sigma_scale = 1.0;
+        c.network_config_.extra_band_phase_sigma_scale = 1.0;   // the phase twin, pinned likewise
         // The second code channel is a producer-side mechanism: it exists
         // so the satellite C1C and C1W families share the network's stations.  A consumer
         // is one station and has no family to support; arming it there would only add a
@@ -13740,6 +14087,23 @@ namespace GnssProcessor {
                                   if (e.kind == "oracle_pin") ++n;
                               return n;
                           }(), root);
+            }
+            // The chain-frame targets are read by the oracle pin alone: without an armed
+            // event they would be read by nothing (armed and inert, invariant 4), and a missing file is a
+            // mis-pointed path, not an empty target set.
+            const auto& frame_file = network_config_.slip_qc.oracle_pin_frame_file;
+            if (!frame_file.empty()) {
+                if (!(any_pin && ic.enable))
+                    throw std::runtime_error(
+                        "network.cycle_slip.oracle_pin_frame_file ('" + frame_file
+                        + "') is set but no 'oracle_pin' event is armed in network.inject: the frame targets "
+                          "would be read by nothing.");
+                if (!std::filesystem::exists(frame_file))
+                    throw std::runtime_error(
+                        "network.cycle_slip.oracle_pin_frame_file ('" + frame_file + "') does not exist.");
+                log->warn("Config: network.cycle_slip.oracle_pin_frame_file '{}' — the oracle pin holds the "
+                          "chords it lists at their integers in the chain's frame (SIM-ONLY, card IRDU "
+                          "section 12).", frame_file);
             }
         }
         return true;

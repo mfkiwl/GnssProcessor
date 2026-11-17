@@ -225,7 +225,79 @@ struct NetworkOraclePin {
     /// epoch.  The counters alone are not enough: membership reconstructed from the
     /// onset rows misses every arc that joined later.
     std::set<std::tuple<int, std::string, std::string>> prev_keys;
+
+    // ---- Chain-frame mode -------------------------------------------------------
+    // With network.cycle_slip.oracle_pin_frame_file set, the table is read from the file
+    // (@ref networkOraclePinFrameTable) instead of the anchor-frame fit: under the
+    // integer-recovering chain of card IRD every tree link is pinned at an integer target,
+    // so a chord's absolute ambiguity in the chain's frame is lambda times an integer that
+    // the simulator's truth and the tree's targets give offline, and no station term is
+    // fitted.  The file's integers stay valid while the frame does: every listed link the
+    // chain pins must sit at the file's integer (a re-host onto a link already at it keeps
+    // the frame), and a pin anywhere else is a step the file cannot follow, at which every
+    // frame pin is released for good (the latch below).
+
+    /// One row of the frame-target file.
+    struct FrameTarget {
+        long long frame_int{0};   ///< The arc's integer in the chain's frame (cycles).
+        bool      tree{false};    ///< A tree link of the file's reference tree (telemetry; the chain's pins decide).
+    };
+    bool        frame_mode{false};  ///< True when network.cycle_slip.oracle_pin_frame_file names a file.
+    std::string frame_file;         ///< The frame-target file.
+    /// (station index, satellite, signal) -> its frame target.
+    std::map<std::tuple<int, std::string, std::string>, FrameTarget> frame;
+    /// A chord -> its true integer (the simulator's convention, @ref networkOraclePinTrueN) when it was first
+    /// pinned; a later change is a true slip, at which the chord is released for good.
+    std::map<std::tuple<int, std::string, std::string>, int> frame_onset_n;
+    /// Chords released for good at a true slip.
+    std::set<std::tuple<int, std::string, std::string>> frame_released;
+    long long   frame_chords{0};          ///< Chords in the file.
+    long long   frame_tree_links{0};      ///< Tree links in the file.
+    long long   frame_tree_checked{0};    ///< Listed links the chain pins, found at the file's integer (arc-epochs).
+    long long   frame_tree_unpinned{0};   ///< Tree links of the file the chain does not pin, held by the oracle instead (arc-epochs).
+    long long   frame_released_slip{0};   ///< Chords released at a true slip (arcs).
+    long long   frame_not_carried{0};     ///< Chords in scope with no carried ambiguity this epoch (arc-epochs; pinned all the same).
+    double      frame_changed_tow{-1.0};  ///< TOW at which the chain first pinned a listed link off the file's integer; -1: never.
+    std::string frame_changed_what;       ///< That link and its two values.
 };
+
+/**
+ * @brief Parse a chain-frame target file.
+ *
+ * Header contract: the line begins `station,sat,signal,frame_int,role`; a column appended after
+ * `role` is ignored.  `role` is `tree` (a link of the reference tree) or `chord`.
+ *
+ * @param path  File to read.
+ * @return (station name, satellite, signal) -> the arc's frame target.
+ * @throws std::runtime_error on a malformed header or row, an unknown role or a duplicate arc.
+ */
+std::map<std::tuple<std::string, std::string, std::string>, NetworkOraclePin::FrameTarget>
+networkOraclePinParseFrameCsv(const std::string& path);
+
+/**
+ * @brief Build this epoch's pin table from the chain-frame targets.
+ *
+ * Every listed link the chain pins this epoch (its pinned_amb_targets) is checked at lambda times the file's
+ * integer, whatever role the file gave it: a pin at another value means the frame has stepped, the first such
+ * epoch is latched (@c frame_changed_tow) and from it on the table stays empty.  Every other listed link covered by
+ * an active scope (the file's chords, and any tree link of the file the chain no longer pins) is pinned at lambda
+ * times its frame integer.  A link whose true integer (@ref networkOraclePinTrueN) differs from its value when
+ * first pinned has slipped: it is released for good and counted.  The residual (value_abs − pinned)/lambda over the carried pinned chords is written to the fit-residual
+ * counters, as the fit does.
+ *
+ * @param pin      The armed pin in frame mode; its table is rebuilt.
+ * @param stations Joint-solve roster in station-index order (reads @c pinned_amb_targets, the chain's pins).
+ * @param arcs     The arc table (carried ambiguities, for the residual).
+ * @param now_s    Continuous-GPS seconds of the epoch.
+ * @param tow      Time of week of the epoch (s), for the latch.
+ * @param active   Indices into @c pin.scopes of the events that have started.
+ * @return The number of chords pinned this epoch.
+ */
+int networkOraclePinFrameTable(NetworkOraclePin& pin,
+                               const std::vector<NetStation>& stations,
+                               const net::ArcTable& arcs,
+                               double now_s, double tow,
+                               const std::vector<std::size_t>& active);
 
 /**
  * @brief Parse one `truth_ambiguities.csv`.

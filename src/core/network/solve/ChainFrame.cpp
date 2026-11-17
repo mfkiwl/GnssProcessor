@@ -4,6 +4,7 @@
  */
 
 #include "network/solve/ChainFrame.hpp"
+#include "network/solve/ChainChordTable.hpp"  // chainChordFloats, chainPairFamilies, chainWavelengthM
 
 #include "common/GnssIdentity.hpp"          // SatId, SignalId, nominalWavelengthOfDigitM
 #include "config/GnssConfig.hpp"
@@ -230,16 +231,6 @@ namespace {
 std::string stationKey(int station) { return "R:" + std::to_string(station); }
 std::string satKeyOf(const std::string& sat) { return "S:" + sat; }
 
-/// The carrier wavelength of a phase signal of a satellite's constellation (0: unknown).
-double wavelengthOf(const std::string& sat, const std::string& signal) {
-    const std::optional<SatId> id = SatId::parse(sat);
-    if (!id) return 0.0;
-    const std::optional<SignalId> sig = SignalId::fromObsCode(id->sys, signal);
-    if (!sig) return 0.0;
-    const double lam = nominalWavelengthOfDigitM(id->sys, sig->digit);
-    return (std::isfinite(lam) && lam > 0.0) ? lam : 0.0;
-}
-
 /// True when x is within 1e-6 of an integer.
 bool nearInteger(double x) { return std::isfinite(x) && std::abs(x - std::round(x)) <= 1e-6; }
 
@@ -261,19 +252,6 @@ std::string vertexName(const std::string& key, const std::vector<NetStation>& st
         return key;
     }
     return key.size() > 2 ? key.substr(2) : key;
-}
-
-/// The band-1 and band-2 signal of a pair family for one arc: every band-1 (digit '1') signal
-/// pairs with the arc's lowest-digit signal of another band.
-std::vector<std::pair<std::string, std::string>> pairFamilies(const std::set<std::string>& sigs) {
-    std::vector<std::pair<std::string, std::string>> out;
-    std::string other;
-    for (const std::string& s : sigs)
-        if (s.size() >= 2 && s[1] != '1' && (other.empty() || s[1] < other[1])) other = s;
-    if (other.empty()) return out;
-    for (const std::string& s : sigs)
-        if (s.size() >= 2 && s[1] == '1') out.emplace_back(s, other);
-    return out;
 }
 
 // ---- One epoch's classification ---------------------------------------------------------------
@@ -518,7 +496,7 @@ ChainEpochClass chainClassifyEpoch(const ChainEpochObs& obs, const ChainFrameMem
     cnt.cf_sl_deseats += static_cast<long long>(obs.deseats.size());
     for (const auto& [key, s] : obs.shift_sat) {
         ++cnt.cf_known_shifts;
-        const double lam = wavelengthOf(key.first, key.second);
+        const double lam = chainWavelengthM(key.first, key.second);
         if (lam > 0.0 && !nearInteger(s / lam)) ++cnt.cf_frac_shifts;
     }
     for (const auto& [g, list] : comps_of) {
@@ -601,15 +579,6 @@ void networkChainFrameObserve(NetworkRun& run, const NetworkEpoch& ep) {
     if (!(ctx.knobs.trace_chain_datum || ctx.knobs.trace_rpb_states)) return;
     const ChainEpochObs no_record;   // an epoch the election did not record
     const ChainEpochObs& obs = obs_rec != nullptr ? *obs_rec : no_record;
-
-    // Each station's ambiguity columns: (sat, signal) -> (column, linearization point).
-    auto ambColumns = [&](std::size_t i) {
-        std::map<std::pair<std::string, std::string>, std::pair<Eigen::Index, double>> out;
-        const StationAssembly& R = asm_res[i];
-        const std::vector<PlAmb>& src = R.pl_amb.empty() ? R.qc_amb : R.pl_amb;
-        for (const PlAmb& a : src) out[{a.sat, a.signal}] = {a.col, a.x_lin};
-        return out;
-    };
 
     std::vector<ChainEdgeObs> classified;   // this epoch's classified edges (the chain trace armed)
     if (ctx.knobs.trace_chain_datum && obs.armed) {
@@ -903,66 +872,22 @@ void networkChainFrameObserve(NetworkRun& run, const NetworkEpoch& ep) {
         auto latticeChord = [&](int station, const std::string& sat, const std::string& sig,
                                 long long& out) -> bool {
             const auto c = cyc_of.find({station, sat, sig});
-            if (c == cyc_of.end() || !c->second->pins_integer || lattice.rows.empty()) return false;
-            const std::optional<long long> v = arcgraph::latticeImplied(lattice, c->second->cycle);
-            if (!v) return false;
-            out = *v - std::llround(c->second->pin_sum_cyc);
-            return true;
+            if (c == cyc_of.end()) return false;
+            return chainLatticeChordInteger(lattice, *c->second, out);
         };
         std::map<std::tuple<int, std::string, std::string>, std::pair<ChainChordRow, int>> new_chords;
         for (std::size_t i = 0; i < stations.size() && i < asm_res.size() && i < est_index_of.size(); ++i) {
             if (est_index_of[i] < 0) continue;
-            const auto cols = ambColumns(i);
-            std::map<std::string, std::set<std::string>> sigs_of;   // sat -> its phase signals
-            for (const auto& [k, v] : cols) {
-                (void)v;
-                if (k.second.find('_') != std::string::npos) continue;
-                sigs_of[k.first].insert(k.second);
-            }
-            std::vector<ChainChordRow> rows;
-            for (const auto& [sat, sigs] : sigs_of) {
-                const std::string c = sat.substr(0, 1);
-                for (const auto& [s1, s2] : pairFamilies(sigs)) {
-                    if (!chain_signals.count(c + "|" + s1) || !chain_signals.count(c + "|" + s2)) continue;
-                    const int ii = static_cast<int>(i);
-                    if (tree_arcs.count({ii, sat, s1}) || tree_arcs.count({ii, sat, s2})) continue;
-                    ChainChordRow r;
-                    r.family = c + "|" + s1 + "+" + s2;
-                    r.sig1 = s1; r.sig2 = s2;
-                    r.station = ii; r.station_name = stations[i].name; r.sat = sat;
-                    rows.push_back(r);
-                }
-            }
+            const ChainAmbColumns cols = chainAmbColumns(asm_res[i]);
+            std::vector<ChainChordRow> rows = chainStationChordRows(
+                static_cast<int>(i), stations[i].name, cols, tree_arcs, chain_signals);
             if (rows.empty()) continue;
             const std::size_t est_idx = static_cast<std::size_t>(est_index_of[i]);
-            Eigen::VectorXd xr;
-            std::vector<std::pair<std::size_t, Eigen::Index>> reqs;
-            std::vector<std::vector<int>> blocks;
-            for (const ChainChordRow& r : rows) {
-                const int k = static_cast<int>(reqs.size());
-                reqs.emplace_back(est_idx, cols.at({r.sat, r.sig1}).first);
-                reqs.emplace_back(est_idx, cols.at({r.sat, r.sig2}).first);
-                blocks.push_back({k, k + 1});
-            }
-            std::vector<Eigen::MatrixXd> covs;
-            try {
-                xr = est.reconstructStation(est_idx, x_s);
-                covs = est.blockConditionalCovariances(reqs, plan.shared_datum, blocks);
-            } catch (...) { continue; }
-            if (covs.size() != rows.size()) continue;
+            std::vector<char> filled;
+            if (!chainChordFloats(est, est_idx, x_s, plan.shared_datum, cols, rows, filled)) continue;
             for (std::size_t r_i = 0; r_i < rows.size(); ++r_i) {
+                if (!filled[r_i]) continue;
                 ChainChordRow& r = rows[r_i];
-                const auto& c1 = cols.at({r.sat, r.sig1});
-                const auto& c2 = cols.at({r.sat, r.sig2});
-                const double l1 = wavelengthOf(r.sat, r.sig1), l2 = wavelengthOf(r.sat, r.sig2);
-                if (!(l1 > 0.0 && l2 > 0.0) || c1.first >= xr.size() || c2.first >= xr.size()) continue;
-                const Eigen::MatrixXd& C = covs[r_i];
-                if (C.rows() != 2 || C.cols() != 2) continue;
-                r.float_cyc_1 = (c1.second + xr(c1.first)) / l1;
-                r.float_cyc_2 = (c2.second + xr(c2.first)) / l2;
-                r.q11 = C(0, 0) / (l1 * l1);
-                r.q12 = C(0, 1) / (l1 * l2);
-                r.q22 = C(1, 1) / (l2 * l2);
                 chainCertifyChord(r.float_cyc_1, r.float_cyc_2, r.q11, r.q12, r.q22,
                                   netar.min_success_rate, netar.ratio_threshold,
                                   netar.ratio_upper_bound, netar.nl_max_per_pair_frac, r);
@@ -1257,6 +1182,13 @@ int networkChainFrameRunEnd(const NetworkRunEndView& v) {
                   c.cf_pb_prehold_rows);
     log->info("Network (chain frame): {} CHAIN event row(s) written.", c.cf_events);
     return 0;
+}
+
+std::set<std::pair<std::string, std::string>> chainDeclaredKeys(const ChainEpochObs& obs) {
+    std::set<std::pair<std::string, std::string>> out;
+    for (const ChainReleaseObs& r : obs.releases)
+        for (const std::string& sat : r.sats) out.insert({sat, r.signal});
+    return out;
 }
 
 } // namespace GnssProcessor

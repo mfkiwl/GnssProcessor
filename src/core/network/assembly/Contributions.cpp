@@ -88,6 +88,7 @@ constexpr const char* kAmbCarryRow = "networkAmbCarryEmitRow (LevelingCarry.cpp)
 constexpr const char* kZwdCarryRow = "networkZwdCarryPrior (ZwdCarry.cpp), station step zwd";
 constexpr const char* kRxCbRows = "networkRxCbPriors (RxCodeBiasCarry.cpp), station step rx_cb";
 constexpr const char* kOraclePinRows = "networkOraclePinPriors (OraclePin.cpp), station step oracle_pin";
+constexpr const char* kRingHoldRows = "networkRingFixPriors (RingFixSeams.cpp), station step ring_hold";
 constexpr const char* kCplRows = "CouplingRowBuilder::buildCplRow, appendCouplingRows "
                                  "(Coupling.cpp)";
 constexpr const char* kBlock   = "CouplingRowBuilder::buildLocalBlock, appendCouplingRows "
@@ -226,6 +227,10 @@ constexpr std::array<ContributionSpec, kContributionKinds> kSpecs = {{
     {CK::PriorAmbiguityOraclePin, "prior_ambiguity_oracle_pin", CC::StationPriorPostPd,
      CG::BeforeGate, CS::StationLosSignal, CU::Entries, bit(PK::Ambiguity),
      "1/sigma^2 of the oracle_pin event (simulation only)", kOraclePinRows, false, nullptr},
+    {CK::PriorAmbiguityRingHold, "prior_ambiguity_ring_hold", CC::StationPriorPostPd,
+     CG::BeforeGate, CS::StationLosSignal, CU::Entries, bit(PK::Ambiguity),
+     "1/kRingFixHoldSigmaM^2 (network.ring_fix)", kRingHoldRows, false,
+     "printed only on a run where it folded a row"},
     {CK::PriorRxCbDatum, "prior_rx_cb_datum", CC::StationPriorPostPd, CG::BeforeGate,
      CS::Station, CU::Entries, bit(PK::RxCodeBias), "1/network.rx_code_bias_datum_sigma_m^2",
      kRxCbRows, false, nullptr},
@@ -388,6 +393,12 @@ ContributionTally runAsPrinted(const NetworkContributionLedger& L) {
 // ---------------------------------------------------------------------------
 
 const std::array<ContributionSpec, kContributionKinds>& contributionSpecs() { return kSpecs; }
+
+bool printedOnlyWhenFolded(ContributionKind k) {
+    // Kinds declared after the table's layout was fixed, printed only on a run that folded them,
+    // so a run that never arms them prints the table and the manifest record as before.
+    return k == ContributionKind::PriorAmbiguityRingHold;
+}
 
 const ContributionSpec& contributionSpec(ContributionKind k) {
     return kSpecs[isFamily(k) ? idx(k) : 0];
@@ -605,6 +616,7 @@ StationTagCheck checkStationTags(const StationAssembly& R) {
            R.pl_blk_rows);
     differ(at(CK::SdEwl), R.sd_ewl_rows);
     differ(at(CK::PriorAmbiguityOraclePin), R.opin_rows);
+    differ(at(CK::PriorAmbiguityRingHold), R.rfix_rows);
     differ(at(CK::PriorRxCbDatum) + at(CK::PriorRxCbDatumPrePd), R.pl_cb_datum_rows);
     return c;
 }
@@ -785,6 +797,8 @@ std::vector<std::string> contributionsTable(const ContributionTally& epoch,
     for (const ContributionSpec& s : kSpecs) {
         const ContributionCount& ce = epoch.kinds[idx(s.kind)];
         const ContributionCount& cr = run.kinds[idx(s.kind)];
+        if (printedOnlyWhenFolded(s.kind) && ce.count == 0 && ce.folds == 0 && cr.count == 0 && cr.folds == 0)
+            continue;
         std::string tail = fmt::format("{} | {}", s.weight, s.builder);
         if (s.note) tail += fmt::format(" | note: {}", s.note);
         if (s.kind == CK::GimIono && cr.count == 0 && run.gim_calls > 0) {
@@ -822,8 +836,10 @@ std::vector<std::string> contributionsTable(const ContributionTally& epoch,
         "(ambiguity_pin + eq34_rpb_pin = np, phase_colour_birth = pc_birth_rows, "
         "phase_colour_backstop = pc_backstop_rows, the block_*_carry kinds = pl_blk_rows, "
         "sd_ewl = the SD-EWL builder's rows_built, prior_ambiguity_oracle_pin = opin_rows, "
-        "prior_rx_cb_datum + prior_rx_cb_datum_pre_pd = pl_cb_datum_rows; per station block)",
-        epoch.counter_mismatches, epoch_scope, run.counter_mismatches));
+        "{}prior_rx_cb_datum + prior_rx_cb_datum_pre_pd = pl_cb_datum_rows; per station block)",
+        epoch.counter_mismatches, epoch_scope, run.counter_mismatches,
+        // Named only on a run that folded it, as its table row (printedOnlyWhenFolded).
+        run.kinds[idx(CK::PriorAmbiguityRingHold)].count > 0 ? "prior_ambiguity_ring_hold = rfix_rows, " : ""));
     out.push_back(fmt::format("shared folds without a kind: {} ({}); over the run {}",
                               epoch.folds_without_kind, epoch_scope, run.folds_without_kind));
     out.push_back(fmt::format(
@@ -852,6 +868,8 @@ std::string contributionsJson(const ContributionTally& epoch, const Contribution
     for (const ContributionSpec& s : kSpecs) {
         const ContributionCount& ce = epoch.kinds[idx(s.kind)];
         const ContributionCount& cr = run.kinds[idx(s.kind)];
+        if (printedOnlyWhenFolded(s.kind) && ce.count == 0 && ce.folds == 0 && cr.count == 0 && cr.folds == 0)
+            continue;
         std::string params;
         {
             const std::string text = paramKindSetText(s.params);

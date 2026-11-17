@@ -397,6 +397,18 @@ struct ForestRules {
     bool by_durability{false};            ///< Chain: longevity order of new edges.  Baseline: the most durable reference satellite (the maximum over common satellites of the weaker arc's durability).
     int  min_common{2};                   ///< Baseline: common satellites a link needs in the first round.
     bool stop_at_gap{false};              ///< Baseline: stop when no station reaches min_common (ARL tree_basis) instead of finishing through one common satellite.
+    /// Chain: per arc, an arc to try first whenever a vertex needs a new edge (the links whose
+    /// integers the ring fix holds, network.ring_fix.held_first); null: none, the walk as built.
+    const std::vector<char>* held_arcs{nullptr};
+    /// Chain: per arc, its lead rank (0: none).  Whenever an attached vertex has an arc of rank 1
+    /// or more to an unattached vertex, the arc of the lowest such rank is taken before any
+    /// incumbent, held or new edge: rank 1 breadth first, a higher rank one arc at a time (the
+    /// attached vertices in attachment order), rank 1 then draining again from the vertex it
+    /// attached.  With it every incumbent and new edge is taken one at a time too, so that a lead
+    /// arc always comes first.  Lead arcs are not filtered (the caller ranks only the arcs it
+    /// accepts).  Used for a cascade's third band grown on its pair's forest
+    /// (network.ring_fix.cascade_tree); null: none, the walk as built.
+    const std::vector<char>* lead_rank{nullptr};
 };
 
 /**
@@ -428,6 +440,8 @@ struct TreeEdge {
     bool ineligible_host{false};  ///< A new edge on a non-eligible host (the legacy hyg.cold_fallback_pins; chain only).
     bool slipped{false};          ///< Its arc slipped (the topology left no other route).
     int  pass{1};                 ///< 2 when admitted only in the second pass.
+    bool held_first{false};       ///< Chain: a new edge taken because its integer is held (ForestRules::held_arcs).
+    int  lead{0};                 ///< Chain: the lead rank it was taken at (ForestRules::lead_rank; 0: not as a lead arc).
 };
 
 /**
@@ -463,7 +477,15 @@ struct SpanningForest {
  * @p station_rank, then durability, then slot.  Pass 1 refuses slipped arcs and non-eligible hosts
  * as new edges when the rules say so; pass 2 runs, when vertices are still unreached, from the
  * frontier rebuilt in @p frontier_rank order and admits everything.  Incumbent arcs are not
- * filtered (the caller de-seeds them).
+ * filtered (the caller de-seeds them).  With @ref GnssProcessor::arcgraph::ForestRules::held_arcs "ForestRules::held_arcs", whenever
+ * the incumbent queue is empty a held arc from an attached vertex to an unattached one is taken
+ * first (the attached vertices in attachment order, each one's candidates in the walk's own
+ * order), so a vertex or a cut-off fragment re-attaches through a held link when one reaches it;
+ * the walk's own new edges are then taken one at a time, so the fragment each one reaches is
+ * re-attached by the incumbent queue and its held arcs are tried before the next new edge.
+ * With @ref GnssProcessor::arcgraph::ForestRules::lead_rank "ForestRules::lead_rank", lead arcs
+ * come before all of these, rank by rank, and every other edge is taken one at a time; an edge
+ * taken as a lead arc reads as from the incumbent when its arc is one of @p incumbent_arcs.
  *
  * @param g              The graph.
  * @param c              The component to span.

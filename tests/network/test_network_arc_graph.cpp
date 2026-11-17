@@ -328,6 +328,49 @@ TEST(NetworkArcGraph, ChainForestDrainsTheIncumbentBeforeAnyNewEdge) {
     EXPECT_EQ(sticky.station_order, (std::vector<int>{0, 1}));
 }
 
+TEST(NetworkArcGraph, ChainForestTakesAHeldArcFirst) {
+    // A (root) and B track x and y.  As built B joins through (B, x), the first new edge from x; with
+    // (B, y) held, the walk takes the root's new edges one at a time and B joins through the held arc.
+    const ArcGraph g = graphOf(oneBandFamily(), 2, 2, {row(0, 1, 1), row(0, 2, 1), row(1, 1, 1), row(1, 2, 1)});
+    const Component c = arcComponents(g, 1, {}).at(0);
+    ForestRules rules;
+    std::vector<char> held(g.rows.size(), 0);
+    held[static_cast<std::size_t>(arcIndex(g, 1, 1))] = 1;
+    rules.held_arcs = &held;
+    const SpanningForest f = growChainForest(g, c, {stationVertex(g, 0)}, {}, rules, {}, {});
+    ASSERT_EQ(f.edges.size(), 3u);
+    EXPECT_EQ(f.edges[0].arc, arcIndex(g, 0, 0));
+    EXPECT_EQ(f.edges[1].arc, arcIndex(g, 0, 1));
+    EXPECT_EQ(f.edges[2].arc, arcIndex(g, 1, 1));
+    EXPECT_TRUE(f.edges[2].held_first);
+    EXPECT_FALSE(f.edges[0].held_first);
+}
+
+TEST(NetworkArcGraph, ChainForestReattachesACutOffFragmentThroughAHeldArc) {
+    // The incumbent fragment {B, y, C} (arcs (B, y) and (C, y)) lost its edge to the root A.  As
+    // built the root's new edges take x and y at once and the fragment hangs from (A, y); with
+    // (B, x) held, the fragment re-attaches through it and its own incumbent edges.
+    const ArcGraph g = graphOf(oneBandFamily(), 3, 2,
+                               {row(0, 1, 1), row(0, 2, 1), row(1, 1, 1), row(1, 2, 1), row(2, 2, 1)});
+    const Component c = arcComponents(g, 1, {}).at(0);
+    const std::vector<int> incumbent{arcIndex(g, 1, 1), arcIndex(g, 2, 1)};
+    ForestRules rules;
+    const SpanningForest plain = growChainForest(g, c, {stationVertex(g, 0)}, incumbent, rules, {}, {});
+    ASSERT_EQ(plain.edges.size(), 4u);
+    EXPECT_EQ(plain.edges[1].arc, arcIndex(g, 0, 1));
+    std::vector<char> held(g.rows.size(), 0);
+    held[static_cast<std::size_t>(arcIndex(g, 1, 0))] = 1;
+    rules.held_arcs = &held;
+    const SpanningForest f = growChainForest(g, c, {stationVertex(g, 0)}, incumbent, rules, {}, {});
+    ASSERT_EQ(f.edges.size(), 4u);
+    EXPECT_EQ(f.edges[0].arc, arcIndex(g, 0, 0));
+    EXPECT_EQ(f.edges[1].arc, arcIndex(g, 1, 0));
+    EXPECT_TRUE(f.edges[1].held_first);
+    EXPECT_TRUE(f.edges[2].from_incumbent);
+    EXPECT_TRUE(f.edges[3].from_incumbent);
+    for (const TreeEdge& e : f.edges) EXPECT_NE(e.arc, arcIndex(g, 0, 1));
+}
+
 TEST(NetworkArcGraph, ChainForestSecondPassAdmitsWhatTheFirstRefused) {
     // B reaches the tree only through its slipped arc (B, x).
     const ArcGraph g = graphOf(oneBandFamily(), 2, 1, {row(0, 1, 1), row(1, 1, 1, /*slipped=*/1)});

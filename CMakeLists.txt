@@ -231,6 +231,8 @@ add_library(gnss_core STATIC
     src/core/products/SsrCorrectionStore.cpp
     src/core/products/SignalDeclaration.cpp
     src/core/products/NetworkProductEmitter.cpp
+    src/core/products/PhaseVisibleStepTest.cpp
+    src/core/products/PhaseStepClassTest.cpp
     src/core/network/emit/EmitRebase.cpp
     src/core/network/emit/ClockEmitRebase.cpp
     src/core/products/NetworkProductIO.cpp
@@ -259,6 +261,7 @@ add_library(gnss_core STATIC
     src/core/realtime/EphemerisJumpLedger.cpp
     src/core/realtime/AmbLevelCheck.cpp
     src/core/realtime/InnovationScreen.cpp
+    src/core/realtime/UnrecordedSatGate.cpp
     src/core/realtime/RealTimeEngineScreen.cpp
     src/core/realtime/RealTimeEngineArObserve.cpp
     src/core/realtime/ArObserve.cpp
@@ -284,6 +287,7 @@ add_library(gnss_core STATIC
     src/core/network/slip/SlipFunnel.cpp
     src/core/network/solve/ChainDatum.cpp
     src/core/network/solve/ChainFrame.cpp
+    src/core/network/solve/ChainChordTable.cpp
     src/core/network/solve/AnchorHygiene.cpp
     src/core/network/assembly/AprioriClockTrack.cpp
     src/core/network/assembly/SignalIntegrity.cpp
@@ -343,6 +347,8 @@ add_library(gnss_core STATIC
     src/core/network/diag/Leveling.cpp
     src/core/network/diag/StashStatus.cpp
     src/core/network/ar/ProducerAr.cpp
+    src/core/network/ar/RingFix.cpp
+    src/core/network/ar/RingFixSeams.cpp
     src/core/network/ar/ArSuspect.cpp
     src/core/network/ar/ArcGraph.cpp
     src/core/network/ar/ArcLife.cpp
@@ -392,6 +398,7 @@ add_library(gnss_core STATIC
     src/core/network/assembly/ParamInventory.cpp
     src/core/network/assembly/Contributions.cpp
     src/core/network/diag/AmbStateTrace.cpp
+    src/core/network/diag/WindupArcs.cpp
     src/core/network/ar/AmbFloat.cpp
     src/core/network/assembly/BiasAdmission.cpp
     src/core/filter/NeqAccumulator.cpp
@@ -701,7 +708,13 @@ add_executable(gnss_tests
     tests/test_amb_level_band_scope.cpp
     tests/test_innovation_screen.cpp
     tests/test_innovation_screen_engine.cpp
+    tests/test_unrecorded_sat_gate.cpp
     tests/test_disc_mark_scope.cpp
+    tests/test_phase_visible_step_test.cpp
+    tests/test_phase_step_class_test.cpp
+    tests/test_unsettled_steps.cpp
+    tests/test_continuity_guard.cpp
+    tests/test_exact_epoch_time.cpp
     tests/test_consumer_sat_trace.cpp
     tests/test_ar_observe_search.cpp
     tests/test_ar_observe_trace.cpp
@@ -814,6 +827,7 @@ add_executable(gnss_tests
     tests/network/test_carry_zwd_in_block.cpp
     tests/network/test_zwd_time_link_float_vehicle.cpp
     tests/network/test_zwd_couple_edge.cpp
+    tests/network/test_bad_epoch_response.cpp
     tests/network/test_carry_iono_in_block.cpp
     tests/network/test_carry_rx_clock_in_block.cpp
     tests/test_resume_frame_restore.cpp
@@ -858,6 +872,12 @@ add_executable(gnss_tests
     tests/network/test_canonical_pair_admission.cpp
     tests/network/test_second_band_admission.cpp
     tests/network/test_oracle_pin.cpp
+    tests/network/test_oracle_pin_frame.cpp
+    tests/network/test_chain_arc_families.cpp
+    tests/network/test_ring_fix.cpp
+    tests/network/test_ring_fix_cascade.cpp
+    tests/network/test_ring_fix_reattach.cpp
+    tests/network/test_chain_forest_lead.cpp
     tests/test_warm_resume_require.cpp
     tests/test_anchor_slip_handover.cpp
     tests/network/test_phase_gate_drop_edge.cpp
@@ -884,7 +904,9 @@ add_executable(gnss_tests
     tests/test_canonical_signal_code_follow.cpp
     tests/network/test_mw_detect_pair_scope.cpp
     tests/test_mw_detector_steps.cpp
+    tests/test_mw_lli_slip_mask.cpp
     tests/network/test_extra_band_code_sigma.cpp
+    tests/network/test_extra_band_phase_sigma.cpp
     tests/network/test_network_second_code_scope.cpp
     tests/network/test_second_code_system_aware.cpp
     tests/network/test_second_phase_channel.cpp

@@ -111,4 +111,21 @@ and [record/refound/CARDS_part2.md](../record/refound/CARDS_part2.md).
   `network.parallel_carry_harvest`, `parallel_iono_traces` and `parallel_coupling_prepare` (each IDENTICAL to off, off IDENTICAL to main), PASS A rejected on its timing, one OpenMP team size in every region. Loop -28.9 % (field), -25.7 % (sim) against main; all six stages -48.7 % against none at 305 stations over 2 h.
   2026-11-07: a fourth key, `network.sbasis_values_first` (the S-basis completion on eigenvalues first, the rank gate reading
   them), identical; main against all four keys -41.5 % (field), -34.8 % (sim).
+- [IRDU](IRDU_user_integers_on_the_chain_2026-11-14.md): open, 2026-11-14: the user's integers on the chain's stream,
+  measured on the simulator. Pre-registered: five simulated users replay the stream with the fixing control's resolver,
+  graded against truth datum-free (fixed minus truth equal between users and constant in time except at a declared
+  discontinuity). Stage A the controls, stage B the chain on or off by the emission holds on or off on r3c, stage C one
+  event per bed ranked by its cost to the user, stage D the network's certified integers at re-hosts and a default-off
+  research switch that takes them.
+- [NRF](NRF_network_ring_fixing_2026-11-14.md): open, 2026-11-14: integer fixing in the network, ring by ring from
+  the chain's root, on the simulator (the author's instruction of 2026-11-14 lifts the do-not-build verdict for this
+  work). Pre-registered: chord integers decided by the gated rounding of card IRDU 12.4 (b) behind a damage gate, held
+  in the solve by the oracle pin's row, released at every event with the variance re-opened, audited against truth;
+  stages N1 (bed without re-seats), N2 (r3c and event beds), N3 (6 h bed); serves IRD-5, IRD-8 and card ARL's rungs.
 - [DRF](DRF_docs_record_folder_2026-11-09.md): open, 2026-11-09: the docs working set and one record folder: `scripts/docs_record.py` moves closed cards and uncited documents into `docs/record/` (old layout mirrored, links re-pointed, nothing rewritten); 145 of 602 files stay; rehearsed on branch `docs/record-folder`, every docs check passes; landing and the rule text wait for the author.
+- [BER](BER_bad_epoch_response_2026-11-15.md): open, 2026-11-15: the network's response to a bad epoch, on the
+  author's order (the network detects a bad epoch but does not know how to respond). Stage E1: one flagged L1 slip of
+  288 cycles on the simulator, then the same event observed at MRO100AUS on DOY 144; bars on wet delays, emitted values,
+  emission, fixing and default identity frozen by the requesting session before the runs. Built default off:
+  `network.amb_float_drop_jump_k` (the drop of a slipped arc covers the band's measured step) and
+  `network.zwd_event_inflate_m` (left off).

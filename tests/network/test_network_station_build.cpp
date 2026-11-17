@@ -99,8 +99,8 @@ TEST(NetworkStationBuildTable, TopLevelStepsInWalkOrder) {
 TEST(NetworkStationBuildTable, CarryStepsInWalkOrder) {
     const std::vector<std::string> want = {
         "ambiguity", "slant_iono_block", "rx_clock_block", "rx_cb_block", "rx_pb_block",
-        "phase_colour_block", "local_block", "oracle_pin", "zwd", "rx_cb", "coupling_region",
-        "prior_finalize"};
+        "phase_colour_block", "local_block", "oracle_pin", "ring_hold", "zwd", "rx_cb",
+        "coupling_region", "prior_finalize"};
     EXPECT_EQ(carryNames(), want);
 }
 

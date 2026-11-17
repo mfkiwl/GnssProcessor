@@ -32,6 +32,7 @@
 #include "network/qc/RhsAttrib.hpp"
 #include "network/assembly/SecondPhaseScope.hpp"
 #include "network/diag/StationBlock.hpp"
+#include "network/diag/WindupArcs.hpp"
 
 namespace GnssProcessor {
 
@@ -92,6 +93,8 @@ const std::array<NetworkEpochObserverRow, kNetworkEpochObserverCount> kNetworkEp
      "network/solve/ChainFrame.cpp", Slot::StashTail, &networkChainFrameObserve},
     {"networkEntitiesReachSample", "the entity tables' reach sampler",
      "network/state/Entities.cpp", Slot::StashTail, &net::networkEntitiesReachSample},
+    {"networkWindupArcsTrace", "the stations' wind-up accumulators per arc",
+     "network/diag/WindupArcs.cpp", Slot::StashTail, &networkWindupArcsTrace},
 }};
 
 void networkObserveEpoch(NetworkRun& run, const NetworkEpoch& ep, NetworkObserverSlot slot, EpochEvents& events) {

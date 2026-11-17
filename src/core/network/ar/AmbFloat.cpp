@@ -132,6 +132,24 @@ AmbDropOutcome ambFloatDropFloored(LocalCarry& lc, double birth_floor_m2,
     return out;
 }
 
+bool ambDropLatchDeclared(unsigned cause_bits) {
+    constexpr unsigned kDeclared = RelevelEpochState::kCauseMw | RelevelEpochState::kCauseLli
+                                 | RelevelEpochState::kCauseIfTd | RelevelEpochState::kCauseGfJump
+                                 | RelevelEpochState::kCauseGap;
+    return (cause_bits & kDeclared) != 0u;
+}
+
+double ambDropCoverVar(const BandBreak& b, double jump_k, NetworkAmbGapCover gap_cover) {
+    if (b.kind == BandBreakKind::Adjacent)
+        return jump_k > 0.0 ? (jump_k * b.step_m) * (jump_k * b.step_m) : 0.0;
+    switch (gap_cover) {
+        case NetworkAmbGapCover::Step: return jump_k > 0.0 ? (jump_k * b.step_m) * (jump_k * b.step_m) : 0.0;
+        case NetworkAmbGapCover::Free: return b.declared_shift ? kAmbGapFreeVarM2 : 0.0;
+        case NetworkAmbGapCover::Off:  break;
+    }
+    return 0.0;
+}
+
 void networkAmbFloatApplyDrops(
     NetworkRunContext& ctx, const GnssConfig& config_,
     const std::shared_ptr<spdlog::logger>& log,
@@ -181,10 +199,10 @@ void networkAmbFloatApplyDrops(
     bool last_decoupled_idem = false;
     // One lambda, so the two populations below cannot take the drop at different
     // floors. Both floors are mapped at this line of sight's elevation.
-    const auto dropAt = [&](LocalCarry& lc, int sta, const std::string& sat) {
+    const auto dropAt = [&](LocalCarry& lc, int sta, const std::string& sat, double cover_m2 = 0.0) {
         const double e = elevOf(sta, sat);
         const AmbDropOutcome o = ambFloatDropFloored(
-            lc, ambFloatBirthFloor(floor_base, e, elev_power),
+            lc, std::max(ambFloatBirthFloor(floor_base, e, elev_power), cover_m2),
             ambFloatBirthFloor(drop_base,  e, elev_power), pl_now_s, now_ep,
             ctx.knobs.amb_drop_decouple_always);
         if (o.decoupled_idem) ++counters.n_amb_drop_decoupled_idem;
@@ -218,7 +236,38 @@ void networkAmbFloatApplyDrops(
             net::putAmbFlagEp(entities, sta, amb_key) = now_ep;
         const auto it = net::get(ctx.entities.arcs, *arc, &net::ArcState::amb);
         if (it == nullptr) continue;      // nothing carried, nothing to drop
-        const bool acted = dropAt((*it), sta, net::satKey(arc->sat));
+        // The restored variance covers the band's measured break (a step between adjacent epochs, or a return
+        // after a gap), so a band that moved by metres is freed instead of keeping a prior at its old level
+        // that the solve would spread into the line of sight's ionosphere, its other band and the receiver's
+        // states.
+        const auto bt = relevel.band_break.find({sta, amb_key});
+        const BandBreak* brk = bt == relevel.band_break.end() ? nullptr : &bt->second;
+        const double cover_m2 =
+            brk ? ambDropCoverVar(*brk, ctx.knobs.amb_drop_jump_k, ctx.knobs.amb_drop_gap_cover) : 0.0;
+        const bool gap_break = brk && brk->kind == BandBreakKind::Gap;
+        if (gap_break) ++counters.n_amb_drop_gap_breaks;
+        // A declared break (a slip detector or the gap re-entry response, never a RAIM refloat alone) is a new
+        // unknown: network.amb_float_drop_declared_var_m2 floors its drop whatever the measured size.
+        const auto cz = relevel.free_cause.find({sta, amb_key});
+        const unsigned cbits = (cz == relevel.free_cause.end()) ? 0u : cz->second;
+        double declared_m2 = 0.0;
+        if (ctx.knobs.amb_drop_declared_var > 0.0 && ambDropLatchDeclared(cbits)) {
+            ++counters.n_amb_drop_declared;
+            declared_m2 = ambFloatBirthFloor(ctx.knobs.amb_drop_declared_var, elevOf(sta, net::satKey(arc->sat)),
+                                             elev_power);
+        }
+        const bool acted = dropAt((*it), sta, net::satKey(arc->sat), std::max(cover_m2, declared_m2));
+        if (acted && declared_m2 > cover_m2 && std::abs((*it).var - declared_m2) <= 1e-9 * declared_m2)
+            ++counters.n_amb_drop_declared_floor;
+        if (acted && cover_m2 > 0.0 && cover_m2 >= declared_m2 && std::abs((*it).var - cover_m2) <= 1e-9 * cover_m2) {
+            if (gap_break) {
+                ++counters.n_amb_drop_gap_cover;
+                counters.max_amb_drop_gap_cover_m = std::max(counters.max_amb_drop_gap_cover_m, std::sqrt(cover_m2));
+            } else {
+                ++counters.n_amb_drop_jump_cover;
+                counters.max_amb_drop_jump_cover_m = std::max(counters.max_amb_drop_jump_cover_m, std::sqrt(cover_m2));
+            }
+        }
         if (acted) ++n_free;
         else       ++n_idem;
         // Tally a drop that changed the carried prior (the variance moved, or the
@@ -226,8 +275,6 @@ void networkAmbFloatApplyDrops(
         // (kReentryBits). The two rows sum to n_free plus this loop's idempotent
         // decouples.
         if (acted || last_decoupled_idem) {
-            const auto cz = relevel.free_cause.find({sta, amb_key});
-            const unsigned cbits = (cz == relevel.free_cause.end()) ? 0u : cz->second;
             const bool reentry = cbits != 0u && (cbits & ~kReentryBits) == 0u;
             prmRespond(counters.prm_resp, reentry ? ResponseSite::AmbDropLatchReentry
                                                   : ResponseSite::AmbDropLatchSlip);
@@ -501,6 +548,23 @@ int networkAmbVehicleRunEnd(const NetworkRunEndView& v) {
                  C.n_amb_birth_floored, C.n_cr_gap_prune,
                  C.n_relevel_free_skips, C.n_cr_inject_stale);
     }
+    if (ctx.knobs.amb_drop_jump_k > 0.0)
+        log->info("Network (drop covering the step, network.amb_float_drop_jump_k {:.2f}): {} slip-latched drop(s) "
+                  "took their variance from the band's phase-minus-code step (largest sigma {:.2f} m).",
+                  ctx.knobs.amb_drop_jump_k, ctx.counters.n_amb_drop_jump_cover,
+                  ctx.counters.max_amb_drop_jump_cover_m);
+    if (ctx.knobs.amb_drop_declared_var > 0.0)
+        log->info("Network (drop floor on declared breaks, network.amb_float_drop_declared_var_m2 {:.1f}): {} latched "
+                  "drop(s) declared by a slip detector or a gap return; {} took their variance from the floor.",
+                  ctx.knobs.amb_drop_declared_var, ctx.counters.n_amb_drop_declared,
+                  ctx.counters.n_amb_drop_declared_floor);
+    if (ctx.knobs.amb_drop_gap_cover != NetworkAmbGapCover::Off)
+        log->info("Network (drop covering a return after a gap, network.amb_float_drop_gap_cover {}): {} latched "
+                  "drop(s) at a return with a measured break; {} took their variance from the cover (largest "
+                  "sigma {:.2f} m).",
+                  ctx.knobs.amb_drop_gap_cover == NetworkAmbGapCover::Step ? "step" : "free",
+                  ctx.counters.n_amb_drop_gap_breaks, ctx.counters.n_amb_drop_gap_cover,
+                  ctx.counters.max_amb_drop_gap_cover_m);
     // Drops that found the arc at birth strength and still decoupled it.
     if (ctx.knobs.amb_drop_decouple_always)
         log->info("Network (drop decouple): {} drop(s) found the arc already at "

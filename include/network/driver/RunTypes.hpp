@@ -18,6 +18,7 @@
 #include "network/state/StationParams.hpp"      // StationParams (NetStation::params)
 #include "network/assembly/StationRows.hpp"      // StationRowInputs, StationRowContext (NetStation::rows)
 #include "network/qc/WithinEpochCulprits.hpp" // WithinEpochCulprits (EpochWorkspace::we_culprits)
+#include "network/slip/BandBreak.hpp"        // BandBreak (RelevelEpochState::band_break)
 #include "model/PppModel.hpp"
 #include "common/PppState.hpp"
 #include "slip/MwSlipDetector.hpp"
@@ -246,6 +247,9 @@ struct NetStation {
     ///.  Those rows keep their unscaled weight; a nonzero count means the
     /// knob is partly inert, and the run-end line says so (standing invariant #4).
     long long eb_rows_no_pin{ 0 };
+    /// Phase rows of an extra-band signal this station folded at the scaled sigma over the run
+    /// (`network.extra_band_phase_sigma_scale`), kept like @c eb_rows_deweighted.
+    long long eb_phase_rows_deweighted{ 0 };
     /// The receiver IFB columns network.estimate_rx_extra_band_code_delay estimates at
     /// this station: the counts and edge state of
     /// network/assembly/ParamInventory.hpp, written by the station's own split and inject
@@ -1002,10 +1006,15 @@ struct RelevelEpochState {
     /// Arcs whose carry was delta-bridged this epoch (station, sat, signal), for the
     /// harvest-side statistics guard (excluded from LS-VCE, relabelled in prires).
     std::set<std::tuple<int, std::string, std::string>> bridged;
+    /// The measured break of each band this epoch, by (station idx, amb key) like @ref free_ambs: the size the
+    /// detector measured, read by the float vehicle's drop of a latched arc (network/ar/AmbFloat.hpp).  Filled
+    /// in PASS A: steps between adjacent epochs under network.amb_float_drop_jump_k, returns after a gap
+    /// under network.amb_float_drop_gap_cover.
+    std::map<std::pair<int, std::string>, BandBreak> band_break;
 
     /// @brief Empties every set and map (called at the next epoch's PASS-A entry).
     void clear() {
-        free_ambs.clear(); free_cause.clear(); mw_cands.clear(); bridged.clear();
+        free_ambs.clear(); free_cause.clear(); mw_cands.clear(); bridged.clear(); band_break.clear();
     }
 };
 
@@ -1416,6 +1425,13 @@ struct StationAssembly {
     long long                 opin_rows{0};           ///< …folded as a diagonal pin prior row.
     long long                 opin_gauge_skipped{0};  ///< …skipped: the arc is gauge-pinned (an anchor), whose 1e10 datum pin owns the family's frame.
     long long                 opin_no_column{0};      ///< …skipped: the column is not in this epoch's A_r (or its x_lin / the row is non-finite).
+    /// The ring fix's hold rows at this station (network/ar/RingFix.hpp; 0 on every run
+    /// without network.ring_fix.enable).  Closure: `rfix_offered == rfix_rows +
+    /// rfix_gauge_skipped + rfix_no_column`.
+    long long                 rfix_offered{0};        ///< Ambiguity columns of this station found in the hold table.
+    long long                 rfix_rows{0};           ///< …folded as a diagonal hold row.
+    long long                 rfix_gauge_skipped{0};  ///< …skipped: the arc is a tree edge of the chain, whose 1e10 pin is the frame.
+    long long                 rfix_no_column{0};      ///< …skipped: the column is not in this epoch's A_r (or its x_lin / the row is non-finite).
     /// Per folded (sat, signal) ambiguity column of this station-epoch, the variance
     /// the fold used and the route it took (RF-1 §7.4, @c network.trace_amb_state).
     /// Filled only when the trace is armed; otherwise the map is never touched, and an

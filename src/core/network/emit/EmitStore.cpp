@@ -22,6 +22,7 @@
 #include "network/emit/LedgerEmit.hpp"
 #include "network/emit/PbHold.hpp"
 #include "network/emit/PhaseFrameHold.hpp"
+#include "network/solve/ChainFrame.hpp"   // chainDeclaredKeys: the release increments
 #include "network/emit/BrdcWire.hpp"      // native broadcast clock wire stamp
 #include "filter/StateKeySchema.hpp"
 #include "math/Coordinates.hpp"
@@ -433,7 +434,14 @@ void networkEmitStore(NetworkRun& run, const NetworkEpoch& ep, NetworkSolutionEp
             ctx.counters.le.decl_rows = rows;
         }
     }
+    // The step declaration's release increments (network.disc_step_class_pairs): every satellite signal the
+    // chain released at this epoch is declared on the phase channel, in addition to the class rule.
+    if (emitter.stepClassArmed() && chain_obs != nullptr && chain_obs->armed)
+        emitter.markReleasedSignals(chainDeclaredKeys(*chain_obs));
     emitter.emitToStore(sol, network_store);
+    // The continuity guard (network.ring_fix.continuity_guard_cyc) lowered flags in the store's records; the file
+    // below is written from `sol` (written), so the same flags are lowered there.  Off, nothing changes.
+    if (emitter.continuityGuardArmed()) emitter.applyContinuityGuardFlags(sol);
     // The declaration reaches the in-process consumer here, immediately after this
     // epoch's records and before the closed-loop consumer reads them below, which is
     // the position the file replay gives it.
@@ -1115,13 +1123,121 @@ static int networkProductContractRunEnd(const NetworkRunEndView& v) {
     return 0;
 }
 
+/**
+ * @brief Run-end section of the phase-visible step test (@c network.disc_phase_visible):
+ *        its groups, medians and declarations, the legacy test's verdicts on the same keys,
+ *        and both edges (first records, returns, forced marks, keys without a clock, the
+ *        vote set and the below-minimum state).
+ *
+ * Gate: the emitter armed with the test (a positive minimum voter count).  A replay of the
+ * product file from its first epoch prints the same counts (ApplicationConsumerReplay.cpp).
+ *
+ * @param v The run at its end (network/runend/RunEnd.hpp).
+ * @return 0 (this report does not set the exit code).
+ */
+static int networkPhaseVisibleStepRunEnd(const NetworkRunEndView& v) {
+    if (!v.setup.emitter || v.setup.emitter->discPhaseVisibleMinSats() <= 0) return 0;
+    const NetworkProductEmitter& em = *v.setup.emitter;
+    const PhaseVisibleCounters& c = em.phaseVisibleCounters();
+    const NetworkProductEmitter::PhaseVisibleEdges& e = em.phaseVisibleEdges();
+    v.log->info("Network (phase-visible step test, discpv={}): group-epochs {} ({} against the "
+                "median, {} below the minimum count); keys tested {}, declared {} ({} in groups "
+                "below the minimum).  The legacy test on the phase bias alone would have declared "
+                "{} of the tested keys; {} declared here it would not have declared.  Group-epochs "
+                "whose median moved by more than the bar (a step a user that does not difference "
+                "would need) {}, largest |median| {:.4f} m.",
+                em.discPhaseVisibleMinSats(), c.groups, c.groups_median, c.groups_below_min,
+                c.keys_tested, c.keys_stepped, c.keys_stepped_below_min, e.legacy_would_step,
+                e.stepped_not_legacy, c.shared_over_bar, c.max_abs_median_m);
+    v.log->info("Network (phase-visible step test, edges): first records {}; returns tested "
+                "against an older baseline {}; returns past the staleness horizon {}; keys under "
+                "a forced mark {}; keys without a clock (the legacy test) {}; vote-set entries {} "
+                "and exits {}; groups entering the below-minimum state {} and leaving it {}.",
+                e.first_records, e.returns_fresh, e.returns_stale, e.forced, e.no_clock,
+                e.vote_entries, e.vote_exits, e.below_min_entries, e.below_min_exits);
+    return 0;
+}
+
+/**
+ * @brief Run-end report of the step-class declaration (network.disc_step_class_pairs): the
+ *        classified satellite-family-epochs by class, the signals declared, and how its
+ *        verdicts differ from the value test's on the same keys.
+ *
+ * Gate: the emitter armed with at least one family.
+ *
+ * @param v The run at its end (network/runend/RunEnd.hpp).
+ * @return 0 (this report does not set the exit code).
+ */
+static int networkStepClassRunEnd(const NetworkRunEndView& v) {
+    if (!v.setup.emitter || !v.setup.emitter->stepClassArmed()) return 0;
+    const NetworkProductEmitter& em = *v.setup.emitter;
+    const StepClassCounters& c = em.stepClassCounters();
+    v.log->info("Network (step-class declaration, tolerance {:.3f} cycle): family-epochs {} ({} below "
+                "the minimum count, not classified); satellite-family-epochs classified {}: quiet {}, "
+                "whole {}, ionosphere-like {}, fraction {}; signals declared {}; phase increments "
+                "raised by the class {}.  On the classified keys the value test alone would have "
+                "declared {} the class did not, and the class declared {} the value test would not.  "
+                "Release increments: {} declared key(s) of the chain, {} landed on an emitted key ({} "
+                "raised by the release alone), {} on a first sighting, {} pending at the end.",
+                em.stepClassTolCyc(), c.families, c.families_below_min, c.sats_tested, c.quiet, c.whole,
+                c.iono_like, c.fraction, c.signals_declared, em.stepClassKeysStepped(),
+                em.stepClassValueOnly(), em.stepClassClassOnly(), em.stepClassReleaseMarks(),
+                em.stepClassReleaseLanded(), em.stepClassReleaseOnly(), em.stepClassReleaseNoBaseline(),
+                em.stepClassReleasePending());
+    return 0;
+}
+
+/**
+ * @brief Run-end report of the unsettled steps (network.ring_fix.unsettled_steps): the phase-key steps raised per
+ *        held family, while unsettled and at the settling.
+ *
+ * Gate: the emitter armed with at least one family.
+ *
+ * @param v The run at its end (network/runend/RunEnd.hpp).
+ * @return 0 (this report does not set the exit code).
+ */
+static int networkUnsettledStepsRunEnd(const NetworkRunEndView& v) {
+    if (!v.setup.emitter || !v.setup.emitter->unsettledStepsArmed()) return 0;
+    std::string line;
+    for (const auto& [fam, n] : v.setup.emitter->unsettledStepCounts())
+        line += fmt::format("{}{} {} while unsettled and {} at the settling", line.empty() ? "" : "; ", fam, n.first,
+                            n.second);
+    v.log->info("Network (ring fix, unsettled steps): phase-key steps raised: {}.", line.empty() ? "none" : line);
+    return 0;
+}
+
+/**
+ * @brief Run-end report: the continuity guard (network.ring_fix.continuity_guard_cyc), its trips per family and the
+ *        phase-key emissions whose flag it lowered.
+ *
+ * Gate: the emitter's guard armed.
+ *
+ * @param v The run at its end (network/runend/RunEnd.hpp).
+ * @return 0 (this report does not set the exit code).
+ */
+static int networkContinuityGuardRunEnd(const NetworkRunEndView& v) {
+    if (!v.setup.emitter || !v.setup.emitter->continuityGuardArmed()) return 0;
+    std::string line;
+    for (const auto& [fam, n] : v.setup.emitter->continuityGuardTrips())
+        line += fmt::format("{}{} {}", line.empty() ? "" : ", ", fam, n);
+    v.log->info("Network (ring fix, continuity guard): trips {}; {} phase-key emission(s) with the flag lowered.",
+                line.empty() ? "none" : line, v.setup.emitter->continuityGuardLoweredKeys());
+    if (line.empty())
+        v.log->info("Network (ring fix, continuity guard): no flagged level moved past the threshold on this run.");
+    return 0;
+}
+
 // Run-end report of this subsystem: its sections in print order (
 // declared in network/emit/EmitStore.hpp).
 int networkEmitStoreRunEnd(const NetworkRunEndView& v) {
     return networkRunEndSections(v, {
         networkEmitOutcomeRunEnd,
         networkDeferredHeartbeatsRunEnd,
-        networkProductContractRunEnd
+        networkProductContractRunEnd,
+        networkPhaseVisibleStepRunEnd,
+        networkStepClassRunEnd,
+        networkUnsettledStepsRunEnd,
+        networkContinuityGuardRunEnd
     });
 }
 

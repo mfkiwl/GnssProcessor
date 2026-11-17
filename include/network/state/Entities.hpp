@@ -394,6 +394,10 @@ struct SatelliteState {
     /// only under emit_clock_disc; not snapshotted (a warm resume has no prior for its
     /// first emit).  Was @c NetworkCarryState::last_if_pin_sel.  ColdStart.
     std::optional<std::pair<std::string, std::string>> last_if_pin_sel;
+    /// Continuous GPS seconds of the satellite's last declared code-reference move or landed code-datum re-seed,
+    /// written at the emit site under network.ring_fix.code_event_window_s and read by the ring fix's window.
+    /// ColdStart.
+    std::optional<double> code_ref_event_s;
     /// The pin pair hold of the last kept epoch, the baseline the begin and the
     /// end of a hold are declared against, advanced only on kept epochs.  Telemetry only,
     /// not snapshotted.  Was @c NetworkCarryState::last_if_pin_holds.  ColdStart.

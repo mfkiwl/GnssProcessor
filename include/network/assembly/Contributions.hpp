@@ -185,6 +185,16 @@ namespace GnssProcessor {
     const std::array<ContributionSpec, kContributionKinds>& contributionSpecs();
 
     /**
+     * @brief Whether a kind's row in the "contributions as armed" table and its manifest record is
+     *        printed only on a run that folded it (a kind declared after the table's layout was
+     *        fixed, so that a run that never arms it prints both as before).
+     * @param k A family of the declaration table.
+     * @return True for such a kind (the ring fix's hold row); false for every other kind, whose row
+     *         is always printed.
+     */
+    bool printedOnlyWhenFolded(ContributionKind k);
+
+    /**
      * @brief The declaration of a kind.
      * @param k The kind (@c Unset, or a value out of range, returns the first entry).
      * @return Its table entry (static storage).

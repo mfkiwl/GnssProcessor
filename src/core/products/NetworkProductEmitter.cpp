@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <istream>
+#include <stdexcept>
 #include <ostream>
 #include <vector>
 
@@ -65,14 +66,113 @@ NetworkProductEmitter::NetworkProductEmitter(double disc_threshold_m, bool emit_
                                              bool code_bias_jump_test,
                                              bool clock_disc_on_set_change,
                                              double disc_threshold_frac_cycles,
-                                             bool disc_mark_scope_channel)
+                                             bool disc_mark_scope_channel,
+                                             int disc_phase_visible_min_sats)
     : disc_threshold_m_(disc_threshold_m),
       disc_threshold_frac_cycles_(disc_threshold_frac_cycles),
       disc_mark_scope_channel_(disc_mark_scope_channel),
       emit_clock_disc_(emit_clock_disc),
       staleness_horizon_s_(staleness_horizon_s),
       code_bias_jump_test_(code_bias_jump_test),
-      clock_disc_on_set_change_(clock_disc_on_set_change) {}
+      clock_disc_on_set_change_(clock_disc_on_set_change) {
+    // The phase-visible step test is armed by a positive minimum voter count; anything
+    // else is the legacy phase test (the member's default 0).
+    if (disc_phase_visible_min_sats > 0) disc_pv_min_sats_ = disc_phase_visible_min_sats;
+}
+
+void NetworkProductEmitter::setStepClassTest(const std::vector<std::string>& pairs, double tol_cyc) {
+    if (!(tol_cyc > 0.0 && tol_cyc < 0.5))
+        throw std::invalid_argument("step-class tolerance must be in (0, 0.5) cycle");
+    std::vector<StepClassFamily> fams;
+    for (const std::string& e : pairs) {
+        if (e.size() != 9 || e[1] != ':' || e[5] != '/' || e[2] != 'L' || e[6] != 'L' || e[3] == e[7])
+            throw std::invalid_argument("step-class family '" + e + "' is not \"<c>:<signal>/<signal>\"");
+        StepClassFamily f;
+        f.constellation = e[0];
+        f.p1 = e.substr(2, 3);
+        f.p2 = e.substr(6, 3);
+        f.c1 = "C" + f.p1.substr(1);
+        f.c2 = "C" + f.p2.substr(1);
+        const System sys = systemFromLetter(f.constellation);
+        f.f1_hz = nominalCarrierFrequencyOfDigitHz(sys, f.p1[1]);
+        f.f2_hz = nominalCarrierFrequencyOfDigitHz(sys, f.p2[1]);
+        if (!(f.f1_hz > 0.0 && f.f2_hz > 0.0) || f.f1_hz == f.f2_hz)
+            throw std::invalid_argument("step-class family '" + e + "' has no two distinct nominal frequencies");
+        fams.push_back(f);
+    }
+    sc_families_ = std::move(fams);
+    sc_tol_cyc_  = tol_cyc;
+    last_sc_.clear();
+    sc_have_prev_ = false;
+}
+
+void NetworkProductEmitter::setUnsettledSteps(const std::vector<std::string>& families) {
+    std::vector<UnsettledFamily> fams;
+    for (const std::string& e : families) {
+        if (e.size() != 9 || e[1] != ':' || e[5] != '/' || e[2] != 'L' || e[6] != 'L' || e[3] == e[7])
+            throw std::invalid_argument("unsettled-steps family '" + e + "' is not \"<c>:<signal>/<signal>\"");
+        fams.push_back(UnsettledFamily{ e[0], e.substr(2, 3), e.substr(6, 3), e });
+    }
+    us_families_ = std::move(fams);
+    us_prev_both_.clear();
+}
+
+bool NetworkProductEmitter::continuityGuardLowered_(const std::string& key) const {
+    if (!(cg_thr_cyc_ > 0.0)) return false;
+    const auto it = cg_hold_left_.find(key);
+    return it != cg_hold_left_.end() && it->second > 0;
+}
+
+void NetworkProductEmitter::continuityGuardRun_(const NetworkSatSolution& s, SsrPhaseBias& rec,
+                                                const std::map<std::string, double>& level,
+                                                const std::set<std::string>& stepped) {
+    for (const UnsettledFamily& f : us_families_) {
+        if (s.sat.empty() || letterOfSat(s.sat) != f.constellation) continue;
+        const auto e1 = rec.bias_per_signal.find(f.p1);
+        const auto e2 = rec.bias_per_signal.find(f.p2);
+        if (e1 == rec.bias_per_signal.end() || e2 == rec.bias_per_signal.end()) continue;
+        const std::string k1 = s.sat + "|" + f.p1, k2 = s.sat + "|" + f.p2;
+        GuardRun& run = cg_run_[f.name + "|" + s.sat];
+        const auto lv = level.find(f.name + "|" + s.sat);
+        // Both flags up as emitted (a held key was lowered in the phase records), a level, and no step of any rule:
+        // the run goes on; otherwise a flagged emission with a level starts a run and any other ends it.
+        const bool flagged = e1->second.signal_integer && e2->second.signal_integer;
+        if (!flagged || lv == level.end()) { run = GuardRun{}; continue; }
+        if (run.n == 0 || stepped.count(k1) != 0 || stepped.count(k2) != 0) { run = GuardRun{ lv->second, 1 }; continue; }
+        ++run.n;
+        if (run.n <= cg_min_run_ || std::abs(lv->second - run.ref) <= cg_thr_cyc_) continue;
+        // The trip: both flags lowered from this emission for the hold, both counters stepped now (the unsettled
+        // steps step them at the lowered emissions after this one, and once more when the flags rise).
+        ++cg_trips_[f.name];
+        for (auto* e : { &e1->second, &e2->second }) {
+            e->signal_integer = false;
+            e->discontinuity_counter = ++disc_counter_[s.sat + "|" + (e == &e1->second ? f.p1 : f.p2)];
+        }
+        cg_lowered_keys_ += 2;
+        cg_lowered_last_.insert(k1);
+        cg_lowered_last_.insert(k2);
+        cg_hold_left_[k1] = cg_hold_;
+        cg_hold_left_[k2] = cg_hold_;
+        run = GuardRun{};
+    }
+}
+
+void NetworkProductEmitter::applyContinuityGuardFlags(NetworkSolutionEpoch& sol) const {
+    if (cg_lowered_last_.empty()) return;
+    for (NetworkSatSolution& s : sol.sats)
+        for (auto& [signal, npb] : s.phase_bias)
+            if (cg_lowered_last_.count(s.sat + "|" + signal) != 0) npb.signal_integer = false;
+}
+
+void NetworkProductEmitter::setContinuityGuard(double thr_cyc, int hold, int min_run) {
+    if (us_families_.empty())
+        throw std::invalid_argument("the continuity guard needs the unsettled steps (setUnsettledSteps first)");
+    if (!(thr_cyc > 0.0) || hold < 1 || min_run < 1)
+        throw std::invalid_argument("the continuity guard needs a threshold > 0, a hold >= 1 and a minimum run >= 1");
+    cg_thr_cyc_ = thr_cyc;
+    cg_hold_    = hold;
+    cg_min_run_ = min_run;
+}
 
 const char* NetworkProductEmitter::discChannelName(DiscChannel c) {
     switch (c) {
@@ -99,6 +199,14 @@ double NetworkProductEmitter::discThresholdM(const std::string& sat,
 void NetworkProductEmitter::markDatumChange(const std::set<char>& constellations) {
     if (constellations.empty()) force_all_bump_ = true;   // global (pre-A2 semantics)
     else forced_bump_consts_.insert(constellations.begin(), constellations.end());
+}
+
+void NetworkProductEmitter::markReleasedSignals(const std::set<std::pair<std::string, std::string>>& keys) {
+    if (sc_families_.empty()) return;   // the release increments belong to the step declaration
+    for (const auto& [sat, signal] : keys) {
+        sc_release_pending_.insert(sat + "|" + signal);
+        ++sc_release_marks_;
+    }
 }
 
 void NetworkProductEmitter::markSatDiscontinuity(const std::set<std::string>& satellites,
@@ -354,6 +462,241 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
         return false;
     };
 
+    // --- Phase-visible step test pre-pass (network.disc_phase_visible) -----------
+    // The test needs every satellite of a (constellation, signal) before it can decide
+    // any of them (the median), so it runs over the whole epoch here, ahead of the
+    // per-satellite loop that stamps the counters, and the loop looks each key's
+    // verdict up.  Each key's change of its clock less phase bias is read against its
+    // baseline: its last emission with a clock (products/PhaseVisibleStepTest.hpp).
+    // Not tested, with the edge counted: a key without a clock now or at its previous
+    // emission (the legacy test applies to it below), a first record (seeded), a
+    // return past the staleness horizon (re-seeded, as the legacy test does) and a key
+    // under a forced mark (declared by the mark).  Off (0), nothing here runs and the
+    // legacy test below is unchanged.
+    std::map<std::string, PhaseVisibleVerdict> pv_verdict;   // "sat|signal" -> verdict
+    std::set<std::string> pv_voters;                          // keys voting this emission
+    std::set<std::string> pv_below_min;                       // "const|signal" groups below the minimum
+    if (disc_pv_min_sats_ > 0) {
+        std::vector<PhaseVisibleKey> pv_keys;
+        std::vector<std::string>     pv_names;
+        for (const auto& s : sol.sats) {
+            if (s.sat.empty() || s.phase_bias.empty()) continue;
+            const char cst = letterOfSat(s.sat);
+            // The read-only twin of constForced/satForced on the phase channel (no tally,
+            // no census): a key under a forced mark is declared by it and does not vote.
+            const bool forced = (pendingMarkChannels(s.sat) & kDiscChanPhaseBias) != 0u;
+            for (const auto& [signal, npb] : s.phase_bias) {
+                const std::string key = s.sat + "|" + signal;
+                if (!s.has_clock) { ++pv_edges_.no_clock; continue; }
+                PhaseVisibleKey k;
+                k.sat           = s.sat;
+                k.signal        = signal;
+                k.constellation = cst;
+                k.bar_m         = discThresholdM(s.sat, signal);
+                const auto base = last_pv_.find(key);
+                if (base == last_pv_.end()) {
+                    // No baseline: a first record, or the previous emission had no clock.
+                    if (last_phase_bias_.count(key) != 0) ++pv_edges_.no_clock;
+                    else                                  ++pv_edges_.first_records;
+                } else if (staleKey(phase_last_seen_s_, key)) {
+                    ++pv_edges_.returns_stale;
+                } else if (forced) {
+                    ++pv_edges_.forced;
+                } else {
+                    k.tested   = true;
+                    k.change_m = (s.clock_c0_m - npb.bias_m) - base->second.cmp_m;
+                    k.votes    = have_prev_emit_ && base->second.epoch_s == prev_emit_epoch_s_;
+                    if (!k.votes) ++pv_edges_.returns_fresh;
+                }
+                pv_keys.push_back(k);
+                pv_names.push_back(key);
+            }
+        }
+        const std::vector<PhaseVisibleVerdict> verdicts =
+            decidePhaseVisibleSteps(pv_keys, disc_pv_min_sats_, &pv_counters_);
+        for (std::size_t i = 0; i < pv_keys.size(); ++i) {
+            pv_verdict[pv_names[i]] = verdicts[i];
+            if (pv_keys[i].votes) pv_voters.insert(pv_names[i]);
+            if (verdicts[i].tested && !verdicts[i].median_basis)
+                pv_below_min.insert(std::string(1, pv_keys[i].constellation) + "|" + pv_keys[i].signal);
+        }
+        for (const auto& k : pv_voters)
+            if (pv_prev_voters_.count(k) == 0) ++pv_edges_.vote_entries;
+        for (const auto& k : pv_prev_voters_)
+            if (pv_voters.count(k) == 0) ++pv_edges_.vote_exits;
+        for (const auto& g : pv_below_min)
+            if (pv_prev_below_min_.count(g) == 0) ++pv_edges_.below_min_entries;
+        for (const auto& g : pv_prev_below_min_)
+            if (pv_below_min.count(g) == 0) ++pv_edges_.below_min_exits;
+    }
+
+    // --- Step-class test pre-pass (network.disc_step_class_pairs) -------------------------
+    // Each family's satellites are classified on the levels E_1, E_2 of
+    // products/PhaseStepClassTest.hpp against their previous emission, which must be the
+    // stream's previous emission and at most 45 s earlier.  A classified key is declared when
+    // its band stepped by a whole or fraction step and is not declared otherwise (the value
+    // test does not apply to it); an unclassified key keeps the value test.  Off (no family),
+    // nothing here runs.
+    std::map<std::string, bool> sc_verdict;   // "sat|signal" -> declared (classified keys only)
+    if (!sc_families_.empty()) {
+        const bool consecutive = sc_have_prev_ && epoch_s - sc_prev_epoch_s_ <= 45.0;
+        std::map<std::string, StepClassBaseline> next_base;
+        for (std::size_t fi = 0; fi < sc_families_.size(); ++fi) {
+            const StepClassFamily& fam = sc_families_[fi];
+            std::vector<StepClassSat> in;
+            for (const auto& s : sol.sats) {
+                if (s.sat.empty() || !s.has_clock || letterOfSat(s.sat) != fam.constellation) continue;
+                const auto p1 = s.phase_bias.find(fam.p1);
+                const auto p2 = s.phase_bias.find(fam.p2);
+                const auto b1 = s.code_bias_m.find(fam.c1);
+                const auto b2 = s.code_bias_m.find(fam.c2);
+                if (p1 == s.phase_bias.end() || p2 == s.phase_bias.end() || b1 == s.code_bias_m.end()
+                    || b2 == s.code_bias_m.end())
+                    continue;
+                double e1 = 0.0, e2 = 0.0;
+                stepClassLevels(s.clock_c0_m, p1->second.bias_m, p2->second.bias_m, b1->second, b2->second,
+                                fam.f1_hz, fam.f2_hz, e1, e2);
+                const std::string bkey = std::to_string(fi) + "|" + s.sat;
+                StepClassSat x;
+                x.sat = s.sat;
+                const auto base = last_sc_.find(bkey);
+                if (consecutive && base != last_sc_.end() && base->second.epoch_s == sc_prev_epoch_s_) {
+                    x.tested = true;
+                    x.d1_cyc = e1 - base->second.e1;
+                    x.d2_cyc = e2 - base->second.e2;
+                }
+                in.push_back(x);
+                next_base[bkey] = StepClassBaseline{ e1, e2, epoch_s };
+            }
+            const std::vector<StepClassVerdict> verdicts =
+                classifyStepClasses(in, fam.f1_hz, fam.f2_hz, sc_tol_cyc_, kStepClassMinSats, &sc_counters_);
+            for (std::size_t i = 0; i < in.size(); ++i) {
+                if (verdicts[i].cls == StepClass::Untested) continue;
+                bool& d1 = sc_verdict[in[i].sat + "|" + fam.p1];
+                bool& d2 = sc_verdict[in[i].sat + "|" + fam.p2];
+                d1 = d1 || verdicts[i].step1;
+                d2 = d2 || verdicts[i].step2;
+            }
+        }
+        last_sc_         = std::move(next_base);
+        sc_have_prev_    = true;
+        sc_prev_epoch_s_ = epoch_s;
+    }
+
+    // --- The continuity guard (network.ring_fix.continuity_guard_cyc), its pre-pass -------------------------------
+    // A key the guard lowered at an earlier emission is lowered at this one while its hold lasts; the unsettled steps
+    // below then see it as not flagged.  The pre-pass forms each family satellite's level (narrow-lane cycles, less
+    // the family's running datum) for the run test after the phase records.  Off (threshold 0), nothing here runs.
+    const bool cg_on = cg_thr_cyc_ > 0.0;
+    const auto cgLowered = [this](const std::string& key) { return continuityGuardLowered_(key); };
+    std::set<std::string> cg_stepped;                                // "sat|signal" keys stepped at this emission
+    std::map<std::string, double> cg_level;                          // "<family>|sat" -> level this emission
+    std::map<std::string, std::pair<double, double>> cg_e_now;       // "<family>|sat" -> (E_1, E_2)
+    cg_lowered_last_.clear();
+    if (cg_on) {
+        constexpr double kC = 299792458.0;
+        for (const UnsettledFamily& f : us_families_) {
+            const std::string c1 = "C" + f.p1.substr(1), c2 = "C" + f.p2.substr(1);
+            double l1 = 0.0, l2 = 0.0;
+            std::map<std::string, std::pair<double, double>> e_now;
+            for (const auto& s : sol.sats) {
+                if (s.sat.empty() || letterOfSat(s.sat) != f.constellation || !s.has_clock) continue;
+                const auto a  = s.phase_bias.find(f.p1);
+                const auto b  = s.phase_bias.find(f.p2);
+                const auto ca = s.code_bias_m.find(c1);
+                const auto cb = s.code_bias_m.find(c2);
+                if (a == s.phase_bias.end() || b == s.phase_bias.end() || ca == s.code_bias_m.end()
+                    || cb == s.code_bias_m.end())
+                    continue;
+                if (l1 <= 0.0) {
+                    l1 = nominalWavelengthM(classifySignalForSat(s.sat, f.p1).band);
+                    l2 = nominalWavelengthM(classifySignalForSat(s.sat, f.p2).band);
+                }
+                if (!(l1 > 0.0 && l2 > 0.0)) continue;
+                const double gam = (l2 / l1) * (l2 / l1);   // (f1 / f2)^2
+                const double x   = (ca->second - cb->second) / (gam - 1.0);
+                e_now[s.sat] = { (s.clock_c0_m - a->second.bias_m + x) / l1,
+                                 (s.clock_c0_m - b->second.bias_m + gam * x) / l2 };
+            }
+            if (e_now.empty()) continue;
+            // The family's datum: the running sum of the median epoch-to-epoch step over the satellites at both
+            // emissions (4 or more), as stream_seg_drift.py forms it from the stream.
+            std::vector<double> d1, d2;
+            for (const auto& [sat, e] : e_now) {
+                const auto p = cg_prev_e_.find(f.name + "|" + sat);
+                if (p == cg_prev_e_.end()) continue;
+                d1.push_back(e.first - p->second.first);
+                d2.push_back(e.second - p->second.second);
+            }
+            auto& dat = cg_datum_[f.name];
+            if (d1.size() >= 4) {
+                const auto median = [](std::vector<double> v) {
+                    const std::size_t m = v.size() / 2;
+                    std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(m), v.end());
+                    const double hi = v[m];
+                    if (v.size() % 2 == 1) return hi;
+                    return 0.5 * (hi + *std::max_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(m)));
+                };
+                dat.first  += median(d1);
+                dat.second += median(d2);
+            }
+            const double f1 = kC / l1, f2 = kC / l2;
+            for (const auto& [sat, e] : e_now) {
+                const std::string k = f.name + "|" + sat;
+                cg_level[k] = (f1 * (e.first - dat.first) - f2 * (e.second - dat.second)) / (f1 - f2);
+                cg_e_now[k] = e;
+            }
+        }
+    }
+
+    // --- The unsettled steps (network.ring_fix.unsettled_steps) -----------------------------------------------
+    // Per family and satellite, from the flags on this emission's P records: "sat|signal" -> (the family, whether
+    // the step is the settling one).  Off (no family), nothing here runs.
+    std::map<std::string, std::pair<const std::string*, bool>> us_step;
+    if (!us_families_.empty()) {
+        for (const auto& s : sol.sats) {
+            if (s.sat.empty()) continue;
+            for (const UnsettledFamily& f : us_families_) {
+                if (letterOfSat(s.sat) != f.constellation) continue;
+                const auto a = s.phase_bias.find(f.p1);
+                const auto b = s.phase_bias.find(f.p2);
+                if (a == s.phase_bias.end() && b == s.phase_bias.end()) continue;   // the family is not emitted
+                const bool both = a != s.phase_bias.end() && b != s.phase_bias.end() && a->second.signal_integer
+                                  && b->second.signal_integer && !cgLowered(s.sat + "|" + f.p1)
+                                  && !cgLowered(s.sat + "|" + f.p2);   // a key the continuity guard holds lowered
+                const std::string k = f.name + "|" + s.sat;
+                const auto prev = us_prev_both_.find(k);
+                // An unknown previous state (after a warm resume, which does not carry it) counts as not settled;
+                // at a first sighting the key has no baseline, so a cold start is unchanged.
+                const bool settling = both && (prev == us_prev_both_.end() || !prev->second);
+                if (!both || settling) {
+                    if (a != s.phase_bias.end()) us_step[s.sat + "|" + f.p1] = { &f.name, settling };
+                    if (b != s.phase_bias.end()) us_step[s.sat + "|" + f.p2] = { &f.name, settling };
+                }
+                us_prev_both_[k] = both;
+            }
+        }
+        // The signals of no held family (network.ring_fix.unsettled_steps_unheld): never settled, so they step at
+        // every emission, filled copies included.
+        if (us_unheld_) {
+            for (const auto& s : sol.sats) {
+                if (s.sat.empty()) continue;
+                const char c = letterOfSat(s.sat);
+                for (const auto& [sig, pb] : s.phase_bias) {
+                    (void)pb;
+                    bool held = false;
+                    for (const UnsettledFamily& f : us_families_)
+                        held = held || (f.constellation == c && (f.p1 == sig || f.p2 == sig));
+                    if (held) continue;
+                    auto it = us_unheld_names_.find(c);
+                    if (it == us_unheld_names_.end())
+                        it = us_unheld_names_.emplace(c, std::string(1, c) + ":no held family").first;
+                    us_step[s.sat + "|" + sig] = { &it->second, false };
+                }
+            }
+        }
+    }
+
     for (const auto& s : sol.sats) {
         SsrHeader header;
         header.epoch_time  = sol.epoch_time;
@@ -539,16 +882,72 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                         && std::abs(npb.bias_m - last_it->second) > bar)
                         ++clv_jump_excluded_;
                     value_jump = raw_over;
+                    // Under the phase-visible step test a tested key is declared on what a
+                    // user of between-satellite differences sees, in place of the phase
+                    // bias alone; the legacy verdict is kept for the counters only.  A key
+                    // the test did not take (no clock) keeps the legacy verdict above.
+                    if (disc_pv_min_sats_ > 0) {
+                        const auto pv = pv_verdict.find(key);
+                        if (pv != pv_verdict.end() && pv->second.tested) {
+                            if (raw_over) ++pv_edges_.legacy_would_step;
+                            if (pv->second.step && !raw_over) ++pv_edges_.stepped_not_legacy;
+                            value_jump = pv->second.step;
+                        }
+                    }
+                    // Under the step-class declaration a classified key is declared by its
+                    // class alone (a whole or fraction step of its band).
+                    if (!sc_verdict.empty()) {
+                        const auto sc = sc_verdict.find(key);
+                        if (sc != sc_verdict.end()) {
+                            if (value_jump && !sc->second) ++sc_value_only_;
+                            if (sc->second && !value_jump) ++sc_class_only_;
+                            value_jump = sc->second;
+                            if (sc->second && !forced) ++sc_keys_stepped_;
+                        }
+                    }
                 }
-                if (have_baseline && (forced || value_jump)) {
+                // The step declaration's release increment: the chain freed this key's level (a mark
+                // consumed by the first emission that carries the key).
+                const bool released = !sc_release_pending_.empty() && sc_release_pending_.erase(key) != 0;
+                if (released) {
+                    if (!have_baseline) ++sc_release_no_baseline_;
+                    else {
+                        ++sc_release_landed_;
+                        if (!forced && !value_jump) ++sc_release_only_;
+                    }
+                }
+                // The unsettled steps: a key of a held family whose two signals are not both flagged, or that
+                // settles at this emission.
+                const auto us = us_step.find(key);
+                const bool unsettled = us != us_step.end();
+                if (unsettled && have_baseline) {
+                    auto& n = us_counts_[*us->second.first];
+                    ++(us->second.second ? n.second : n.first);
+                }
+                if (have_baseline && (forced || value_jump || released || unsettled)) {
                     ++ctr;
+                    if (cg_on) cg_stepped.insert(key);   // a step of any rule ends the guard's run
                 }
                 last_phase_bias_[key] = npb.bias_m;
                 if (staleness_horizon_s_ > 0.0) phase_last_seen_s_[key] = epoch_s;
+                // The phase-visible baseline: the key's clock less phase bias at this
+                // emission, dropped when the satellite has no clock (the next emission
+                // then takes the legacy test).
+                if (disc_pv_min_sats_ > 0) {
+                    if (s.has_clock) last_pv_[key] = PvBaseline{ s.clock_c0_m - npb.bias_m, epoch_s };
+                    else             last_pv_.erase(key);
+                }
 
                 SsrPhaseBiasEntry entry;
                 entry.bias_m                = npb.bias_m;
                 entry.signal_integer        = npb.signal_integer;
+                if (cgLowered(key)) {   // the continuity guard holds this key's flag lowered
+                    if (entry.signal_integer) {
+                        ++cg_lowered_keys_;
+                        cg_lowered_last_.insert(key);
+                    }
+                    entry.signal_integer = false;
+                }
                 entry.wide_lane_integer     = npb.wide_lane_integer;
                 entry.discontinuity_counter = ctr;
                 entry.sigma_m               = npb.sigma_m;   // 0 unless emit_phase_bias_sigma populated it (gauge-exact); in-process store only, no wire record (B1b)
@@ -562,8 +961,15 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
                 entry.hold_generation       = npb.hold_generation;
                 rec.bias_per_signal[signal] = entry;
             }
+            if (cg_on) continuityGuardRun_(s, rec, cg_level, cg_stepped);
             store.pushPhaseBias(rec, header);
         }
+    }
+    // The continuity guard's hold counts emissions; the levels of this emission are the next one's baselines.
+    if (cg_on) {
+        for (auto it = cg_hold_left_.begin(); it != cg_hold_left_.end();)
+            it = (--it->second > 0) ? std::next(it) : cg_hold_left_.erase(it);
+        cg_prev_e_ = std::move(cg_e_now);   // replaced, not merged: a datum step compares consecutive emissions only
     }
 
     // Replace (never merge) the previous-epoch code-bias trackers with this epoch's:
@@ -623,6 +1029,15 @@ void NetworkProductEmitter::emitToStore(const NetworkSolutionEpoch& sol,
     // re-marks the same satellites.
     forced_bump_sats_.clear();
     forced_bump_chan_.clear();   // the mask map is kept in step with the set
+
+    // The phase-visible test's notion of "consecutive": this emission is the previous
+    // one for the next, and its voters and below-minimum groups are the edges' baseline.
+    if (disc_pv_min_sats_ > 0) {
+        have_prev_emit_    = true;
+        prev_emit_epoch_s_ = epoch_s;
+        pv_prev_voters_    = std::move(pv_voters);
+        pv_prev_below_min_ = std::move(pv_below_min);
+    }
 }
 
 void NetworkProductEmitter::serializeState(std::ostream& os) const {
@@ -634,7 +1049,17 @@ void NetworkProductEmitter::serializeState(std::ostream& os) const {
     // default-config snapshot is byte-identical to pre-channel builds and old
     // snapshots restore into emitters with the channels off; v2 appends the two
     // channel flags when either is armed.
-    if (disc_threshold_frac_cycles_ > 0.0) {
+    if (disc_pv_min_sats_ > 0) {
+        // v4 = the v3 fields plus the phase-visible step test's minimum voter count.
+        // Written only when the test is armed, so every other snapshot stays v1 to v3.
+        os << "EMITTER,v4," << fmt::format("{}", disc_threshold_m_) << ','
+           << (emit_clock_disc_ ? 1 : 0) << ','
+           << fmt::format("{}", staleness_horizon_s_) << ','
+           << (code_bias_jump_test_ ? 1 : 0) << ','
+           << (clock_disc_on_set_change_ ? 1 : 0) << ','
+           << fmt::format("{}", disc_threshold_frac_cycles_) << ','
+           << disc_pv_min_sats_ << '\n';
+    } else if (disc_threshold_frac_cycles_ > 0.0) {
         // v3 = the v2 fields plus the H3 per-λ fractional-cycle threshold.  Written
         // only when the fractional mode is armed, so a legacy (frac == 0) snapshot
         // stays v1 or v2 and is byte-identical to a pre-H3 build.
@@ -719,6 +1144,15 @@ void NetworkProductEmitter::serializeState(std::ostream& os) const {
         }
         os << '\n';
     }
+    // The phase-visible test's baselines and its previous emission (v4 only; the
+    // edge counters' previous voter and group sets are telemetry and restart empty).
+    if (disc_pv_min_sats_ > 0) {
+        for (const auto& [k, b] : last_pv_)
+            os << "epv," << k << ',' << fmt::format("{}", b.cmp_m) << ','
+               << fmt::format("{}", b.epoch_s) << '\n';
+        os << "epe," << (have_prev_emit_ ? 1 : 0) << ',' << fmt::format("{}", prev_emit_epoch_s_)
+           << '\n';
+    }
     os << "EEND\n";
 }
 
@@ -734,14 +1168,17 @@ bool NetworkProductEmitter::restoreState(std::istream& is) {
         const bool v1 = (h.size() == 5 && h[0] == "EMITTER" && h[1] == "v1");
         const bool v2 = (h.size() == 7 && h[0] == "EMITTER" && h[1] == "v2");
         const bool v3 = (h.size() == 8 && h[0] == "EMITTER" && h[1] == "v3");
-        if (!v1 && !v2 && !v3) return false;
+        const bool v4 = (h.size() == 9 && h[0] == "EMITTER" && h[1] == "v4");
+        if (!v1 && !v2 && !v3 && !v4) return false;
         double thr = 0.0, stale = 0.0, frac = 0.0;
-        int clk = 0, cbj = 0, cks = 0;
+        int clk = 0, cbj = 0, cks = 0, pvmin = 0;
         if (!parseStateD(h[2], thr) || !parseStateI(h[3], clk) || !parseStateD(h[4], stale))
             return false;
-        if ((v2 || v3) && (!parseStateI(h[5], cbj) || !parseStateI(h[6], cks)))
+        if ((v2 || v3 || v4) && (!parseStateI(h[5], cbj) || !parseStateI(h[6], cks)))
             return false;
-        if (v3 && !parseStateD(h[7], frac))
+        if ((v3 || v4) && !parseStateD(h[7], frac))
+            return false;
+        if (v4 && !parseStateI(h[8], pvmin))
             return false;
         // A parameter mismatch means the snapshotting producer ran a different
         // emitter config, and the stream state would be interpreted under the wrong
@@ -752,7 +1189,8 @@ bool NetworkProductEmitter::restoreState(std::istream& is) {
             || stale != staleness_horizon_s_
             || (cbj != 0) != code_bias_jump_test_
             || (cks != 0) != clock_disc_on_set_change_
-            || frac != disc_threshold_frac_cycles_)
+            || frac != disc_threshold_frac_cycles_
+            || pvmin != disc_pv_min_sats_)
             return false;
     }
 
@@ -767,6 +1205,9 @@ bool NetworkProductEmitter::restoreState(std::istream& is) {
     std::map<std::string, double> st_seen_p, st_seen_c, st_seen_k;
     bool           st_force_all = false;
     std::set<char> st_forced_consts;
+    std::map<std::string, PvBaseline> st_pv;   // phase-visible baselines (v4)
+    bool   st_have_prev = false;
+    double st_prev_epoch = 0.0;
     bool saw_end = false, saw_efa = false;
 
     while (std::getline(is, line)) {
@@ -839,6 +1280,16 @@ bool NetworkProductEmitter::restoreState(std::istream& is) {
                     return false;
                 st_forced_chan[f[1]] = static_cast<unsigned>(iv);
             }
+        } else if (tag == "epv") {
+            double ep = 0.0;
+            if (f.size() != 4 || !parseStateD(f[2], dv) || !parseStateD(f[3], ep)) return false;
+            st_pv[f[1]] = PvBaseline{ dv, ep };
+        } else if (tag == "epe") {
+            if (f.size() != 3 || !parseStateI(f[1], iv) || (iv != 0 && iv != 1)
+                || !parseStateD(f[2], dv))
+                return false;
+            st_have_prev  = (iv == 1);
+            st_prev_epoch = dv;
         } else {
             return false;   // unknown tag: fail loudly, never guess
         }
@@ -861,6 +1312,11 @@ bool NetworkProductEmitter::restoreState(std::istream& is) {
     forced_bump_consts_ = std::move(st_forced_consts);
     forced_bump_sats_   = std::move(st_forced_sats);
     forced_bump_chan_   = std::move(st_forced_chan);   // empty on a legacy snapshot
+    last_pv_            = std::move(st_pv);            // empty unless the test is armed (v4)
+    have_prev_emit_     = st_have_prev;
+    prev_emit_epoch_s_  = st_prev_epoch;
+    pv_prev_voters_.clear();
+    pv_prev_below_min_.clear();
     return true;
 }
 

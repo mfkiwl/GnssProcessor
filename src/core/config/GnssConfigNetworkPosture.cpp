@@ -278,6 +278,17 @@ namespace GnssProcessor {
         const double      spacing_s    = r.spacing_s;
         const bool        gps_only     = r.gps_only;
         const bool        gps_gal_only = r.gps_gal_only;
+        // GPS band 1 on L1C before L1W (C1C before C1W and L1C before L1W in the GPS priority list; an absent W entry
+        // counts as after).
+        const auto gpsBand1OnL1C = [this]() {
+            const auto it = signal_priorities_.find("GPS");
+            if (it == signal_priorities_.end()) return false;
+            const std::vector<std::string>& v = it->second;
+            const auto pos = [&v](const char* s) {
+                return static_cast<std::size_t>(std::find(v.begin(), v.end(), s) - v.begin());
+            };
+            return pos("C1C") < pos("C1W") && pos("L1C") < pos("L1W");
+        };
 
         const std::vector<Item> rows = {
             // --- SCOPED tier: the carry couplings ---------------------------------------
@@ -327,6 +338,93 @@ namespace GnssProcessor {
               "a drop clears the arc's border regression and block row even at birth strength "
               "(without it the field level jumps by metres at the first fold under the exact "
               "update); a companion of the exact update" },
+            // --- The bad-epoch response, in the chain posture with network integer fixing (adopted
+            //     2026-11-15; the main posture's goldens do not run the ring fix).
+            { nc.ring_fix.enable,
+              nc.amb_float_drop_jump_k == 1.0,
+              Tier::SCOPED, false, "network.amb_float_drop_jump_k",
+              "a slipped band's drop covers its measured phase-minus-code step: the drop kept the pre-slip "
+              "value at the first-stash sigma, a prior the solve spread into the other band, the slant "
+              "ionosphere and the receiver's states (DOY 144 MRO100AUS: wet-delay step +10.8 cm -> 0.02 cm, "
+              "anchors decoupled 13 -> 0)" },
+            { nc.ring_fix.enable,
+              nc.amb_float_drop_gap_cover == NetworkAmbGapCover::Free,
+              Tier::SCOPED, false, "network.amb_float_drop_gap_cover",
+              "free a band whose return after a gap the gap instrument declares shifted: the drop kept the "
+              "pre-gap value at the first-stash sigma (DOY 144: 9 / 11 returns more than 3 sigma off -> 0 / 0, "
+              "T4 refloats 15 -> 0, RAIM wet-delay erases 9 -> 0)" },
+            // --- A re-host onto a held link keeps its carries, and the odds gate at the formal sigma (adopted
+            //     2026-11-15).
+            { nc.ring_fix.enable,
+              nc.ring_fix.rehost_keep_carry,
+              Tier::SCOPED, false, "network.ring_fix.rehost_keep_carry",
+              "a chain re-host onto a held link whose carry sits on its integer keeps the moved side's carries "
+              "at a step of 0 instead of releasing them (DOY 145: E18's level no longer parts between two "
+              "reference receivers)" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.sigma_scale == 1.0,
+              Tier::SCOPED, false, "network.ring_fix.sigma_scale",
+              "the ring fix's odds gate at the formal sigma, with the bad-epoch response and remedy (a) "
+              "(DOY 144 and DOY 145: the same-start audits and DOY 145's two-start audit read zero)" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.max_decisions_per_epoch == 12,
+              Tier::SCOPED, false, "network.ring_fix.max_decisions_per_epoch",
+              "the ring fix decides up to 12 links per epoch in place of 3 (simulator: held link-epochs "
+              "+36 %, 0 wrong; DOY 144: the same-start audit reads zero)" },
+            // --- The stream declares its steps: the class rule and the release increments (adopted 2026-11-16).
+            { nc.ring_fix.enable,
+              !nc.disc_step_class_pairs.empty(),
+              Tier::SCOPED, false, "network.disc_step_class_pairs",
+              "the stream declares a whole or fraction step of a family's level and every signal the chain "
+              "releases (DOY 144: float users gain at 28 network and 11 independent receivers)" },
+            { nc.ring_fix.enable,
+              nc.disc_step_class_tol_cyc == 0.15,
+              Tier::SCOPED, false, "network.disc_step_class_tol_cyc",
+              "the step declaration's class tolerance, 0.15 cycle" },
+            // --- The flags and the steps of the stream, Galileo C/Q held, GPS on L1C (adopted 2026-11-16, the
+            //     package of card NRF section 70: user replays on DOY 144 and 145 at 46 receivers, none wrong).
+            { nc.ring_fix.enable,
+              nc.ring_fix.settled_flags,
+              Tier::SCOPED, false, "network.ring_fix.settled_flags",
+              "the stream flags the satellite signals tied to the network's integers" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.settled_rule == "largest",
+              Tier::SCOPED, false, "network.ring_fix.settled_rule",
+              "the flags follow the largest set tied by held links (rule L)" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.settled_wait_emissions == 10,
+              Tier::SCOPED, false, "network.ring_fix.settled_wait_emissions",
+              "a satellite's flag rises at its 11th consecutive emission in the set" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.unsettled_steps,
+              Tier::SCOPED, false, "network.ring_fix.unsettled_steps",
+              "an unsettled signal of a held family declares itself at every emission" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.unsettled_steps_unheld,
+              Tier::SCOPED, false, "network.ring_fix.unsettled_steps_unheld",
+              "a signal of no held family declares itself at every emission" },
+            { nc.ring_fix.enable,
+              nc.ring_fix.pairs == std::vector<std::string>{ "E:L1X/L5X", "E:L1C/L5Q", "G:L1C/L2W" },
+              Tier::SCOPED, false, "network.ring_fix.pairs",
+              "Galileo L1X/L5X and L1C/L5Q and GPS L1C/L2W held" },
+            { nc.ring_fix.enable,
+              gpsBand1OnL1C(),
+              Tier::SCOPED, false, "processing.signal_priorities.GPS",
+              "GPS band 1 on L1C before L1W, so that the GPS family spans every receiver; the users take the "
+              "same order" },
+            { nc.ring_fix.enable,
+              nc.zwd_event_inflate_m > 0.0,
+              Tier::SCOPED, false, "network.zwd_event_inflate_m",
+              "keep a receiver's wet delay with 2 cm of sigma added at a slip latch or a RAIM flag instead of "
+              "erasing it; the companion of the gap cover (KIT300UZB's step at a return 1.02 -> 0.88 cm)" },
+            // --- The exact epoch time (adopted 2026-11-16, card NRF sections 80 and 81).
+            { nc.ring_fix.enable,
+              exact_epoch_time_,
+              Tier::SCOPED, false, "processing.exact_epoch_time",
+              "calendar times convert to GPS time from the whole days and the seconds of the day: the 30 s "
+              "epochs lose their rounding of up to 20 microseconds and the 675 s step it left in the satellite "
+              "clocks and the station residuals (DOY 144 and 145: clock step ratio 2.1 -> 1.0, residual "
+              "statistic 16 % lower)" },
             { !network_carry_invariant_ && network_phase_leveling_,
               network_shared_carry_full_cov_,
               Tier::SCOPED, false, "network.shared_carry_full_cov",

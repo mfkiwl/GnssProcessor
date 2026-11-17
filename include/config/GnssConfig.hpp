@@ -771,6 +771,26 @@ namespace GnssProcessor {
         ///         phase-bias step; false (default) resets it instead.
         bool ssrPhaseBiasDiscCarry() const { return ssr_phase_bias_disc_carry_; }
 
+        /// @brief Leave out of the solution every satellite the stream holds no record for
+        ///        (@c processing.ssr_drop_unrecorded, or derived from
+        ///        @c network.closed_loop.drop_unrecorded).
+        ///        See @c RealTimeEngine::dropUnrecorded and @c UnrecordedSatGate.
+        /// @return True when a satellite without a stream clock record is left out; false
+        ///         (default) keeps it with the a priori clock (byte-identical).
+        bool ssrDropUnrecorded() const { return ssr_drop_unrecorded_; }
+
+        /// @brief Leave out of the solution, besides every satellite without a stream clock
+        ///        record, every satellite without a phase-bias record for a raw phase signal the
+        ///        receiver uses for it (@c processing.ssr_drop_unrecorded_phase_bias, or derived
+        ///        from @c network.closed_loop.drop_unrecorded_phase_bias).  The phase-bias test is
+        ///        the apply site's (the bias age limit times the stale-hold factor when the bias
+        ///        staleness gate is on); the whole satellite is left out when one of its signals
+        ///        lacks the record, and a missing code bias is no reason.  See
+        ///        @c RealTimeEngine::dropUnrecorded and @c UnrecordedSatGate.
+        /// @return True when the phase-bias rule is armed (it includes the clock rule); false
+        ///         (default) keeps such satellites (byte-identical).
+        bool ssrDropUnrecordedPhaseBias() const { return ssr_drop_unrecorded_phase_bias_; }
+
         /// @brief Translate the float ambiguity by @c −Δ on every change in the
         ///        applied SSR phase bias, declared or not, rather than only on a
         ///        declared one (@c processing.ssr_phase_bias_step_translate,
@@ -4388,6 +4408,24 @@ namespace GnssProcessor {
         }
 
         /**
+         * @brief Sigma multiplier for extra-band phase rows in the network solve
+         *        (@c network.extra_band_phase_sigma_scale), the phase twin of
+         *        @ref networkExtraBandCodeSigmaScale.
+         *
+         * The phase rows of a signal whose band is neither band of the constellation's
+         * ionosphere-free pin pair fold at sigma x scale (information / scale squared) in the
+         * network solve; the code rows are left as they are.  A diagnostic lever: with the
+         * third band's phase deweighted its carried ambiguities lose their pull on the shared
+         * states.  1.0 is the default and is never applied (byte-identical); the loader refuses a
+         * value below 1; the closed-loop consumer is pinned to 1.
+         *
+         * @return The multiplier; 1.0 (no scaling) by default.
+         */
+        double networkExtraBandPhaseSigmaScale() const {
+            return network_config_.extra_band_phase_sigma_scale;
+        }
+
+        /**
          * @brief Cold-start absolute bound of the gross line-of-sight screen, metres
          *        (@c network.gross_los_cold_bound_m;
          *        docs/record/refound/ICF_ignition_code_fault_2026-10-09.md).
@@ -4915,6 +4953,27 @@ namespace GnssProcessor {
          *         fraction times the signal wavelength); 0.0 (default) keeps the flat 0.05 m gate.
          */
         double networkDiscThresholdFracCycles() const { return network_disc_threshold_frac_cycles_; }
+
+        /**
+         * @brief Whether the emitter declares phase steps on what a user sees
+         *        (@c network.disc_phase_visible).
+         *
+         * Armed, the phase value test declares a step of a (satellite, signal) when the
+         * change of its phase-visible correction (clock less phase bias) between two
+         * emissions, less the median of that change over the satellites of the same
+         * constellation and signal, exceeds the discontinuity threshold; with fewer than
+         * @ref GnssProcessor::kPhaseVisibleMinSats "kPhaseVisibleMinSats" voting satellites
+         * each key is tested on its own change.  The moves a user of between-satellite
+         * differences does not see (a satellite's clock-to-phase-bias split, the network's
+         * phase level) are then not declared.  Travels in the S contract (@c discpv=), so
+         * a replay reproduces the counters.  Inert, and disarmed by the loader, under
+         * @c network.emit_pb_hold, whose generations declare the held steps.  Measured
+         * on the simulator only; ledger UNVALIDATED.
+         *
+         * @return True when the phase-visible step test is armed; false (default) keeps the
+         *         legacy test on the phase bias alone (byte-identical).
+         */
+        bool networkDiscPhaseVisible() const { return network_disc_phase_visible_; }
 
         /**
          * @brief Whether the emitter bumps a constellation's clock discontinuity
@@ -10109,6 +10168,8 @@ namespace GnssProcessor {
         bool   enable_ssr_bias_max_age_explicit_{ false };///< True iff the config sets processing.enable_ssr_bias_max_age (either key form), so applyNetworkConsumerProfile can arm the gate under bias consumption while respecting an explicit false (RTA-9(a)).
         double ssr_bias_stale_hold_factor_{ 2.0 };        ///< Apply-gate drop limit = factor × ssr_bias_max_age_s_ (A5): the last bias is held over sub-limit staleness gaps, so no artificial model step or burst of resets occurs; 1.0 = drop exactly at max age.  Only meaningful when enable_ssr_bias_max_age_.
         bool   ssr_phase_bias_disc_carry_{ false };       ///< Carry the float ambiguity across a declared phase-bias step (amb − Δ, value-only) instead of resetting it; off = the existing reset path (byte-identical).  Set directly (processing.ssr_phase_bias_disc_carry) or derived from network.closed_loop.pb_disc_carry.
+        bool   ssr_drop_unrecorded_{ false };             ///< Leave out of the solution every satellite the stream holds no clock record for ; off = such a satellite keeps the a priori clock (byte-identical).  Set directly (processing.ssr_drop_unrecorded) or derived from network.closed_loop.drop_unrecorded.
+        bool   ssr_drop_unrecorded_phase_bias_{ false };  ///< Also leave out every satellite without a phase-bias record for a phase signal the receiver uses (processing.ssr_drop_unrecorded_phase_bias, derived from network.closed_loop.drop_unrecorded_phase_bias); off = byte-identical.
         bool   ssr_level_step_inflate_{ false };      ///< Raise the variance along a stepped satellite's phase-blind ionosphere-ambiguity direction by its declared code-level step (C and B record lvl=). OFF = byte-identical.  Set directly (processing.ssr_level_step_inflate) or derived from network.closed_loop.level_step_inflate.
         double ssr_level_step_inflate_k_{ 1.0 };      ///< The inflation's standard deviation over the declared code step.
         bool   ephemeris_jump_reseed_{ false };       ///< Re-seed a satellite whose broadcast record change moves its modelled range by more than the threshold (processing.ephemeris_jump_reseed). OFF = byte-identical.
@@ -10390,6 +10451,7 @@ namespace GnssProcessor {
         bool   network_pivot_vanish_return_signal_{false}; ///< Also raise a datum change (markDatumChange) when a constellation absent last epoch returns with a clock pivot != its last-ever pivot (A1); off = only the adjacent-epoch pivot change signals (byte-identical).
         bool   network_emit_clock_disc_{false};            ///< Maintain a per-satellite clock discontinuity counter (bumped on a per-constellation datum re-reference) and scope the forced phase/code bump to the affected constellation(s) (A2); off = no clock disc channel + a global bump (byte-identical).
         bool   network_code_bias_disc_jump_test_{false};   ///< Emitter code-bias magnitude jump test: also bump disc_per_signal on a fresh-baseline value jump > the phase disc threshold (0.05 m), which signals the weak-separation value wander the H1 structural triggers cannot see; travels in the S-contract (cbjump=). Off = structural triggers only (byte-identical).
+        bool network_disc_phase_visible_{false};   ///< Phase steps declared on what a user sees (clock less phase bias, less the satellites' median); travels in the S contract (discpv=). Disarmed under network.emit_pb_hold.
         double network_disc_threshold_frac_cycles_{0.0};   ///< Per-λ discontinuity threshold as a fraction of a carrier cycle (H3); when > 0 the emitter jump test uses frac·λ(sat,signal) instead of the flat 0.05 m disc_threshold_m (uniform in cycles, still a fixed contract); travels in the S-contract (discfrac=). 0 = legacy flat-metre gate (byte-identical).
         bool   network_clock_disc_on_set_change_{false};   ///< Sum-to-zero datum-move signalling: bump a constellation's clock disc counters when its clock-satellite set changes between emits (under Σδtˢ=0 a membership change re-references the datum, which otherwise goes unsignalled); requires clock_datum_sum_to_zero, arms emit_clock_disc; travels in the S-contract (clkset=). Off = forced-bump-only clock channel (byte-identical).
         bool   network_sticky_pivot_{false};               ///< Keep the incumbent clock-pivot satellite per constellation while it remains registered (RTA-1; re-select only when it sets; a config-pinned satellite still wins); off = lexical first-registered auto-pick every epoch (byte-identical).

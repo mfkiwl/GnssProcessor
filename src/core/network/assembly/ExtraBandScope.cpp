@@ -63,6 +63,17 @@ int networkExtraBandScopeRunEnd(const NetworkRunEndView& v) {
     const std::shared_ptr<spdlog::logger>& log = v.log;
     const std::vector<NetStation>& stations = v.setup.stations;
 
+    // ---- Extra-band phase deweight (network.extra_band_phase_sigma_scale), the phase twin
+    if (config_.networkExtraBandPhaseSigmaScale() > 1.0) {
+        long long n_ebp = 0;
+        for (const auto& st : stations) n_ebp += st.eb_phase_rows_deweighted;
+        const double sp = config_.networkExtraBandPhaseSigmaScale();
+        log->info("Network (extra-band phase sigma x {:.3f}): {} phase row(s) folded at the scaled sigma "
+                  "(information / {:.3f}).", sp, n_ebp, sp * sp);
+        if (n_ebp == 0)
+            log->warn("Network (extra-band phase sigma): INERT: the scale was armed and NO phase row was ever "
+                      "extra-band (a two-band lineage, or no resolvable pin pair).");
+    }
     // ---- Extra-band code deweight (network.extra_band_code_sigma_scale)
     // Same contract.  The fold runs inside the parallel produce phase, so its row
     // counts are kept per station (as gl_rows_deweighted is); they are summed here,

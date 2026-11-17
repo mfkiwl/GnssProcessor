@@ -191,6 +191,7 @@
 #include <vector>
 #include "network/qc/CongruenceSetup.hpp"
 #include "network/slip/OraclePinSetup.hpp"
+#include "network/ar/RingFix.hpp"           // networkRingFixArm
 
 namespace GnssProcessor {
 
@@ -275,6 +276,7 @@ int Application::runNetwork() {
     networkSlipQcConfigure(run);
     networkSlipOracleArm(run, log_manager_);
     networkOraclePinArm(run, log_manager_);
+    networkRingFixArm(run);
     traces.openAll(config_, nc, shc, sh_model.get(), closed_loop_on && consumer, log);
     networkSlipQcArmWavelengthProvider(run, log_manager_);
     // The arms of the carry-VCE apply step, the prior-residual corroborator, the
