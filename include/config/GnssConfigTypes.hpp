@@ -4964,6 +4964,13 @@ namespace GnssProcessor {
         /// unchanged).  Via @c estimation.cycle_slip.turbo_edit_bridge_lli.  See
         /// docs/record/turbo_edit_lli_bridge_design.md.
         bool turbo_edit_bridge_lli = false;
+        /// @c estimation.cycle_slip.lli_slip_mask: which bits of a phase observation's loss-of-lock indicator the
+        /// Melbourne-Wubbena slip detector reads as a loss of lock.  7 (default, the detector as built): any bit.
+        /// 3: bit 0 (lock lost) and bit 1 (half-cycle ambiguity) only.  RINEX 3 defines bit 2 for Galileo as BOC
+        /// tracking of an MBOC-modulated signal, not a loss of lock; a receiver that raises it at every epoch (a
+        /// Leica GR50 on E1) has every Galileo ambiguity reset at every epoch under the default, and its
+        /// between-satellite reference changes at every epoch with it.  The network's slip scan reads bit 0 only.
+        int lli_slip_mask = 7;
         /// WL-settle deferral cap (s) for the gap-bridge joint solve (effective only
         /// with @c turbo_edit, @c turbo_edit_bridge_lli and a non-zero
         /// @c turbo_edit_max_gap_s): when the across-gap GF jump is solid but the MW

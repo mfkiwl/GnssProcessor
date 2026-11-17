@@ -1397,6 +1397,9 @@ namespace GnssProcessor {
 
         /// Unit-test seam (tests/test_mw_detector_steps.cpp): reaches the steps above.
         friend struct MwDetectorStepsTestAccess;
+        /// Unit-test seam (tests/test_mw_lli_slip_mask.cpp): the loss-of-lock test and the
+        /// two LLI band memories under @c estimation.cycle_slip.lli_slip_mask.
+        friend struct MwLliSlipMaskTestAccess;
 
 
         // ======================================================================

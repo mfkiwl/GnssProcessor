@@ -887,6 +887,7 @@ add_executable(gnss_tests
     tests/test_canonical_signal_code_follow.cpp
     tests/network/test_mw_detect_pair_scope.cpp
     tests/test_mw_detector_steps.cpp
+    tests/test_mw_lli_slip_mask.cpp
     tests/network/test_extra_band_code_sigma.cpp
     tests/network/test_extra_band_phase_sigma.cpp
     tests/network/test_network_second_code_scope.cpp

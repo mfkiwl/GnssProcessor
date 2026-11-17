@@ -1321,6 +1321,10 @@ namespace GnssProcessor {
         cycle_slip_.turbo_edit_bridge_lli =
             jval<bool>(json, "estimation.cycle_slip.turbo_edit_bridge_lli",
                        "cycle_slip_turbo_edit_bridge_lli", false);
+        // Which loss-of-lock bits the Melbourne-Wubbena detector reads as a loss of lock: 7 (default) any bit,
+        // 3 leaves out bit 2 (Galileo BOC tracking, not a loss of lock).  See CycleSlipConfig.
+        cycle_slip_.lli_slip_mask =
+            jval<int>(json, "estimation.cycle_slip.lli_slip_mask", "cycle_slip_lli_slip_mask", 7);
         // WL-settle deferral cap (s) for ambiguous bridged solves; 0
         // disables (an ambiguous solve resets immediately).  Negative
         // clamps to 0 with a warning.  See CycleSlipConfig doc.
