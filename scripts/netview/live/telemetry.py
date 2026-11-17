@@ -46,7 +46,36 @@ NET_FIELDS = [
     ('msep', 'time per epoch (ms)'),
 ]
 SLIP_TIERS = {'T0_mw_detect', 'T1_gf_jump', 'T1_if_slip'}
-QUIET_ACTIONS = {'diagnostic', 'coincident'}
+#: Actions that record without acting (a periodic report, a diagnostic, a coincident duplicate): counted neither as a
+#: cycle slip nor as a quality-test flag, and filed under bookkeeping in the page's feed.
+QUIET_ACTIONS = {'diagnostic', 'coincident', 'report'}
+
+
+def colour_range(key: str, kind: str, v: np.ndarray):
+    """The colour range of one field over the finite values v: (range, scale kind or None).
+
+    Counts run from 0 to the 99th percentile of their positive values; a share from 0 to 1; a signed value (vik)
+    symmetric about 0, unless nearly all of one sign (1st percentile above -15 % of the 99th), when it runs from 0 to
+    its 99th percentile with the lowest colour marked "<0" (or the mirror); any other value from its 1st to its 99th
+    percentile.
+    """
+    if not v.size:
+        return [0.0, 1.0], None
+    if kind == 'count':
+        pos = v[v > 0]
+        return [0.0, float(max(1.0, np.percentile(pos, 99) if pos.size else 1.0))], None
+    if key == 'held':
+        return [0.0, 1.0], None
+    if kind == 'vik':
+        p1, p99 = (float(x) for x in np.percentile(v, [1, 99]))
+        if p99 > 0 and p1 >= -0.15 * p99:                    # nearly all positive: 0 .. p99, '<0' below
+            return [0.0, p99], {'lo_label': '<0', 'hi_label': None}
+        if p1 < 0 and p99 <= -0.15 * p1:                     # nearly all negative
+            return [p1, 0.0], {'lo_label': None, 'hi_label': '>0'}
+        m = max(abs(p1), abs(p99)) or 1.0
+        return [-m, m], None
+    lo, hi = np.percentile(v, [1, 99])
+    return [float(lo), float(max(hi, lo + 1e-9))], None
 
 
 def _round_list(a, digits):
@@ -59,7 +88,11 @@ def _round_list(a, digits):
 class ReplaySource:
     """Per-epoch records of a finished run, from its blocks ({name: (header, arrays)} of nv_build or nv_page)."""
 
+    mode = 'replay'
+
     def __init__(self, blocks: dict, archive: bool = False):
+        self._ranges = None
+        self._meta = None
         self.H, self.A = blocks['core']
         self.blocks = blocks
         self.archive = archive
@@ -92,7 +125,7 @@ class ReplaySource:
         is_slip = np.array([E['tiers'][a] in SLIP_TIERS and E['actions'][b] not in QUIET_ACTIONS for a, b in zip(tier, act)], bool)
         is_alarm = np.array([lanes[x] == 'alarm' for x in lane], bool)
         qc = fam_keys.index('qc') if 'qc' in fam_keys else -1
-        is_qc = np.array([tier_fam[a] == qc for a in tier], bool) & ~is_alarm
+        is_qc = np.array([tier_fam[a] == qc and E['actions'][b] not in QUIET_ACTIONS for a, b in zip(tier, act)], bool) & ~is_alarm
         self.ev_family = np.array([tier_fam[a] for a in tier], np.int64)
         sta = np.asarray(A.get('ev_sta', np.zeros(0)), np.int64)
         sat = np.asarray(A.get('ev_sat', np.zeros(0)), np.int64)
@@ -214,6 +247,11 @@ class ReplaySource:
     # ------------------------------------------------------------------ what the server sends
 
     def meta(self, window: int) -> dict:
+        if self._meta is None or self._meta['window'] != int(window):
+            self._meta = self._meta_of(window)
+        return self._meta
+
+    def _meta_of(self, window: int) -> dict:
         H = self.H
         E = H['events']
         es = self.blocks.get('epoch')
@@ -233,33 +271,24 @@ class ReplaySource:
         }
 
     def ranges(self) -> dict:
-        """A colour range per field over the run (1st to 99th percentile; for signed values symmetric about 0)."""
-        out = {}
-        self.scale_kinds = {}
-        for tag, table, fields in (('rx', self.rx, RX_FIELDS), ('sat', self.sat, SAT_FIELDS)):
-            for i, (k, _l, kind, _u) in enumerate(fields):
-                v = table[i][np.isfinite(table[i])]
-                if not v.size:
-                    out[f'{tag}.{k}'] = [0.0, 1.0]
-                elif kind == 'count':
-                    out[f'{tag}.{k}'] = [0.0, float(max(1.0, np.percentile(v[v > 0], 99) if (v > 0).any() else 1.0))]
-                elif k == 'held':
-                    out[f'{tag}.{k}'] = [0.0, 1.0]
-                elif kind == 'vik':
-                    p1, p99 = (float(x) for x in np.percentile(v, [1, 99]))
-                    if p99 > 0 and p1 >= -0.15 * p99:                    # nearly all positive: 0 .. p99, '<0' below
-                        out[f'{tag}.{k}'] = [0.0, p99]
-                        self.scale_kinds[f'{tag}.{k}'] = {'lo_label': '<0', 'hi_label': None}
-                    elif p1 < 0 and p99 <= -0.15 * p1:                   # nearly all negative
-                        out[f'{tag}.{k}'] = [p1, 0.0]
-                        self.scale_kinds[f'{tag}.{k}'] = {'lo_label': None, 'hi_label': '>0'}
-                    else:
-                        m = max(abs(p1), abs(p99)) or 1.0
-                        out[f'{tag}.{k}'] = [-m, m]
-                else:
-                    lo, hi = np.percentile(v, [1, 99])
-                    out[f'{tag}.{k}'] = [float(lo), float(max(hi, lo + 1e-9))]
-        return out
+        """A colour range per field over the run (colour_range; computed once)."""
+        if self._ranges is None:
+            out, self.scale_kinds = {}, {}
+            for tag, table, fields in (('rx', self.rx, RX_FIELDS), ('sat', self.sat, SAT_FIELDS)):
+                for i, (k, _l, kind, _u) in enumerate(fields):
+                    out[f'{tag}.{k}'], sk = colour_range(k, kind, table[i][np.isfinite(table[i])])
+                    if sk:
+                        self.scale_kinds[f'{tag}.{k}'] = sk
+            self._ranges = out
+        return self._ranges
+
+    def poll(self) -> int:
+        """A finished run does not grow (the follow source's poll reads new lines)."""
+        return 0
+
+    def lists(self):
+        """A finished run's lists are all in its description (the follow source's grow)."""
+        return None
 
     def record(self, e: int) -> dict:
         """The record of epoch e."""

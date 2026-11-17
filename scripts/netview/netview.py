@@ -3,7 +3,7 @@
     py -3.14 scripts/netview/netview.py build <run folder> [-o page.html] [--no-compress]
     py -3.14 scripts/netview/netview.py arm <config.json> -o <armed config.json> [--no-map]
     py -3.14 scripts/netview/netview.py compare <page A.html> <page B.html> -o <compare.html>
-    py -3.14 scripts/netview/netview.py live <built page or run folder> [--speed 1] [--port 8770] [--start HH:MM]
+    py -3.14 scripts/netview/netview.py live <run folder, live record or built page> [--speed N] [--port 8770] [--start HH:MM]
 
 build   reads the run folder's traces (logs/*.csv, logs/network_run_manifest.json and products.txt) and writes one
         HTML page that opens by double-click from file:// (no server, no network access).  Default output:
@@ -16,6 +16,10 @@ arm     writes a copy of a run config with the trace keys the page needs switche
         viewed.
 compare writes a page that shows two built pages side by side (for example the same day from two reference
         receivers); time, signals, layout and the selected link or node follow each other.
+live    serves the live monitor on 127.0.0.1: a rolling window of the network.  A run folder whose engine wrote the
+        live record (network.trace_live_record: logs/network_live.jsonl), or that file itself, is followed as the
+        engine writes it, a running engine included; a built page, or a run folder without the record (or with
+        --replay), is replayed as a live engine would send it.
 
 The page, the quantities and the cost of the traces: docs/onboarding/network_view.md.
 """
@@ -55,8 +59,14 @@ def cmd_build(a) -> int:
 
 
 def cmd_live(a) -> int:
-    from live import server, telemetry
+    from live import follow, server, telemetry
     src = Path(a.source)
+    # A .jsonl argument is the record itself; a run folder is followed when its engine wrote the record, or when
+    # it has no products yet (an engine that is starting); a finished run without the record is replayed.
+    record = src if src.suffix.lower() == '.jsonl' else src / 'logs' / 'network_live.jsonl'
+    starting = src.is_dir() and not (src / 'products.txt').exists()
+    if src.suffix.lower() == '.jsonl' or (src.is_dir() and (record.is_file() or starting) and not a.replay):
+        return _live_follow(a, follow, server, record)
     if src.is_file() and src.suffix.lower() in ('.html', '.htm'):
         print(f'reading the blocks of {src}', flush=True)
         blocks, archive = nv_page.read_page(src), src
@@ -76,9 +86,36 @@ def cmd_live(a) -> int:
         else:
             start = int(a.start)
     html = nv_page.live_page_html(blocks['core'][0]['run'])
-    srv, replay, _clock = server.serve(source, html, port=a.port, window=a.window, speed=a.speed, start=start, archive=archive)
+    speed = a.speed if a.speed is not None else 1.0
+    srv, replay, _clock = server.serve(source, html, port=a.port, window=a.window, speed=speed, start=start, archive=archive)
     print(f'live monitor of {blocks["core"][0]["run"]}: http://127.0.0.1:{a.port}/   '
-          f'(replaying {source.n_ep} epochs of {source.step_s:g} s from epoch {start}, {a.speed:g} epochs/s; Ctrl+C stops)', flush=True)
+          f'(replaying {source.n_ep} epochs of {source.step_s:g} s from epoch {start}, {speed:g} epochs/s; Ctrl+C stops)', flush=True)
+    return _serve_until_stopped(srv, replay)
+
+
+def _live_follow(a, follow, server, record: Path) -> int:
+    """The live monitor on an engine's live record: the newest window first, then each epoch as it is written."""
+    source = follow.FollowSource(record)
+    source.poll()
+    start = source.n_ep                                        # the newest window
+    if a.start:
+        if ':' in a.start:                                     # a GPS time of day, HH:MM
+            hh, mm = (int(x) for x in a.start.split(':')[:2])
+            want = hh * 3600 + mm * 60
+            tods = [(r['ms'] // 1000) % 86400 for r in source.records]
+            start = min(range(len(tods)), key=lambda e: abs(tods[e] - want)) if tods else 0
+        else:
+            start = int(a.start)
+    html = nv_page.live_page_html(source.run)
+    speed = a.speed if a.speed is not None else 50.0
+    srv, replay, _clock = server.serve(source, html, port=a.port, window=a.window, speed=speed, start=start)
+    state = f'{source.n_ep} epochs so far' if source.header else 'waiting for the engine to write its header'
+    print(f'live monitor of {source.run}: http://127.0.0.1:{a.port}/   (following {record}; {state}; '
+          f'catching up at {speed:g} epochs/s; Ctrl+C stops)', flush=True)
+    return _serve_until_stopped(srv, replay)
+
+
+def _serve_until_stopped(srv, replay) -> int:
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -125,12 +162,15 @@ def main(argv=None) -> int:
     r.add_argument('-o', '--output', required=True)
     r.add_argument('--no-map', action='store_true', help='leave the ionosphere trace (satellite positions) as it is')
     r.set_defaults(fn=cmd_arm)
-    lv = sub.add_parser('live', help='the live monitor (prototype): replay a run as if it were live, in a local page')
-    lv.add_argument('source', help='a built page (fast) or a run folder')
+    lv = sub.add_parser('live', help='the live monitor: follow an engine\'s live record, or replay a finished run, in a local page')
+    lv.add_argument('source', help='a run folder, its logs/network_live.jsonl, or a built page')
     lv.add_argument('--port', type=int, default=8770)
-    lv.add_argument('--speed', type=float, default=1.0, help='epochs released per second (default 1)')
+    lv.add_argument('--speed', type=float, default=None,
+                    help='epochs released per second (default: 1 for a replay; 50 while a followed record catches up)')
     lv.add_argument('--window', type=int, default=240, help='epochs the page keeps (default 240)')
-    lv.add_argument('--start', help='first epoch: an index or a GPS time of day HH:MM')
+    lv.add_argument('--start', help='first epoch: an index or a GPS time of day HH:MM (default: a replay from its '
+                                    'start, a followed record at its newest epoch)')
+    lv.add_argument('--replay', action='store_true', help='replay a run folder from its traces even when it has a live record')
     lv.set_defaults(fn=cmd_live)
     c = sub.add_parser('compare', help='a page showing two built pages side by side, time and selection linked')
     c.add_argument('page_a')

@@ -19,6 +19,7 @@ TRACE_KEYS = [
     ('trace_zwd', 'wet delay (network_zwd.csv)'),
     ('trace_rx_states', 'receiver clock (network_rx_states.csv)'),
     ('trace_rpb_states', 'receiver phase bias (network_rpb_states.csv)'),
+    ('trace_live_record', "the live monitor's record, one line per epoch (network_live.jsonl)"),
 ]
 MAP_KEY = ('trace_ionosphere', 'satellite positions for the map (network_ionosphere.csv)')
 

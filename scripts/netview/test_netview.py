@@ -475,6 +475,126 @@ class TestLive(Fixture):
         self.assertNotRegex(html, r'<script[^>]+src=')
 
 
+LIVE_HEADER = {'kind': 'header', 'format': 'netview-live/1',
+               'stations': [{'name': 'R1', 'lat': 40.0, 'lon': -83.0}, {'name': 'R2', 'lat': 41.0, 'lon': -82.0}],
+               'rx_fields': ['code_rms_m', 'phase_rms_m', 'n_sats', 'code_scale', 'max_norm', 'zwd_m', 'clk_sd_m'],
+               'sat_fields': ['code_rms_m', 'n_rx', 'clk_m', 'disc']}
+
+
+def live_line(tow, **kw):
+    """One engine line of the live record (network/diag/LiveRecord.hpp) at GPS week 2419."""
+    return dict({'t': [2419, tow]}, **kw)
+
+
+class TestFollow(unittest.TestCase):
+    """The follow source on a live record written in steps, as a running engine writes it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / 'logs' / 'network_live.jsonl'
+        self.path.parent.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, *objs, partial=''):
+        with open(self.path, 'a', encoding='utf-8', newline='\n') as fh:
+            for o in objs:
+                fh.write(json.dumps(o) + '\n')
+            fh.write(partial)
+
+    def test_records_grow_with_the_file(self):
+        from live import follow
+        self.write(LIVE_HEADER,
+                   live_line(30, disp='emitted', npres=2, nclk=30, s0=[0.29, 0.18], user=[0.02, 0.01, -0.01, 0.015],
+                             rx=[[0.25, 0.001, 12, 0.3, 4.1, 0.14, 0.008], None],
+                             sat={'G05': [0.23, 2, 12.5, 3]},
+                             ev=[['T1_if_slip', 'slip', 'G05', 'R1', 'reset', 'k=4', 1.2, 0.5],
+                                 ['T3_raim', 'flag', 'G07', 'R2', 'refloat', '', 6.0, 4.0]]))
+        src = follow.FollowSource(self.path)
+        self.assertEqual(src.poll(), 1)
+        self.assertEqual(src.run, Path(self.tmp.name).name)
+        meta = src.meta(window=10)
+        self.assertEqual(meta['mode'], 'engine')
+        self.assertEqual([s['name'] for s in meta['stations']], ['R1', 'R2'])
+        rx_keys, sat_keys = [f[0] for f in meta['rx_fields']], [f[0] for f in meta['sat_fields']]
+        net_keys = [f[0] for f in meta['net_fields']]
+        r0 = src.record(0)
+        json.dumps(r0, allow_nan=False)
+        self.assertEqual(r0['net'][net_keys.index('disp')], 0)               # emitted is index 0
+        self.assertEqual(r0['net'][net_keys.index('npres')], 2)
+        self.assertAlmostEqual(r0['net'][net_keys.index('user3d')], 0.02)
+        self.assertAlmostEqual(r0['rx'][0][rx_keys.index('code')], 0.25)
+        self.assertEqual(r0['rx'][0][rx_keys.index('slip')], 1)              # the slip event on R1
+        self.assertEqual(r0['rx'][1][rx_keys.index('alarm')], 1)             # the residual-test refloat on R2
+        self.assertIsNone(r0['rx'][1][rx_keys.index('code')])                # R2 not in the solve
+        self.assertEqual(src.sats, ['G05', 'G07'])                           # G07 known from its event only
+        self.assertEqual(r0['sat'][0][sat_keys.index('jumps')], 0)           # the first counter is the baseline
+        self.assertEqual(r0['add']['sats'], ['G05', 'G07'])
+        self.assertIn('ranges', r0['add'])
+
+        # a skipped epoch, an epoch with a new satellite and a counter step, and an incomplete line
+        self.write(live_line(60, disp='sync_skip', ev=[['GATE', 'skip', '', '', 'skip', 'no stations', None, None]]),
+                   live_line(90, disp='emitted', npres=2, nclk=31, s0=[0.3, 0.2],
+                             rx=[[0.26, 0.001, 12, 0.3, 4.0, 0.15, 0.008], [0.3, 0.002, 10, 0.4, 3.0, 0.12, 0.01]],
+                             sat={'E11': [0.2, 2, -3.1, 0], 'G05': [0.22, 2, 12.6, 5]}),
+                   partial='{"t":[2419,120],"disp":"emi')
+        self.assertEqual(src.poll(), 2)
+        self.assertEqual(src.step_s, 30.0)
+        r1, r2 = src.record(1), src.record(2)
+        self.assertEqual(src.dispositions, ['emitted', 'sync_skip'])
+        self.assertEqual(r1['net'][net_keys.index('disp')], 1)
+        self.assertIsNone(r1['net'][net_keys.index('s0c')])
+        self.assertEqual(r1['add']['dispositions'], ['sync_skip'])
+        self.assertEqual(src.sats, ['G05', 'G07', 'E11'])
+        self.assertEqual(len(r2['sat']), 3)
+        self.assertEqual(r2['sat'][0][sat_keys.index('jumps')], 2)           # counter 3 -> 5
+        self.assertAlmostEqual(r2['sat'][2][sat_keys.index('clk')], -3.1)
+        self.assertEqual(r2['add']['sats'], ['E11'])
+        self.assertEqual(r2['ms'] - r0['ms'], 60000)
+
+        # the incomplete line completes; a second line of an unreleased epoch merges into it
+        self.write(partial='tted","npres":1}\n')
+        self.write(live_line(120, ev=[['CHAIN', 'late', 'E11', '', 'note', '', None, None]]))
+        self.assertEqual(src.poll(), 1)
+        r3 = src.record(3)
+        self.assertEqual(r3['net'][net_keys.index('npres')], 1)
+        self.assertEqual(len(r3['ev']), 1)
+        self.write(live_line(120, ev=[['CHAIN', 'later', '', '', 'note', '', None, None]]))
+        self.assertEqual(src.poll(), 0)
+        self.assertEqual(src.late_lines, 1)                                  # record 3 was already released
+        lists = src.lists()
+        self.assertEqual(lists['sats'], ['G05', 'G07', 'E11'])
+        self.assertIn('CHAIN', lists['tiers'])
+
+    def test_server_follows_a_growing_record(self):
+        import threading
+        import time
+        import urllib.request
+        from live import follow, server
+        self.write(LIVE_HEADER, *[live_line(30.0 * k, disp='emitted', npres=2, rx=[[0.2, 0.001, 9, 0.3, 3.0, 0.1, 0.01], None],
+                                            sat={'G05': [0.2, 1, 1.0, 0]}) for k in range(1, 6)])
+        src = follow.FollowSource(self.path)
+        srv, replay, _clock = server.serve(src, '<html>live</html>', port=0, window=10, speed=200.0, start=99)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = f'http://127.0.0.1:{srv.server_address[1]}'
+        try:
+            meta = json.loads(urllib.request.urlopen(base + '/meta', timeout=10).read())
+            self.assertIsNone(meta['n_ep'])
+            self.write(live_line(180.0, disp='emitted', npres=2, sat={'E01': [0.3, 1, 2.0, 0]}))
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and replay.e < 6:
+                time.sleep(0.05)
+            snap = json.loads(urllib.request.urlopen(base + '/snapshot', timeout=10).read())
+            self.assertEqual([r['e'] for r in snap['records']], [0, 1, 2, 3, 4, 5])
+            self.assertEqual(snap['lists']['sats'], ['G05', 'E01'])
+            self.assertEqual(snap['status']['mode'], 'engine')
+        finally:
+            replay.stopped = True
+            srv.shutdown()
+            srv.server_close()
+
+
 class TestCommands(Fixture):
     def test_build_writes_one_self_contained_page(self):
         run = make_run(self.root)

@@ -78,6 +78,26 @@ function scaleOf(kind, f) {
   const sk = (M_().scale_kinds || {})[kind + '.' + f[0]];
   return { kind: sk ? 'viridis' : f[2], range: M_().ranges[kind + '.' + f[0]] || [0, 1], lo: sk ? sk.lo_label : null, hi: sk ? sk.hi_label : null };
 }
+/** Value number `fi` of row `row` of a record (null when the record has no such row: a satellite first seen later). */
+function cell(rec, kind, row, fi) { const a = rec[kind][row]; return a ? a[fi] : null; }
+/** Appends the list entries a record or a snapshot brings (an engine run's satellites and event words grow), and
+ *  takes its colour ranges; an entry already present is skipped, so the lists stay in the server's order. */
+function applyAdd(add) {
+  const m = M_();
+  const lists = { sats: m.sats, tiers: m.events.tiers, names: m.events.names, actions: m.events.actions, dispositions: m.dispositions };
+  for (const [k, list] of Object.entries(lists)) for (const x of add[k] || []) if (!list.includes(x)) list.push(x);
+  if (add.stations && !m.stations.length) m.stations = add.stations;   // an engine's header read after the page opened
+  if (add.ranges) m.ranges = add.ranges;
+  if (add.scale_kinds) m.scale_kinds = add.scale_kinds;
+  if (add.step_s) m.step_s = add.step_s;
+  if (add.stations || add.sats) LV.order = {};          // new rows: the cached row orders are stale
+  if (add.stations || add.sats || add.step_s) setSubtitle();
+}
+function setSubtitle() {
+  const m = M_();
+  document.getElementById('run-sub').textContent = m.stations.length + ' receivers, ' + m.sats.length + ' satellites, one epoch every ' + m.step_s + ' s; window ' +
+    m.window + ' epochs';
+}
 function netValue(rec, key) { const i = M_().net_fields.findIndex(f => f[0] === key); return i < 0 || !rec ? null : rec.net[i]; }
 function famKeyOf(ev) { const f = M_().events.families[ev[1]]; return f ? f[0] : 'other'; }
 function famLabelOf(key) { const f = M_().events.families.find(x => x[0] === key); return f ? f[1] : key; }
@@ -92,9 +112,11 @@ function isAlarm(ev) { const l = M_().lanes[ev[0]]; return l && l.key === 'alarm
  *  by a slip, tree links kept, keys declared, the phase reference re-realized): hidden from the feed unless asked. */
 const BOOKKEEPING = new Set(['T0_band_scope/common_band', 'ZWD/slip_latch', 'ZWD/first_fold', 'CHAIN/kept', 'CHAIN/declared_keys',
   'PHASE_DATUM/eq34_reref', 'SCC/companion_open', 'SCC/companion_close']);
-function isBookkeeping(ev) { const E = M_().events; return BOOKKEEPING.has(E.tiers[ev[2]] + '/' + E.names[ev[3]]); }
+const QUIET_ACTIONS = new Set(['diagnostic', 'coincident', 'report']);   // record without acting (live/telemetry.py)
+function isBookkeeping(ev) { const E = M_().events; return BOOKKEEPING.has(E.tiers[ev[2]] + '/' + E.names[ev[3]]) || QUIET_ACTIONS.has(E.actions[ev[4]]); }
 
 function addRecord(rec) {
+  if (rec.add) applyAdd(rec.add);
   LV.recs.push(rec);
   const extra = LV.recs.length - M_().window;
   if (extra > 0) {
@@ -105,6 +127,7 @@ function addRecord(rec) {
   if (LV.events.length > 4000) LV.events.splice(0, LV.events.length - 4000);
   const now = performance.now();
   LV.arrivals.push(now);
+  LV.lastArrival = now;
   while (LV.arrivals.length && now - LV.arrivals[0] > 5000) LV.arrivals.shift();
   LV.dirty = true;
 }
@@ -115,6 +138,7 @@ function onSnapshot(data) {
   LV.events = [];
   LV.cursor = -1;
   LV.order = {};
+  if (data.lists) applyAdd(data.lists);
   for (const r of data.records) addRecord(r);
   for (const x of LV.events) x.fresh = -Infinity;            // the window that came at once is not news
   LV.arrivals = [];
@@ -170,21 +194,25 @@ function drawAll() {
 
 function drawClock() {
   const rec = curRec(), n = LV.recs.length;
-  document.getElementById('clock').textContent = gpsDate(rec.ms) + ' ' + gpsClock(rec.ms) + ' GPS time, epoch ' + (rec.e + 1) + ' of ' + M_().n_ep;
+  document.getElementById('clock').textContent = gpsDate(rec.ms) + ' ' + gpsClock(rec.ms) + ' GPS time, epoch ' + (rec.e + 1) + (M_().n_ep ? ' of ' + M_().n_ep : '');
   const cur = document.getElementById('cursor');
   cur.max = n - 1;
   cur.value = curIndex();
   const first = LV.recs[0], last = LV.recs[n - 1];
   const span = LV.arrivals.length > 1 ? (LV.arrivals[LV.arrivals.length - 1] - LV.arrivals[0]) / 1000 : 0;
   const rate = span > 0.5 ? (LV.arrivals.length - 1) / span : 0;
+  const quiet = LV.lastArrival ? (performance.now() - LV.lastArrival) / 1000 : 0;   // an engine that stopped or stalls
   document.getElementById('window-label').textContent = 'window ' + gpsClock(first.ms) + ' to ' + gpsClock(last.ms) + ' (' + n + ' epochs)' +
-    (rate ? ', arriving ' + rate.toFixed(1) + ' epochs/s' : '');
-  if (LV.status && !LV.jumping) document.getElementById('jump').value = last.e;
+    (rate ? ', arriving ' + rate.toFixed(1) + ' epochs/s' : '') +
+    (M_().mode === 'engine' && quiet > 10 ? ', no new epoch for ' + (quiet < 120 ? Math.round(quiet) + ' s' : Math.round(quiet / 60) + ' min') : '');
+  const jmp = document.getElementById('jump');
+  if (+jmp.max < last.e) jmp.max = last.e;            // an engine run grows
+  if (LV.status && !LV.jumping) jmp.value = last.e;
 }
 
 function series(kind, row, fi) {
   const y = new Float32Array(LV.recs.length);
-  for (let c = 0; c < LV.recs.length; c++) { const v = LV.recs[c][kind][row][fi]; y[c] = v == null ? NaN : v; }
+  for (let c = 0; c < LV.recs.length; c++) { const v = cell(LV.recs[c], kind, row, fi); y[c] = v == null ? NaN : v; }
   return y;
 }
 function netSeries(key) {
@@ -252,7 +280,7 @@ function rowOrder(kind, fi) {
   if (LV.order[key] && LV.orderAt[key] > n - 30 && LV.orderAt[key] <= n) return LV.order[key];
   const f = M_()[kind + '_fields'][fi], names = kind === 'rx' ? M_().stations.map(s => s.name) : M_().sats;
   const nr = names.length, score = new Float64Array(nr), cnt = new Int32Array(nr);
-  for (const r of LV.recs) for (let i = 0; i < nr; i++) { const v = r[kind][i][fi]; if (v != null && isFinite(v)) { score[i] += v; cnt[i]++; } }
+  for (const r of LV.recs) for (let i = 0; i < nr; i++) { const v = cell(r, kind, i, fi); if (v != null && isFinite(v)) { score[i] += v; cnt[i]++; } }
   const worseLow = ['nsat', 'nrx', 'held'].includes(f[0]), signed = f[2] === 'vik';
   let idx = Array.from({ length: nr }, (_x, i) => i).filter(i => cnt[i] > 0 || f[2] === 'count');
   if (signed) idx.sort((a, b) => names[a].localeCompare(names[b]));
@@ -286,10 +314,10 @@ function drawMatrix(kind) {
     for (let c = 0; c < ncol; c++) {
       const c0 = Math.floor(c * n / ncol), c1 = Math.max(c0 + 1, Math.floor((c + 1) * n / ncol));
       let v = NaN;
-      if (c1 - c0 === 1) { const x = LV.recs[c0][kind][row][fi]; v = x == null ? NaN : x; }
+      if (c1 - c0 === 1) { const x = cell(LV.recs[c0], kind, row, fi); v = x == null ? NaN : x; }
       else {
         let acc = 0, k = 0, mx = -Infinity;
-        for (let q = c0; q < c1; q++) { const x = LV.recs[q][kind][row][fi]; if (x != null && isFinite(x)) { acc += x; k++; if (x > mx) mx = x; } }
+        for (let q = c0; q < c1; q++) { const x = cell(LV.recs[q], kind, row, fi); if (x != null && isFinite(x)) { acc += x; k++; if (x > mx) mx = x; } }
         v = k ? (f[2] === 'count' ? mx : acc / k) : NaN;
       }
       const col = rgbOf(sc.kind, range, v) || bg, o = (r * ncol + c) * 4;
@@ -367,7 +395,7 @@ function drawMap() {
     if (st.lat == null || st.lon == null) return;
     const [x, y] = XY(st.lat, st.lon);
     const sel = LV.sel && LV.sel.kind === 'rx' && LV.sel.i === j;
-    ctx.fillStyle = cssOf(rgbOf(sc.kind, range, rec.rx[j][fi])) || C.float;
+    ctx.fillStyle = cssOf(rgbOf(sc.kind, range, cell(rec, 'rx', j, fi))) || C.float;
     ctx.strokeStyle = sel ? C.sel : C.ink; ctx.lineWidth = sel ? 2.5 : 0.8;
     ctx.beginPath(); ctx.arc(x, y, sel ? 6 : 4.5, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
     if (alarmed.has(j)) { ctx.strokeStyle = C.alarm; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 8, 0, 2 * Math.PI); ctx.stroke(); }
@@ -392,7 +420,7 @@ function drawDetail() {
   box.innerHTML = '<div class="hdr">' + esc(name) + ' <span class="muted" style="font-weight:400;font-size:12px">' + (kind === 'rx' ? 'receiver' : 'satellite') + '</span></div>' +
     (m.archive ? '<div class="hint"><a class="act" target="_blank" href="/archive#/' + path + '?t=' + rec.e + '">open its page in the archived dashboard at this time</a></div>' : '') +
     qs.map((f, k) => '<div class="sparkrow"><span class="lab" title="' + esc(f[1]) + '">' + esc(f[1]) + '</span><canvas class="spark" data-k="' + k + '"></canvas><span class="val">' +
-      esc(fmtField(f, rec[kind][i][k])) + '</span></div>').join('') +
+      esc(fmtField(f, cell(rec, kind, i, k))) + '</span></div>').join('') +
     '<h3 style="margin-top:10px">Its events</h3><div class="evs">' + (evs.map(x => '<div><span class="muted">' + gpsClock(x.ms) + '</span> ' + esc(eventWords(x.ev)) +
       (kind === 'rx' && x.ev[6] >= 0 ? ' <b>' + esc(m.sats[x.ev[6]]) + '</b>' : '') + (kind === 'sat' && x.ev[5] >= 0 ? ' <b>' + esc(m.stations[x.ev[5]].name) + '</b>' : '') + '</div>').join('') ||
       '<div class="hint">none in the window</div>') + '</div>';
@@ -432,7 +460,7 @@ function setStatus() {
   if (!s) return;
   const xr = s.speed * s.step_s;
   el.className = 'pill ' + (s.paused ? 'paused' : 'on');
-  el.textContent = s.paused ? 'paused' : 'replaying at ' + (xr >= 10 ? Math.round(xr) : xr.toFixed(1)) + 'x real time';
+  el.textContent = s.paused ? 'paused' : s.mode === 'engine' ? 'following the engine' : 'replaying at ' + (xr >= 10 ? Math.round(xr) : xr.toFixed(1)) + 'x real time';
   document.getElementById('pause').innerHTML = s.paused ? '&#9654;' : '&#10074;&#10074;';
 }
 function syncControls() {
@@ -472,7 +500,7 @@ function bindControls() {
       const r = cv.getBoundingClientRect(), hit = cv._hit && cv._hit(ev.clientX - r.left, ev.clientY - r.top);
       if (!hit) { tip(null); return; }
       const fi = fieldIndex(kind, kind === 'rx' ? LV.rxMetric : LV.satMetric), f = M_()[kind + '_fields'][fi], rec = LV.recs[hit.c];
-      tip('<b>' + esc(kind === 'rx' ? M_().stations[hit.row].name : M_().sats[hit.row]) + '</b> ' + gpsClock(rec.ms) + '<br>' + esc(f[1]) + ': ' + esc(fmtField(f, rec[kind][hit.row][fi])), ev);
+      tip('<b>' + esc(kind === 'rx' ? M_().stations[hit.row].name : M_().sats[hit.row]) + '</b> ' + gpsClock(rec.ms) + '<br>' + esc(f[1]) + ': ' + esc(fmtField(f, cell(rec, kind, hit.row, fi))), ev);
     });
     cv.addEventListener('mouseleave', () => tip(null));
   }
@@ -483,7 +511,7 @@ function bindControls() {
     const j = near(ev);
     if (j == null) { tip(null); return; }
     const fi = fieldIndex('rx', LV.rxMetric), f = M_().rx_fields[fi];
-    tip('<b>' + esc(M_().stations[j].name) + '</b><br>' + esc(f[1]) + ': ' + esc(fmtField(f, curRec().rx[j][fi])), ev);
+    tip('<b>' + esc(M_().stations[j].name) + '</b><br>' + esc(f[1]) + ': ' + esc(fmtField(f, cell(curRec(), 'rx', j, fi))), ev);
   });
   map.addEventListener('mouseleave', () => tip(null));
   document.getElementById('feed').addEventListener('click', ev => {
@@ -528,10 +556,11 @@ async function start() {
   LV.status = LV.meta.status;
   const m = LV.meta;
   document.getElementById('run-name').textContent = 'Live network monitor: ' + m.run;
-  document.getElementById('run-sub').textContent = m.stations.length + ' receivers, ' + m.sats.length + ' satellites, one epoch every ' + m.step_s + ' s; window ' +
-    m.window + ' epochs';
+  setSubtitle();
   document.getElementById('note').innerHTML = m.mode === 'replay' ? 'Replay of a finished run: the server releases one epoch after another as a live engine would send it. ' +
-    'The rate sets how many epochs arrive per second; "follow now" keeps the cursor on the newest.' : '';
+    'The rate sets how many epochs arrive per second; "follow now" keeps the cursor on the newest.' :
+    m.mode === 'engine' ? 'Following the engine: each epoch appears when the engine has written it to its live record (' + esc(m.source || 'network_live.jsonl') + '). ' +
+    'The rate sets how fast the window catches up after a jump back; "follow now" keeps the cursor on the newest.' : '';
   document.getElementById('archive').hidden = !m.archive;
   bindControls();
   syncControls();
@@ -544,6 +573,7 @@ async function start() {
   }
   connect();
   scheduleDraw();
+  if (m.mode === 'engine') setInterval(() => { LV.dirty = true; }, 5000);   // the quiet time keeps counting
 }
 
 window.addEventListener('error', ev => showError(ev.error || new Error(ev.message)));

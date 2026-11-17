@@ -21,6 +21,7 @@
 #include "network/solve/DatumGraph.hpp"
 #include "network/diag/FrameDiag.hpp"
 #include "network/emit/LedgerEmit.hpp"
+#include "network/diag/LiveRecord.hpp"
 #include "network/carry/LevelAuthority.hpp"
 #include "network/qc/Mdb.hpp"
 #include "network/qc/Vcf.hpp"
@@ -77,6 +78,7 @@ const Pinned kPinned[] = {
     {"networkAmbStateTrace",                Slot::StashTail,     &networkAmbStateTrace},
     {"networkChainFrameObserve",            Slot::StashTail,     &networkChainFrameObserve},
     {"networkEntitiesReachSample",          Slot::StashTail,     &net::networkEntitiesReachSample},
+    {"networkLiveRecord",                   Slot::StashTail,     &networkLiveRecord},
 };
 
 /// The row named @p name, or the table's size when no row has that name.

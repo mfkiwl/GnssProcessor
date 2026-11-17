@@ -5,19 +5,19 @@
 - **id:** NETVIEW
 - **topic:** tools
 - **status:** open
-- **summary:** A tool that turns the traces of one network run into one self-contained HTML page. Since 2026-11-17 the page is a dashboard of layers a reader clicks through (section 11): overview, network links (the trees, held and float links, each link's whole numbers), receivers, satellites, cycle slips, stochastic model, atmosphere, products and the held-out user check, events; and pages of one receiver, one satellite and one line of sight, all on one time cursor. Made on request from existing traces, no C++ change; `netview.py arm` writes a config copy with the two traces the reference configurations lack. Branch `viz/network-view`.
-- **dates:** 2026-11-15 (built and first version shown to the author); 2026-11-17 (the dashboard; the live monitor prototype, section 12)
-- **code:** `scripts/netview/` (`netview.py` with the commands build, arm and compare; readers `nv_read.py` and `nv_tables.py`, aggregation `nv_build.py` (core block) and `layers/` (the other blocks), page writer `nv_page.py`, the page's sources in `page/`, unit tests `test_netview.py`); how-to [onboarding/network_view.md](../../onboarding/network_view.md)
-- **knobs / posture:** none new. `arm` switches on existing trace keys only.
-- **run dirs:** pages of `D:\GnssProcessorSupport\runs_nom\_rap_o2s1j_n144`, `_rap_o2s1j_n144r`, `_rap_o2offj_n144`, `_rap_o9_n145`, `_rap_ka_sim` and `_rap_k0_sim` in `D:\GnssProcessorSupport\netview_out\` (the first page design); the dashboard of `_rap_l12_n144` as `D:\GnssProcessorSupport\netview_out\l12_n144.html`; the timing pair in `D:\GnssProcessorSupport\netview_out\timing\`
+- **summary:** A tool that turns the traces of one network run into one self-contained HTML page. Since 2026-11-17 the page is a dashboard of layers a reader clicks through (section 11): overview, network links (the trees, held and float links, each link's whole numbers), receivers, satellites, cycle slips, stochastic model, atmosphere, products and the held-out user check, events; and pages of one receiver, one satellite and one line of sight, all on one time cursor. Made on request from existing traces; `netview.py arm` writes a config copy with the traces the reference configurations lack. A live monitor (section 12) follows a running engine through the live record (`network.trace_live_record`, section 13), the one engine change: an observer, off by default. Branch `viz/network-view`.
+- **dates:** 2026-11-15 (built and first version shown to the author); 2026-11-17 (the dashboard; the live monitor prototype, section 12; the live record in the engine and the monitor following it, section 13)
+- **code:** `scripts/netview/` (`netview.py` with the commands build, arm and compare; readers `nv_read.py` and `nv_tables.py`, aggregation `nv_build.py` (core block) and `layers/` (the other blocks), page writer `nv_page.py`, the page's sources in `page/`, unit tests `test_netview.py`; the live monitor in `live/`: `server.py`, the replay source `telemetry.py`, the follow source `follow.py`); the engine's record `include/network/diag/LiveRecord.hpp`, `src/core/network/diag/LiveRecord.cpp`, tests `tests/network/test_network_live_record.cpp`; how-to [onboarding/network_view.md](../../onboarding/network_view.md)
+- **knobs / posture:** `network.trace_live_record` (TRACE, off by default, measure-only; section 13). `arm` switches on trace keys only.
+- **run dirs:** pages of `D:\GnssProcessorSupport\runs_nom\_rap_o2s1j_n144`, `_rap_o2s1j_n144r`, `_rap_o2offj_n144`, `_rap_o9_n145`, `_rap_ka_sim` and `_rap_k0_sim` in `D:\GnssProcessorSupport\netview_out\` (the first page design); the dashboard of `_rap_l12_n144` as `D:\GnssProcessorSupport\netview_out\l12_n144.html`; the timing pair in `D:\GnssProcessorSupport\netview_out\timing\`; the live record's arms `D:\GnssProcessorSupport\runs_nom\_rap_lvr_smoke`, `_rap_lvr_off`, `_rap_lvr_on` and `_rap_lvr_live`
 - **source:** the author's request of 2026-11-15 (section 1); the definitions of NRF and BER (branch `irdu/user-integers`, `docs/refound/NRF_network_ring_fixing_2026-11-14*.md`, `BER_bad_epoch_response_2026-11-15.md`) and of ARNF sections 3, 9 and 15 (branch `ar/rx-sat-code-bias`)
 
-**Outcome.** Built, then rebuilt as a dashboard (section 11). One command makes a 22 MB page from a 6 h run of 56
-receivers in about 40 s. The overview is ready about 0.9 s after the page loads, a layer opens in 0.01 to 0.2 s and
-a time step redraws in about 4 ms. Nine layers (overview, network links, receivers, satellites, cycle slips,
-stochastic model, atmosphere, products and user check, events) lead to pages of one receiver, one satellite and one
-line of sight. The page degrades to what a run traced and names the key of each missing part. `arm` adds two
-traces, about 1 % of the run time, products byte-identical.
+**Outcome.** Built, then rebuilt as a dashboard (section 11), with a live monitor (sections 12 and 13). One
+command makes a 22 MB page from a 6 h run of 56 receivers in about 40 s; the overview is ready about 0.9 s
+after the page loads and a layer opens in 0.01 to 0.2 s. Nine layers lead to pages of one receiver, one
+satellite and one line of sight. The engine's live record (`network.trace_live_record`, off by default)
+writes one line per epoch, which `netview.py live` follows while the engine runs; its values equal the
+run's traces and the products stay byte-identical.
 
 > Results are appended to this file, below the text, under dated headings.
 
@@ -338,3 +338,91 @@ endpoints, the live page's sources); the live page drawn in Chromium and in head
 2. Whether the live window should be longer, or hold one-minute summaries beyond the last hour.
 3. Whether to test a rescaled code sigma (a sigma ratio near 0.45) in an arm, simulator first since it moves the
    fixing's gates.
+
+## 13. 2026-11-17: the live record in the engine, and the live monitor following it
+
+The author approved the engine-side record of section 12 the same day ("Yes, build it"). The engine now writes the
+live monitor's record when `network.trace_live_record` is on, and `netview.py live` follows it while the engine runs.
+
+**The record.** `logs/network_live.jsonl`: a header line with the receivers (name, latitude, longitude) and the field
+lists, then one JSON line per processed epoch, flushed at each line, so the file is complete up to its last epoch while
+the engine runs. Per epoch: how the epoch ended, the receivers in the solution and the satellites with a clock (from
+the epoch-status row), the post-fit sigma0 of code and phase; per receiver the post-fit code and phase RMS, the
+satellites with a code row, the robust scale (1.4826 x median) of its normalized code residuals, its largest
+normalized residual, its wet delay and its clock sigma given the satellite states (the square root of the diagonal
+of N_rr^-1, `pureConditionalLocalVarianceDiag`); per satellite the post-fit code RMS over every receiver, the
+receivers with a code row, the emitted clock and the sum of the emitter's discontinuity counters; the held-out user's
+position error; and every event of the epoch with its tier, satellite, receiver, action, detail (cut to 200 bytes),
+statistic and threshold. The monitor classifies the events with the dashboard's rules, so the classification has one
+owner.
+
+**How a line is built** (`include/network/diag/LiveRecord.hpp`, `src/core/network/diag/LiveRecord.cpp`). Three notes
+and one observer: `NetworkRunTraces::emitEpochStatus` notes how the epoch ended (every processed epoch, a skipped one
+included, reaches one disposition site), `NetworkRunTraces::emitEvent` notes each event, `networkEmitStore` notes the
+held-out user's error, and the observer `networkLiveRecord`, the last row of slot StashTail in
+`kNetworkEpochObservers`, adds the receivers and satellites and writes the line. The residuals are formed as the
+post-fit pass forms them (`y - A_s x_s - A_r x_r`, rows classed by `rowClassOfKind`); the wet delay and the clock are
+found through the station's parameter set and h2local, as the wet-delay trace finds them. An epoch that ends before
+StashTail has no observer call: its line is written with what was noted when a later epoch's first note arrives, or
+at the run end. A note for an epoch already written becomes a second line of that epoch (no writer makes one today).
+The setup builder `networkLiveRecordOpen`, called once after the trace streams open, opens the file and writes the
+header. Off: no file, every note returns at once. Ledger verdict TRACE (not armed in the reference configurations).
+
+**The monitor side** (`scripts/netview/live/follow.py`). The follow source reads the new lines as the file grows and
+turns each into the page's record, the record the replay source makes from a finished run. Satellites, event words
+and dispositions are lists that only grow: a record that brings a new entry carries it in its `add` object (with fresh
+colour ranges every 20 records, over the last 200,000 values of each field), a snapshot carries the whole lists, and
+the page appends what it lacks, so indices stay valid without a reload. The products' discontinuity counters become
+declared discontinuities (the counter's increase since the satellite's previous epoch). `netview.py live` follows a
+`.jsonl` file, or a run folder that has the record or no products yet (an engine that is starting); a finished run
+folder without the record, or `--replay`, is replayed as before. The page opens on the newest epochs; after a jump
+back the window catches up at `--speed` (default 50 epochs per second). When no epoch has arrived for 10 s, the
+window label says for how long (an engine that has finished, or stalls). `netview.py arm` now also switches the
+record on.
+
+**Quiet rows.** Following the record showed 1,034 "quality-test flags" in 10 minutes: about 40 rows per epoch of
+`PRIORRES prior_residual report`, the periodic summary of the prior-residual check. Rows whose action records without
+acting (`report`, `diagnostic`, `coincident`) now count neither as cycle slips nor as quality-test flags in either
+source of the live monitor, and the feed lists them under bookkeeping. The dashboard's counts are unchanged.
+
+**Verification.**
+- Unit tests: 8 new cases in suite `NetworkLiveRecord` (the JSON writer, the header and epoch lines, the order of the
+  notes, a skipped epoch, a late note, a closed record); the observer pins and the epoch contract updated; 2 new
+  Python tests (the follow source on a file written in steps; the server following a growing file), 33 in all.
+  Debug `gnss_tests.exe`: 4,264 cases in 562 suites, 4,227 passed, 37 skipped, 0 failed (1,608 s); the skips are
+  fixtures absent from a worktree's empty `data/` (34) and the sparse kernel that only an SSE2 build reproduces (3).
+- Same-build pair, 1 h of the observed-data reference configuration (DOY 129, 58 receivers, GPS + Galileo), exe
+  `gnss_processor_live.exe` sha256[:16] fc7a2840f1ad0b12: `products.txt` byte-identical (sha256[:16] 33d206d2632bb303
+  both); every trace identical except the wall-clock columns (`ms` of network_datum_graph.csv, `loop_ms` and
+  `ms_per_epoch` of network_run_summary.csv, `ms_per_epoch_window` of network_service_health.csv); 727.3 ms per epoch
+  without the record, 725.8 with it (`runs_nom/_rap_lvr_off`, `_rap_lvr_on`).
+- The record against the traces of the same run, every epoch (`_rap_lvr_on`, 121 epochs; `_rap_lvr_live`, 6 h,
+  720 epochs): disposition, receivers in the solution and satellite clocks against network_epoch_status.csv;
+  sigma0 of code and phase against its post-fit columns; receiver and satellite code RMS, phase RMS, satellites and
+  receivers against network_pf_rows.csv; the normalized code scale and the largest normalized residual against
+  network_pf_keyed.csv; the wet delay against network_zwd.csv; emitted clocks and discontinuity counters against
+  network_solution.csv; the user's error against closed_loop_trace.csv; the events, as multisets per epoch, against
+  network_events.csv. Every comparison agrees within the rounding of the two files on both runs (largest differences 5e-5 m in a code RMS, 7e-6 m in a phase RMS, 5e-5 m in a wet delay, the third decimal of the scales); the clocks, the discontinuity counters, the user's error, the counts and the events (8,371 and 41,316) are equal.
+- Size: 18.0 KB per epoch over the first hour (2.19 MB): events 76 % of the bytes (their detail text 50 %), receivers
+  2.6 KB, satellites 1.5 KB. Over 6 h: 11.9 MB, 16.5 KB per epoch.
+- Following a running engine: a 6 h arm (`_rap_lvr_live`) ran while `netview.py live` followed its folder. The page
+  received each epoch as the engine wrote it (1.3 to 1.4 epochs per second, the engine's pace), a satellite that rose
+  during the run joined the list without a reload, and after a jump back to epoch 50 the window caught up with the
+  engine within 6.5 s and followed again. A full redraw of the 240-epoch window took 69 ms.
+
+**What the record does not carry yet.**
+1. Held links and fixing families: network integer fixing lives on another branch; the tiles and the share of held
+   links per receiver and satellite return when it is merged.
+2. The residual test's alarm rows of network_raim.csv (the replay adds them as `RAIM residual_alarm` events); the alarm
+   lane of the record holds the event tiers only.
+3. The clock anchor test and the fraction of a cycle of a declared discontinuity (both from other traces in the
+   replay).
+4. The receiver clock sigma is the sigma given the satellite states, not the datum-conditioned sigma of
+   network_rx_states.csv, so the two differ.
+5. Not tested on a streaming run (the network's stream front end calls the same epoch spine, so the observer runs
+   there too).
+
+**Open questions.**
+1. Whether to arm the record in the reference configurations (TRACE now): about 12 MB per 6 h, no measured cost.
+2. Whether the event detail text, half of the bytes, should be optional for a 1 s network of hundreds of receivers.
+3. The hourly archive blocks of section 12 (a page of the last hours written by the live server) remain unbuilt.

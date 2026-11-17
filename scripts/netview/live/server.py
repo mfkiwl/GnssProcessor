@@ -3,12 +3,15 @@
     GET /           the live page (style, script and colour maps inlined)
     GET /meta       the run's description: receivers, satellites, families, field lists, colour ranges, status
     GET /stream     server-sent events: 'snapshot' (the rolling window, sent on connect and after a jump) and then
-                    one 'record' event per epoch as the replay releases it; a comment every 15 s keeps it open
+                    one 'record' event per epoch as it is released; a comment every 15 s keeps it open
     GET /snapshot   the rolling window once, as JSON (the page's still view, ?still, for checks and screenshots)
-    GET /control    ?speed=epochs per second &pause=1|0 &jump=epoch: changes the replay; answers the status
+    GET /control    ?speed=epochs per second &pause=1|0 &jump=epoch: changes the release; answers the status
     GET /archive    the built dashboard page the replay comes from (when it comes from one), for going deeper
 
-The replay releases the epochs of a finished run at a chosen rate, so the page sees what a live engine would send.
+Two sources: a finished run, whose epochs are released at a chosen rate so the page sees what a live engine would
+send (telemetry.ReplaySource), and a running engine's live record, whose epochs are released as the engine writes
+them (follow.FollowSource; the rate then only sets how fast the window catches up after a jump back).  A source's
+lists that grow (satellites, event words) travel in each record's "add" and in each snapshot's "lists".
 """
 from __future__ import annotations
 
@@ -49,7 +52,13 @@ class Replay:
 
     def status(self) -> dict:
         return {'e': self.e, 'n_ep': self.src.n_ep, 'speed': self.speed, 'paused': self.paused, 'gen': self.gen,
-                'step_s': self.src.step_s, 'window': self.window}
+                'step_s': self.src.step_s, 'window': self.window, 'mode': self.src.mode}
+
+    def snapshot(self) -> str:
+        """The window as one JSON message (the caller holds the lock): status, the source's growing lists, records."""
+        lists = self.src.lists()
+        return ('{"status":' + _dumps(self.status()) + (',"lists":' + _dumps(lists) if lists else '') +
+                ',"records":[' + ','.join(s for _k, s in self.buf) + ']}')
 
     def control(self, q: dict) -> dict:
         with self.cond:
@@ -67,6 +76,8 @@ class Replay:
         """The clock (its own thread): one record per 1/speed seconds, catching up if a record took longer."""
         due = time.monotonic()
         while not self.stopped:
+            if self.e >= self.src.n_ep:
+                self.src.poll()                             # a running engine's new lines (a finished run: none)
             with self.cond:
                 waiting = self.paused or self.e >= self.src.n_ep
                 if not waiting:
@@ -87,7 +98,7 @@ class Replay:
                 due = time.monotonic()
 
 
-def make_handler(replay: Replay, meta: dict, page_html: str, archive: Path | None):
+def make_handler(replay: Replay, page_html: str, archive: Path | None):
     class Handler(BaseHTTPRequestHandler):
         server_version = 'netview-live'
 
@@ -109,6 +120,7 @@ def make_handler(replay: Replay, meta: dict, page_html: str, archive: Path | Non
                 if u.path == '/':
                     self._send(200, page_html.encode('utf-8'), 'text/html; charset=utf-8')
                 elif u.path == '/meta':
+                    meta = replay.src.meta(replay.window)
                     self._send(200, _dumps(dict(meta, status=replay.status())).encode('utf-8'), 'application/json')
                 elif u.path == '/control':
                     self._send(200, _dumps(replay.control(q)).encode('utf-8'), 'application/json')
@@ -118,7 +130,7 @@ def make_handler(replay: Replay, meta: dict, page_html: str, archive: Path | Non
                     self._stream()
                 elif u.path == '/snapshot':
                     with replay.cond:
-                        body = '{"status":' + _dumps(replay.status()) + ',"records":[' + ','.join(s for _k, s in replay.buf) + ']}'
+                        body = replay.snapshot()
                     self._send(200, body.encode('utf-8'), 'application/json')
                 elif u.path == '/favicon.ico':
                     self._send(204, b'', 'image/x-icon')
@@ -138,10 +150,8 @@ def make_handler(replay: Replay, meta: dict, page_html: str, archive: Path | Non
                 with replay.cond:
                     if gen != replay.gen:
                         gen = replay.gen
-                        items = list(replay.buf)
-                        last = items[-1][0] if items else replay.e - 1
-                        payload = '{"status":' + _dumps(replay.status()) + ',"records":[' + ','.join(s for _k, s in items) + ']}'
-                        out = 'event: snapshot\ndata: ' + payload + '\n\n'
+                        last = replay.buf[-1][0] if replay.buf else replay.e - 1
+                        out = 'event: snapshot\ndata: ' + replay.snapshot() + '\n\n'
                     else:
                         if not replay.buf or replay.buf[-1][0] <= last:
                             replay.cond.wait(timeout=15.0)
@@ -162,9 +172,10 @@ def make_handler(replay: Replay, meta: dict, page_html: str, archive: Path | Non
 def serve(source, page_html: str, port: int = 8770, window: int = 240, speed: float = 1.0, start: int = 0,
           archive: Path | None = None, log=print):
     """Start the replay and the server; returns (server, replay, thread) with the server already listening."""
+    source.poll()
     replay = Replay(source, window=window, speed=speed, start=start)
-    meta = source.meta(replay.window)
-    server = ThreadingHTTPServer(('127.0.0.1', port), make_handler(replay, meta, page_html, archive))
+    source.meta(replay.window)                              # computed once now (a finished run's ranges)
+    server = ThreadingHTTPServer(('127.0.0.1', port), make_handler(replay, page_html, archive))
     server.daemon_threads = True
     clock = threading.Thread(target=replay.run, name='replay', daemon=True)
     clock.start()

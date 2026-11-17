@@ -29,7 +29,8 @@ py -3.14 scripts\netview\netview.py arm <config.json> -o <armed config.json>
 fixing and the chain datum change the estimate and are never switched on by it). The reference configurations
 (`config\golden\`) already arm every trace the dashboard reads but two: `network.trace_chain_datum` (the trees and
 the links) and `network.trace_rpb_states` (the receiver phase bias); both write only on a run with the chain datum
-(`network.phase_datum_eq34`). The run is then made as usual from the armed copy.
+(`network.phase_datum_eq34`). `arm` also switches on `network.trace_live_record`, the record the live monitor follows
+(below). The run is then made as usual from the armed copy.
 
 | Trace | Key | Size per 6 h, 56 receivers, GPS + Galileo |
 | --- | --- | --- |
@@ -37,6 +38,7 @@ the links) and `network.trace_rpb_states` (the receiver phase bias); both write 
 | `network_chain_frame.csv` | `network.trace_chain_datum` | 50 MB |
 | `network_rpb_states.csv` | `network.trace_rpb_states` | about 14 MB (1.15 MB in the first 30 min of DOY 144) |
 | `network_ring_fix.csv` | written by the fixing itself (`network.ring_fix.enable`) | 14 MB (one family held) to 34 MB (two) |
+| `network_live.jsonl` (the live monitor's record) | `network.trace_live_record` | 12 MB (about three quarters of it the events) |
 | post-fit rows, carried floats, slip tests and observables, ionosphere, residual test, events and the rest | already armed in `config\golden\` | about 600 MB together |
 
 The two added traces cost about 1 % of the run time and leave `products.txt` byte-identical (measured on 30 min of
@@ -52,19 +54,36 @@ The comparison page shows the two pages side by side; time, the view and its sel
 side keeps its own data (for example the same day from two reference receivers). The three files keep their
 relative places.
 
-## The live monitor (prototype)
+## The live monitor
 
 ```
-py -3.14 scripts\netview\netview.py live <built page or run folder> [--speed 1] [--port 8770] [--start HH:MM]
+py -3.14 scripts\netview\netview.py live <run folder, live record or built page> [--port 8770] [--speed N] [--start HH:MM] [--replay]
 ```
 
-The command starts a local server (bound to 127.0.0.1) and prints its address; the page there shows a rolling window
+The command starts a local server (bound to 127.0.0.1) and prints its address. The page there shows a rolling window
 of the network: key figures with their trend, receivers and satellites over the window for a chosen metric, a map,
-what happened (newest first, by family) and the selected receiver or satellite with every value over the window. For
-now it replays a finished run as a live engine would send it: `--speed` sets the epochs released per second, and the
-page's controls pause, change the rate or jump. A built page starts in seconds; a run folder is built first. The
-engine-side record that would feed it live is not built yet ([NETVIEW](../cards/tools/NETVIEW-network-view.md),
-section 12). Ctrl+C stops the server.
+what happened (newest first, by family) and the selected receiver or satellite with every value over the window. The
+page's controls pause, change the rate or jump. Ctrl+C stops the server.
+
+- **Following an engine.** With `network.trace_live_record` on, the engine writes `logs\network_live.jsonl`: a header
+  with the receivers, then one line per epoch, flushed as each epoch ends. `live` on such a run folder, or on the file
+  itself, opens on the newest epochs and shows each new epoch as soon as the engine has written it, while the engine
+  runs or after it has finished. A run folder without products yet is taken as an engine that is starting: the page
+  waits for its first epoch. After a jump back, `--speed` (default 50 epochs per second) sets how fast the window
+  catches up. When no epoch has arrived for 10 s, the window label says for how long (an engine that has finished,
+  or stalls).
+- **Replaying a finished run.** A built page, or a run folder without the record (or with `--replay`), is replayed as
+  a live engine would send it: `--speed` (default 1) sets the epochs released per second and `--start` the first
+  epoch. A built page starts in seconds; a run folder is built first.
+
+Per epoch the record holds how the epoch ended, the post-fit sigma0 of code and phase, the receivers in the solution
+and the satellites with a clock; per receiver the post-fit code and phase RMS, its satellites, the robust scale of its
+normalized code residuals, its largest normalized residual, its wet delay and its clock sigma; per satellite the
+post-fit code RMS, its receivers, its emitted clock and its declared discontinuities; the held-out user's position
+error; and every event. Its values are those of the run's traces ([NETVIEW](../cards/tools/NETVIEW-network-view.md),
+section 13). A line holds about 4 KB of values for 58 receivers, plus the epoch's events. Rows that record without
+acting (reports, diagnostics, coincident duplicates) count neither as cycle slips nor as quality-test flags and are
+listed under bookkeeping.
 
 ## Reading the page
 
