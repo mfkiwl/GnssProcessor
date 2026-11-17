@@ -110,11 +110,11 @@ function scaleColor(sc, v) {
   if (!isFinite(v)) return null;
   if (sc.kind === 'vik') return vik(Math.max(-1, Math.min(1, v / (sc.hi || 1))));
   if (sc.kind === 'count' && v <= 0) return null;
-  return viridis((v - sc.lo) / ((sc.hi - sc.lo) || 1));
+  return seqColor((v - sc.lo) / ((sc.hi - sc.lo) || 1));
 }
 function scaleRgb(sc, v) {
   if (!isFinite(v)) return null;
-  const table = window.NV_ASSETS.colormaps[sc.kind === 'vik' ? 'vik' : 'viridis'];
+  const table = sc.kind === 'vik' ? window.NV_ASSETS.colormaps.vik : seqTable();
   let t = sc.kind === 'vik' ? (Math.max(-1, Math.min(1, v / (sc.hi || 1))) + 1) / 2 : (v - sc.lo) / ((sc.hi - sc.lo) || 1);
   if (sc.kind === 'count' && v <= 0) return null;
   t = Math.max(0, Math.min(1, t));
@@ -132,13 +132,31 @@ function robustSpan(values, symmetric, floorHi) {
   if (symmetric) { const m = Math.max(Math.abs(lo), Math.abs(hi), floorHi || 1e-9); return [-m, m]; }
   return [lo, Math.max(hi, lo + (floorHi || 1e-9))];
 }
+/**
+ * The colour scale of a signed quantity.  vik about zero when both signs matter; when nearly every value has one sign
+ * (the wet delay correction is mostly positive), viridis from 0 to the 99th percentile, its lowest colour holding
+ * every value below zero (the key says "<0"), so the range the values use gets the whole scale.
+ */
+function signedScale(values, label) {
+  const v = [];
+  const step = Math.max(1, Math.floor(values.length / 200000));
+  for (let i = 0; i < values.length; i += step) if (isFinite(values[i])) v.push(values[i]);
+  if (!v.length) return { kind: 'vik', lo: -1, hi: 1, label };
+  v.sort((p, q) => p - q);
+  const p1 = v[Math.floor(0.01 * (v.length - 1))], p99 = v[Math.ceil(0.99 * (v.length - 1))];
+  if (p99 > 0 && p1 >= -0.15 * p99) return { kind: 'viridis', lo: 0, hi: p99, label, loLabel: '<0' };
+  if (p1 < 0 && p99 <= -0.15 * p1) return { kind: 'viridis', lo: p1, hi: 0, label, hiLabel: '>0' };
+  const m = Math.max(Math.abs(p1), Math.abs(p99), 1e-9);
+  return { kind: 'vik', lo: -m, hi: m, label };
+}
+
 function scaleKey(parent, sc, fmtv) {
   const f = fmtv || shortNum;
-  const table = window.NV_ASSETS.colormaps[sc.kind === 'vik' ? 'vik' : 'viridis'];
+  const table = sc.kind === 'vik' ? window.NV_ASSETS.colormaps.vik : seqTable();
   const stops = table.map((c, i) => 'rgb(' + c.map(x => Math.round(255 * x)).join(',') + ') ' + Math.round(100 * i / (table.length - 1)) + '%');
   const lo = sc.kind === 'vik' ? -sc.hi : sc.lo;
-  const k = el('div', 'ckey', '<span>' + esc(sc.label || '') + '</span><span>' + esc(f(lo)) + '</span><span class="ramp" style="background:linear-gradient(90deg,' +
-    stops.join(',') + ')"></span><span>' + esc(f(sc.hi)) + '</span>');
+  const k = el('div', 'ckey', '<span>' + esc(sc.label || '') + '</span><span>' + esc(sc.loLabel || f(lo)) + '</span><span class="ramp" style="background:linear-gradient(90deg,' +
+    stops.join(',') + ')"></span><span>' + esc(sc.hiLabel || f(sc.hi)) + '</span>');
   parent.appendChild(k);
   return k;
 }

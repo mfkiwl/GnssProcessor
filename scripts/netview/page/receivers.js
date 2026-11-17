@@ -81,7 +81,8 @@ function metricScale(metric, nRows, rowFn) {
   const all = new Float32Array(nRows * M.nEp);
   for (let r = 0; r < nRows; r++) all.set(rowFn(r), r * M.nEp);
   if (metric.kind === 'count') { let mx = 0; for (const v of all) if (v > mx) mx = v; return { kind: 'count', lo: 0, hi: Math.max(1, mx), label: metric.label }; }
-  const [lo, hi] = robustSpan(all, metric.kind === 'vik');
+  if (metric.kind === 'vik') return signedScale(all, metric.label);
+  const [lo, hi] = robustSpan(all, false);
   return { kind: metric.kind, lo, hi, label: metric.label };
 }
 

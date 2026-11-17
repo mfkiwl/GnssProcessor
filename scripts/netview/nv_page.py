@@ -68,14 +68,51 @@ def pack(header: dict, arrays: dict) -> bytes:
     return bytes(out + blobs)
 
 
+#: typed-array name -> numpy dtype (the inverse of JS_TYPES).
+NP_TYPES = {v: k for k, v in JS_TYPES.items()}
+
+
+def unpack(raw: bytes) -> tuple[dict, dict]:
+    """(header, {name: numpy array}) of a block container written by pack()."""
+    if raw[:4] != b'NVB1':
+        raise ValueError('not a network view data block')
+    n = struct.unpack('<I', raw[4:8])[0]
+    head = json.loads(raw[8:8 + n].decode('utf-8'))
+    base = 8 + n
+    base += (-base) % 8
+    arrays = {}
+    for a in head.pop('arrays'):
+        dt = NP_TYPES[a['type']].newbyteorder('<')
+        start = base + a['offset']
+        arrays[a['name']] = np.frombuffer(raw, dt, count=a['length'], offset=start).reshape(a['shape'])
+    return head, arrays
+
+
+def read_page(path: Path) -> dict:
+    """Every block of a built page: {name: (header, arrays)} ('core' for the block decoded at open)."""
+    html = Path(path).read_text(encoding='utf-8')
+    out = {}
+    for m in re.finditer(r'<script id="(nv-data|nv-block-[a-z]+)" type="application/octet-stream" data-encoding="(gzip|raw)">'
+                         r'([A-Za-z0-9+/=]*)</script>', html):
+        raw = base64.b64decode(m.group(3))
+        if m.group(2) == 'gzip':
+            raw = gzip.decompress(raw)
+        name = 'core' if m.group(1) == 'nv-data' else m.group(1)[len('nv-block-'):]
+        out[name] = unpack(raw)
+    if 'core' not in out:
+        raise ValueError(f'{path}: not a page written by netview.py build')
+    return out
+
+
 def colormaps():
-    """viridis and vik anchor tables from pyviz/gnssviz/colormaps.py (loaded by path: the package's __init__ pulls
+    """viridis, vik and turbo anchor tables from pyviz/gnssviz/colormaps.py (loaded by path: the package's __init__ pulls
     in its viewers, which this tool does not need)."""
     p = REPO / 'pyviz' / 'gnssviz' / 'colormaps.py'
     spec = importlib.util.spec_from_file_location('nv_colormaps', p)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return {'viridis': np.round(mod._VIRIDIS, 4).tolist(), 'vik': np.round(mod._VIK, 4).tolist()}
+    return {'viridis': np.round(mod._VIRIDIS, 4).tolist(), 'vik': np.round(mod._VIK, 4).tolist(),
+            'turbo': np.round(mod._TURBO, 4).tolist()}
 
 
 def coastline():
@@ -90,8 +127,20 @@ def coastline():
 
 #: The page's style and script files, joined in this order (a file not yet written is skipped).
 CSS_FILES = ['netview.css', 'dashboard.css']
-JS_FILES = ['core.js', 'widgets.js', 'network.js', 'overview.js', 'receivers.js', 'satellites.js', 'los.js',
-            'slips.js', 'stochastic.js', 'atmosphere.js', 'products.js', 'events.js', 'main.js']
+JS_FILES = ['core.js', 'widgets.js', 'eventtext.js', 'network.js', 'overview.js', 'receivers.js', 'satellites.js',
+            'los.js', 'slips.js', 'stochastic.js', 'atmosphere.js', 'products.js', 'events.js', 'main.js']
+#: The live monitor's page (served by live/server.py): its own script, the dashboard's style and event words.
+LIVE_CSS_FILES = ['netview.css', 'dashboard.css', 'live.css']
+LIVE_JS_FILES = ['eventtext.js', 'live.js']
+
+
+def live_page_html(run: str) -> str:
+    """The live monitor's page as one HTML text (style, script and colour maps inlined)."""
+    page = (HERE / 'page' / 'live.html').read_text(encoding='utf-8')
+    assets = json.dumps({'colormaps': colormaps(), 'coastline': coastline()}, separators=(',', ':'))
+    fill = {'CSS': _joined(LIVE_CSS_FILES), 'ASSETS': f'window.NV_ASSETS = {assets};', 'JS': _joined(LIVE_JS_FILES),
+            'TITLE': _html_escape(f'Live network monitor {run}')}
+    return re.sub(r'\{\{(CSS|ASSETS|JS|TITLE)\}\}', lambda m: fill[m.group(1)], page)
 
 
 def _joined(names: list[str]) -> str:

@@ -52,6 +52,20 @@ The comparison page shows the two pages side by side; time, the view and its sel
 side keeps its own data (for example the same day from two reference receivers). The three files keep their
 relative places.
 
+## The live monitor (prototype)
+
+```
+py -3.14 scripts\netview\netview.py live <built page or run folder> [--speed 1] [--port 8770] [--start HH:MM]
+```
+
+The command starts a local server (bound to 127.0.0.1) and prints its address; the page there shows a rolling window
+of the network: key figures with their trend, receivers and satellites over the window for a chosen metric, a map,
+what happened (newest first, by family) and the selected receiver or satellite with every value over the window. For
+now it replays a finished run as a live engine would send it: `--speed` sets the epochs released per second, and the
+page's controls pause, change the rate or jump. A built page starts in seconds; a run folder is built first. The
+engine-side record that would feed it live is not built yet ([NETVIEW](../cards/tools/NETVIEW-network-view.md),
+section 12). Ctrl+C stops the server.
+
 ## Reading the page
 
 1. The rail on the left picks a layer; the badge beside it is its count. The path above the view leads back
@@ -70,6 +84,10 @@ relative places.
    page.
 7. The legend button explains the terms (layers, going deeper, tree link, held link, wide and narrow lane, jump,
    post-fit residual, sigma0, variance factor, MW, GF, wet delay).
+8. "Colours" in the header picks the colour map of magnitudes and counts: turbo (the default) or viridis (better in
+   print and for colour-vision deficiency); signed values keep a blue-red map. A signed quantity whose values nearly
+   all share one sign (the wet delay) gets a scale from 0, its lowest colour marked "<0". The atmosphere layer's
+   ionosphere map shows the vertical-equivalent delay or the slant delay.
 
 ## Tests
 

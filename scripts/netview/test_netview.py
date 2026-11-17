@@ -419,6 +419,62 @@ class TestDashboardBlocks(Fixture):
         self.assertNotIn('quality', blocks)                     # nothing to show without its traces
 
 
+class TestLive(Fixture):
+    def setUp(self):
+        super().setUp()
+        from live import telemetry
+        self.blocks = B.build_blocks(add_dashboard_traces(make_run(self.root)), log=lambda *x: None)
+        self.src = telemetry.ReplaySource(self.blocks)
+        self.telemetry = telemetry
+
+    def test_record_from_blocks(self):
+        meta = self.src.meta(window=10)
+        rx_keys = [f[0] for f in meta['rx_fields']]
+        rec = self.src.record(1)
+        json.dumps(rec, allow_nan=False)                                   # plain JSON: empty values are null
+        self.assertAlmostEqual(rec['rx'][0][rx_keys.index('code')], math.sqrt((0.3 ** 2 + 0.4 ** 2) / 2), places=4)
+        self.assertIsNone(rec['rx'][2][rx_keys.index('code')])            # R3 has no residuals
+        self.assertEqual(rec['e'], 1)
+        n_events = int(np.sum(np.asarray(self.blocks['core'][1]['ev_ep']) == 1))
+        self.assertEqual(len(rec['ev']), n_events)
+        net_keys = [f[0] for f in meta['net_fields']]
+        self.assertEqual(rec['net'][net_keys.index('disp')], 1.0)          # gate_withheld at 30 s
+
+    def test_page_round_trip(self):
+        out = self.root / 'page.html'
+        nv_page.write_page(out, self.blocks)
+        back = nv_page.read_page(out)
+        self.assertEqual(sorted(back), sorted(self.blocks))
+        self.assertTrue(np.array_equal(back['receivers'][1]['rp_c_rms'], self.blocks['receivers'][1]['rp_c_rms'], equal_nan=True))
+
+    def test_server_endpoints(self):
+        import threading
+        import urllib.request
+        from live import server
+        srv, replay, _clock = server.serve(self.src, '<html>live</html>', port=0, window=10, speed=50.0)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = f'http://127.0.0.1:{srv.server_address[1]}'
+        try:
+            meta = json.loads(urllib.request.urlopen(base + '/meta', timeout=10).read())
+            self.assertEqual(meta['n_ep'], len(TOWS))
+            st = json.loads(urllib.request.urlopen(base + '/control?pause=1&jump=2', timeout=10).read())
+            self.assertTrue(st['paused'])
+            self.assertEqual(st['e'], 2)
+            snap = json.loads(urllib.request.urlopen(base + '/snapshot', timeout=10).read())
+            self.assertEqual([r['e'] for r in snap['records']], [0, 1])     # the window before the jump target
+            self.assertEqual(urllib.request.urlopen(base + '/', timeout=10).read(), b'<html>live</html>')
+        finally:
+            replay.stopped = True
+            srv.shutdown()
+            srv.server_close()
+
+    def test_live_page_sources(self):
+        html = nv_page.live_page_html('run')
+        self.assertIn('window.NV_ASSETS', html)
+        self.assertIn('turbo', html)
+        self.assertNotRegex(html, r'<script[^>]+src=')
+
+
 class TestCommands(Fixture):
     def test_build_writes_one_self_contained_page(self):
         run = make_run(self.root)
@@ -464,7 +520,7 @@ class TestPlainWords(unittest.TestCase):
               'standing')
 
     def test_page_sources(self):
-        names = ['netview.html'] + nv_page.CSS_FILES + nv_page.JS_FILES
+        names = sorted(set(['netview.html', 'live.html'] + nv_page.CSS_FILES + nv_page.JS_FILES + nv_page.LIVE_CSS_FILES + nv_page.LIVE_JS_FILES))
         self.assertTrue(all((HERE / 'page' / n).exists() for n in names), 'a page file named in nv_page is missing')
         for name in names:
             text = (HERE / 'page' / name).read_text(encoding='utf-8').lower()

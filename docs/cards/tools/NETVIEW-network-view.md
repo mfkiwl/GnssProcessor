@@ -6,7 +6,7 @@
 - **topic:** tools
 - **status:** open
 - **summary:** A tool that turns the traces of one network run into one self-contained HTML page. Since 2026-11-17 the page is a dashboard of layers a reader clicks through (section 11): overview, network links (the trees, held and float links, each link's whole numbers), receivers, satellites, cycle slips, stochastic model, atmosphere, products and the held-out user check, events; and pages of one receiver, one satellite and one line of sight, all on one time cursor. Made on request from existing traces, no C++ change; `netview.py arm` writes a config copy with the two traces the reference configurations lack. Branch `viz/network-view`.
-- **dates:** 2026-11-15 (built and first version shown to the author); 2026-11-17 (the dashboard)
+- **dates:** 2026-11-15 (built and first version shown to the author); 2026-11-17 (the dashboard; the live monitor prototype, section 12)
 - **code:** `scripts/netview/` (`netview.py` with the commands build, arm and compare; readers `nv_read.py` and `nv_tables.py`, aggregation `nv_build.py` (core block) and `layers/` (the other blocks), page writer `nv_page.py`, the page's sources in `page/`, unit tests `test_netview.py`); how-to [onboarding/network_view.md](../../onboarding/network_view.md)
 - **knobs / posture:** none new. `arm` switches on existing trace keys only.
 - **run dirs:** pages of `D:\GnssProcessorSupport\runs_nom\_rap_o2s1j_n144`, `_rap_o2s1j_n144r`, `_rap_o2offj_n144`, `_rap_o9_n145`, `_rap_ka_sim` and `_rap_k0_sim` in `D:\GnssProcessorSupport\netview_out\` (the first page design); the dashboard of `_rap_l12_n144` as `D:\GnssProcessorSupport\netview_out\l12_n144.html`; the timing pair in `D:\GnssProcessorSupport\netview_out\timing\`
@@ -273,3 +273,68 @@ page file.
 1. Which metrics the overview's matrices should open with (now: post-fit code residual RMS for both).
 2. Whether runs over 6 h should get a thinned line-of-sight block (every second or fourth epoch).
 3. Whether the first page design should remain a separate output (it lives on as the network links layer).
+
+## 12. 2026-11-17: a 24 h page, the live monitor (prototype), colours and the atmosphere scales
+
+**24 h.** `_rap_d24_n147` (DOY 147, 2880 epochs): a page of 82 MB built in 112 s (core 21.0 MB, line of sight 39.7,
+satellites 10.9, receivers 8.8, quality 1.3, epoch 0.2). In Chromium the overview is ready 1.3 s after the page
+loads; the line-of-sight block decodes in 1.2 s the first time a line of sight or the atmosphere opens; a layer
+draws in 0.02 to 0.5 s and a time step in 5 to 9 ms; memory reaches about 660 MB once every block is open. A matrix of
+a long run has more epochs than pixel columns: each column now takes its epochs together, the largest value for
+counts (an isolated slip stays visible) and the mean otherwise.
+
+**The live monitor (prototype).** The author asked (2026-11-17) how the viewer would work in real time with 1 s
+sampling and streams, and agreed to an archived viewer plus a separate live monitor, starting with a replay. At
+1 s the 6 h rates scale to about 3,800 post-fit rows and 860 lines of sight per epoch, about 1 GB of post-fit rows per
+hour: no page holds that, so the live monitor keeps a rolling window of per-epoch summaries.
+
+- `netview.py live <built page or run folder> [--speed epochs/s] [--port 8770] [--window epochs] [--start HH:MM]`
+  starts a local server (Python standard library, bound to 127.0.0.1): the page, the run's description (`/meta`), a
+  stream of one record per epoch (`/stream`, server-sent events), the window once (`/snapshot`), the replay controls
+  (`/control`: speed, pause, jump) and the archived dashboard (`/archive`). A built page opens in seconds (its blocks
+  are read back, `nv_page.read_page`); a run folder is built first.
+- The record (`live/telemetry.py`) is what a live engine would send: the whole network (disposition, sigma0 code and
+  phase, receivers in the solution, satellites with a clock, the held-out user's error, time per epoch), held and all
+  links per family, 11 values per receiver, 8 per satellite and the epoch's events: about 1,100 numbers, 7 to 9 KB.
+  The replay source builds it from the dashboard's blocks, so the page is judged before any engine change.
+- The page (`page/live.html`, `live.js`, `live.css`): tiles at the cursor with their trend; receivers and satellites
+  over the window for a chosen metric, worst rows first; the receivers on a map with a ring after an alarm; what
+  happened, newest first, by family (bookkeeping rows, such as the bands a slip response covers, hidden unless
+  asked); the selected receiver or satellite with every value over the window and its events, and a link to its page
+  in the archived dashboard at that time. "Follow now" keeps the cursor on the newest epoch; the page redraws at most
+  2.5 times a second however fast records arrive.
+- Measured on `_rap_d24_n147` at 2 epochs/s (60 times real time): the first message (the window, 240 epochs) is
+  2.4 MB; a full redraw costs 60 to 85 ms (tiles 16, each matrix 10, the selected panel 21, the feed 3, the map 2).
+- Not built: the engine-side record. It belongs in one row of `kNetworkEpochObservers` (a measure-only instrument,
+  default off, products byte-identical when on) and needs the author's approval before any C++ change. Nor the hourly
+  archive blocks the live server could write.
+
+**Colours.** The author asked (2026-11-17) for a turbo colour map on the residual colour bars and similar figures.
+Magnitudes and counts (matrices, maps, their keys, the node colours of the network) now use turbo by default, from
+the anchor table of `pyviz/gnssviz/colormaps.py`; a "Colours" switch in the page's header returns to viridis and the
+choice is kept in the browser. Signed values keep vik. Turbo resolves small differences better; it is not uniform in
+lightness, so viridis remains the choice for print and for readers with colour-vision deficiency.
+
+**Atmosphere scales.** The author noted that the wet-delay scale spanned -40 to +40 cm while nearly every value lies
+between 0 and 40 cm. A signed quantity whose values nearly all have one sign (1st percentile above -15 % of the 99th)
+now gets a magnitude scale from 0 to its 99th percentile, its lowest colour holding the values below zero (the key
+says "<0"); the dashboard and the live monitor share the rule. The ionosphere map shows the vertical-equivalent
+ionosphere by default (slant x cos(zenith at the 350 km shell)), with a switch back to slant.
+
+**The stochastic model looks pessimistic** (the author, 2026-11-17, from the stochastic model layer). On
+`_rap_d24_n147` every class of observation has a variance factor between 0.15 and 0.28 (the sigma ratio, its square
+root, 0.38 to 0.53), steady over the 24 h; post-fit sigma0 has a median of 0.29 for code and 0.18 for phase. At 30 to 35
+degrees the code residuals have an RMS of 0.23 to 0.28 m against an a priori sigma of 0.56 m; the phase residuals 0.6 to
+1.2 mm against 3.7 mm (before the redundancy is taken into account). Card VCF (2026-11-07) bears on how to read this:
+the code factor agrees with its field URA ratio of 0.37 to 0.40, while the phase factor read 0.4 to 0.6 on the
+simulator even with a phase error above the a priori, so the phase factor is not a clean measurement. `vcf_apply`
+(armed) feeds the emitted URA only; the weights of the solve do not use the factors, and `vcf_apply_phase` is off.
+
+**Verification.** 31 unit tests pass (4 new: the live record from blocks, the page's blocks read back, the server's
+endpoints, the live page's sources); the live page drawn in Chromium and in headless Chrome (`?still`); docs verify.
+
+**Open questions.**
+1. Whether to build the engine-side record (one observer row, default off) now that the replay shows the page.
+2. Whether the live window should be longer, or hold one-minute summaries beyond the last hour.
+3. Whether to test a rescaled code sigma (a sigma ratio near 0.45) in an arm, simulator first since it moves the
+   fixing's gates.

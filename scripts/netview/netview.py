@@ -3,6 +3,7 @@
     py -3.14 scripts/netview/netview.py build <run folder> [-o page.html] [--no-compress]
     py -3.14 scripts/netview/netview.py arm <config.json> -o <armed config.json> [--no-map]
     py -3.14 scripts/netview/netview.py compare <page A.html> <page B.html> -o <compare.html>
+    py -3.14 scripts/netview/netview.py live <built page or run folder> [--speed 1] [--port 8770] [--start HH:MM]
 
 build   reads the run folder's traces (logs/*.csv, logs/network_run_manifest.json and products.txt) and writes one
         HTML page that opens by double-click from file:// (no server, no network access).  Default output:
@@ -53,6 +54,41 @@ def cmd_build(a) -> int:
     return 0
 
 
+def cmd_live(a) -> int:
+    from live import server, telemetry
+    src = Path(a.source)
+    if src.is_file() and src.suffix.lower() in ('.html', '.htm'):
+        print(f'reading the blocks of {src}', flush=True)
+        blocks, archive = nv_page.read_page(src), src
+    elif src.is_dir():
+        print(f'reading {src} (a built page opens faster: netview.py live <page.html>)')
+        blocks, archive = nv_build.build_blocks(src), None
+    else:
+        print(f'{src}: neither a run folder nor a built page', file=sys.stderr)
+        return 2
+    source = telemetry.ReplaySource(blocks, archive=archive is not None)
+    start = 0
+    if a.start:
+        if ':' in a.start:                                     # a GPS time of day, HH:MM
+            hh, mm = (int(x) for x in a.start.split(':')[:2])
+            tod = ((source.abs_ms // 1000) % 86400)
+            start = int(min(range(source.n_ep), key=lambda e: abs(int(tod[e]) - (hh * 3600 + mm * 60))))
+        else:
+            start = int(a.start)
+    html = nv_page.live_page_html(blocks['core'][0]['run'])
+    srv, replay, _clock = server.serve(source, html, port=a.port, window=a.window, speed=a.speed, start=start, archive=archive)
+    print(f'live monitor of {blocks["core"][0]["run"]}: http://127.0.0.1:{a.port}/   '
+          f'(replaying {source.n_ep} epochs of {source.step_s:g} s from epoch {start}, {a.speed:g} epochs/s; Ctrl+C stops)', flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        replay.stopped = True
+        srv.server_close()
+    return 0
+
+
 def cmd_arm(a) -> int:
     changed, notes = nv_arm.arm(Path(a.config), Path(a.output), with_map=not a.no_map)
     print(f'wrote {a.output}')
@@ -89,6 +125,13 @@ def main(argv=None) -> int:
     r.add_argument('-o', '--output', required=True)
     r.add_argument('--no-map', action='store_true', help='leave the ionosphere trace (satellite positions) as it is')
     r.set_defaults(fn=cmd_arm)
+    lv = sub.add_parser('live', help='the live monitor (prototype): replay a run as if it were live, in a local page')
+    lv.add_argument('source', help='a built page (fast) or a run folder')
+    lv.add_argument('--port', type=int, default=8770)
+    lv.add_argument('--speed', type=float, default=1.0, help='epochs released per second (default 1)')
+    lv.add_argument('--window', type=int, default=240, help='epochs the page keeps (default 240)')
+    lv.add_argument('--start', help='first epoch: an index or a GPS time of day HH:MM')
+    lv.set_defaults(fn=cmd_live)
     c = sub.add_parser('compare', help='a page showing two built pages side by side, time and selection linked')
     c.add_argument('page_a')
     c.add_argument('page_b')

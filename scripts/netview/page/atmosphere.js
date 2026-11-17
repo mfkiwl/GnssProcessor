@@ -43,14 +43,14 @@ function rxVerticalIono() {
   return out;
 }
 
-const ATV = {};
+const ATV = { iono: 'vertical' };
 
 function renderAtmosphere(root) {
   root.innerHTML = '';
   const pad = el('div', 'pad');
   root.appendChild(pad);
   const ne = M.nEp, L = B('los');
-  viewHead(pad, 'Atmosphere', 'wet delay per receiver and slant ionosphere per line of sight');
+  viewHead(pad, 'Atmosphere', 'wet delay per receiver; ionosphere per line of sight, slant or vertical');
   missingNote(pad, 'atmosphere');
   const zwd = M.A.rx_zwd, vio = rxVerticalIono();
   const col = (a, e) => Array.from({ length: M.nSta }, (_x, j) => a ? a[j * ne + e] : NaN);
@@ -69,37 +69,49 @@ function renderAtmosphere(root) {
   pad.appendChild(g);
   if (zwd) {
     const p = panel(g, 'Wet delay at the cursor', 'correction to the model per receiver');
-    const [, hi] = robustSpan(zwd, true);
-    const sc = { kind: 'vik', lo: -hi, hi, label: 'wet delay' };
+    const sc = signedScale(zwd, 'wet delay');
     ATV.zmap = worldMap(p, { height: 320, scale: sc, points: () => M.H.stations.map((s, j) => ({ label: s.name, lat: s.lat, lon: s.lon, value: zwd[j * ne + S.ep] })),
       text: j => fmtLen(zwd[j * ne + S.ep]) + ' +- ' + fmtLen(M.A.rx_zwd_sd[j * ne + S.ep]), onClick: j => openNode(j) });
     scaleKey(p, sc, v => fmtLen(v));
   }
   if (L && L.A.laz && L.A.lion) {
-    const p = panel(g, 'Slant ionosphere at the cursor', 'each line of sight at its pierce point (shell at 350 km), above 10 degrees');
+    const vert = ATV.iono === 'vertical';
+    const p = panel(g, (vert ? 'Vertical' : 'Slant') + ' ionosphere at the cursor', 'each line of sight at its pierce point (shell at 350 km), above 10 degrees' +
+      (vert ? '; slant x cos(zenith at the shell)' : ''));
+    const ctl = el('div', 'row', '<span class="seg"><button data-i="vertical" class="' + (vert ? 'on' : '') + '">vertical</button><button data-i="slant" class="' + (vert ? '' : 'on') + '">slant</button></span>');
+    p.appendChild(ctl);
+    ctl.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { ATV.iono = b.dataset.i; renderAtmosphere(root); }));
+    const factor = elv => (vert ? Math.cos(Math.asin(EARTH_R / (EARTH_R + IONO_SHELL_M) * Math.cos(elv * Math.PI / 180))) : 1);
     const v = [];
-    for (let i = 0; i < L.A.lion.length; i += 7) if (L.A.lion[i] !== -32768) v.push(L.A.lion[i] / L.H.scales.lion);
+    for (let li = 0; li < L.A.los_sta.length; li += 3) {
+      const j = L.A.los_sta[li], k = L.A.los_sat[li];
+      for (let e = 0; e < ne; e += 7) {
+        const q = L.A.lion[li * ne + e], elv = M.A.los_el[(j * M.nSat + k) * ne + e];
+        if (q !== -32768 && elv !== 255 && elv >= 10) v.push(q / L.H.scales.lion * factor(elv));
+      }
+    }
     const [lo, hi] = robustSpan(Float32Array.from(v), false);
-    const sc = { kind: 'viridis', lo: Math.max(0, lo), hi, label: 'slant ionosphere' };
+    const sc = { kind: 'viridis', lo: Math.max(0, lo), hi, label: (vert ? 'vertical' : 'slant') + ' ionosphere', loLabel: lo < 0 ? '<0' : null };
     ATV.imap = worldMap(p, { height: 320, scale: sc, points: e => {
       const pts = [];
       for (let li = 0; li < L.A.los_sta.length; li++) {
         const j = L.A.los_sta[li], k = L.A.los_sat[li], q = L.A.lion[li * ne + e], az = L.A.laz[li * ne + e], elv = M.A.los_el[(j * M.nSat + k) * ne + e];
         if (q === -32768 || az === 255 || elv === 255 || elv < 10 || !isFinite(M.lat[j])) continue;
         const pp = piercePoint(M.lat[j], M.lon[j], az * 360 / 254, elv);
-        pts.push({ label: M.names[j] + ' - ' + M.H.sats[k], lat: pp.lat, lon: pp.lon, value: q / L.H.scales.lion, r: 2.6, j, k });
+        const slant = q / L.H.scales.lion;
+        pts.push({ label: M.names[j] + ' - ' + M.H.sats[k], lat: pp.lat, lon: pp.lon, value: vert ? slant * pp.vert : slant, slant, vertical: slant * pp.vert, r: 2.6, j, k });
       }
       ATV.ipts = pts;
       return pts;
-    }, text: i => ATV.ipts && ATV.ipts[i] ? fmtLen(ATV.ipts[i].value) + ' slant' : '', onClick: i => { const q = ATV.ipts && ATV.ipts[i]; if (q) openLink(q.j, q.k); } });
+    }, text: i => { const q = ATV.ipts && ATV.ipts[i]; return q ? 'vertical ' + fmtLen(q.vertical) + ', slant ' + fmtLen(q.slant) : ''; },
+    onClick: i => { const q = ATV.ipts && ATV.ipts[i]; if (q) openLink(q.j, q.k); } });
     scaleKey(p, sc, x => fmtLen(x));
   }
   if (zwd) {
     const p = panel(pad, 'Wet delay over time', 'receivers x time, ordered by name; a click opens the receiver');
     const names = M.H.stations.map(s => s.name);
     const order = names.map((_n, j) => j).sort((a, b) => names[a].localeCompare(names[b]));
-    const [, hi] = robustSpan(zwd, true);
-    const sc = { kind: 'vik', lo: -hi, hi, label: 'wet delay' };
+    const sc = signedScale(zwd, 'wet delay');
     matrix(p, { rows: order.map(j => names[j]), scale: sc, value: (r, e) => zwd[order[r] * ne + e], text: (r, e, v) => fmtLen(v), onClick: (r, e) => { S.ep = e; openNode(order[r]); } });
     scaleKey(p, sc, v => fmtLen(v));
   }

@@ -336,7 +336,7 @@ function rxSeries(name, sta, band) {
 
 const S = {
   ep: 0, fam: 0, bandSel: 0, layout: 'rings', showFloat: true, showHeld: true, showLabels: true,
-  sel: null, hover: null, playing: false, speed: 5, showOther: false,
+  sel: null, hover: null, playing: false, speed: 5, showOther: false, seqMap: 'turbo',
 };
 const C = {};
 const COLOR_KEYS = ['bg', 'panel', 'ink', 'muted', 'line', 'soft', 'tree', 'held', 'decided', 'refused', 'float',
@@ -356,6 +356,12 @@ function rampColor(table, t) {
   return 'rgb(' + c.join(',') + ')';
 }
 function viridis(t) { return rampColor(window.NV_ASSETS.colormaps.viridis, t); }
+/** The colour map of magnitudes and counts (matrices, maps, node colours): turbo, the author's choice for residuals and
+ *  similar (2026-11-17), or viridis; the reader's pick is kept in the browser.  Signed values keep vik. */
+function seqTable() { return window.NV_ASSETS.colormaps[S.seqMap] || window.NV_ASSETS.colormaps.viridis; }
+function seqColor(t) { return rampColor(seqTable(), t); }
+function loadSeqMap() { try { const v = localStorage.getItem('netview.seqmap'); if (v === 'turbo' || v === 'viridis') S.seqMap = v; } catch (_e) { /* no storage: the default stays */ } }
+function saveSeqMap() { try { localStorage.setItem('netview.seqmap', S.seqMap); } catch (_e) { /* no storage */ } }
 function vik(t) { return rampColor(window.NV_ASSETS.colormaps.vik, (t + 1) / 2); }
 function withAlpha(color, a) {
   if (color.startsWith('#')) {
@@ -1010,6 +1016,15 @@ function wireCommon() {
     if (R.name === 'network') selectNode(n); else openNode(n);
     search.value = '';
   });
+  const sm = document.getElementById('seqmap');
+  sm.value = S.seqMap;
+  sm.addEventListener('change', () => {
+    S.seqMap = sm.value;
+    saveSeqMap();
+    for (const c of CHARTS) c.img = null;
+    if (R.view && R.view.recolor) R.view.recolor(); else if (R.view) R.view.show(R.args, R.query);
+    drawAllCharts();
+  });
   document.getElementById('legend-btn').addEventListener('click', () => { document.getElementById('legend').hidden = false; });
   document.getElementById('legend-close').addEventListener('click', () => { document.getElementById('legend').hidden = true; });
   document.getElementById('legend').addEventListener('click', ev => { if (ev.target.id === 'legend') ev.target.hidden = true; });
@@ -1072,6 +1087,7 @@ async function start() {
   buildModel(H, A);
   BLOCKS.core = Promise.resolve({ H, A });
   readColors();
+  loadSeqMap();
   S.fam = defaultFamily();
   loadQuery(parseHash().q);
   document.getElementById('run-name').textContent = 'Network dashboard: ' + H.run;
