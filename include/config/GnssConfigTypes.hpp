@@ -3875,6 +3875,13 @@ namespace GnssProcessor {
         /// (default): erase, as before.  Read only where the event response is armed (the float vehicle with
         /// @c network.carry_zwd_in_block).
         double zwd_event_inflate_m{ 0.0 };
+        /// Emit @c network_live.jsonl (network/diag/LiveRecord.hpp): one JSON line per
+        /// processed epoch, flushed at each line, for the live monitor
+        /// (scripts/netview/netview.py live): how the epoch ended, the post-fit sigma0 of code
+        /// and phase, per receiver and per satellite post-fit residual summaries, the wet delay,
+        /// the receiver clock sigma, the emitted clocks, the held-out user's error and the
+        /// epoch's events.  Measure-only; off by default, byte-identical when off (no file).
+        bool trace_live_record{ false };
         bool trace_events{ false };       ///< Emit @c network_events.csv (L2): one structured long-format row per discrete QC action (tiers T1 IF-slip … T6 clock-monitor, plus GATE / SIGMA0 / PIVOT / RETRO), in place of scraping spdlog with regular expressions for which satellite, station or arc was acted on and when.  Pivot handover and retro-bump arming are logged nowhere else.  Rows are written even on epochs that are later withheld (they are part of the disposition record).  O(QC events); off by default, byte-identical when off (no new file).
         /// Replay a product file that has no S contract line.  Such a
         /// wire (from before the S contract line) replays with the default emitter (no

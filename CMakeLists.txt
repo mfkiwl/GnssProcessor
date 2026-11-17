@@ -345,6 +345,7 @@ add_library(gnss_core STATIC
     src/core/network/carry/ZwdEdge.cpp
     src/core/network/diag/ShHealth.cpp
     src/core/network/diag/Leveling.cpp
+    src/core/network/diag/LiveRecord.cpp
     src/core/network/diag/StashStatus.cpp
     src/core/network/ar/ProducerAr.cpp
     src/core/network/ar/RingFix.cpp
@@ -858,6 +859,7 @@ add_executable(gnss_tests
     tests/network/test_network_run_end.cpp
     tests/network/test_network_entities_records.cpp
     tests/network/test_network_epoch_observers.cpp
+    tests/network/test_network_live_record.cpp
     tests/network/test_network_sat_clock_event.cpp
     tests/network/test_network_iftd_sat_centre.cpp
     tests/network/test_network_apriori_clock_track.cpp
