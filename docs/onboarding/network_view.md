@@ -30,7 +30,8 @@ fixing and the chain datum change the estimate and are never switched on by it).
 (`config\golden\`) already arm every trace the dashboard reads but two: `network.trace_chain_datum` (the trees and
 the links) and `network.trace_rpb_states` (the receiver phase bias); both write only on a run with the chain datum
 (`network.phase_datum_eq34`). `arm` also switches on `network.trace_live_record`, the record the live monitor follows
-(below). The run is then made as usual from the armed copy.
+(below), for a configuration that is not a copy of the reference ones (they arm it). The run is then made as usual
+from the armed copy.
 
 | Trace | Key | Size per 6 h, 56 receivers, GPS + Galileo |
 | --- | --- | --- |
@@ -65,8 +66,9 @@ of the network: key figures with their trend, receivers and satellites over the 
 what happened (newest first, by family) and the selected receiver or satellite with every value over the window. The
 page's controls pause, change the rate or jump. Ctrl+C stops the server.
 
-- **Following an engine.** With `network.trace_live_record` on, the engine writes `logs\network_live.jsonl`: a header
-  with the receivers, then one line per epoch, flushed as each epoch ends. `live` on such a run folder, or on the file
+- **Following an engine.** With `network.trace_live_record` on (armed in the reference configurations since
+  2026-11-17, so every run copied from them has it), the engine writes `logs\network_live.jsonl`: a header with the
+  receivers, then one line per epoch, flushed as each epoch ends. `live` on such a run folder, or on the file
   itself, opens on the newest epochs and shows each new epoch as soon as the engine has written it, while the engine
   runs or after it has finished. A run folder without products yet is taken as an engine that is starting: the page
   waits for its first epoch. After a jump back, `--speed` (default 50 epochs per second) sets how fast the window

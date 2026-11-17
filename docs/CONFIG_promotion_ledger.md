@@ -135,17 +135,17 @@ The full-prose ledger before 2026-10-13 is in git (`git show 8326da3:docs/CONFIG
 
 | verdict | keys |
 | --- | --- |
-| RECOMMEND_ON | 25 |
+| RECOMMEND_ON | 26 |
 | RECOMMEND_SCOPED | 94 |
 | ARMED | 43 |
 | UNVALIDATED | 65 |
 | KEEP_OFF | 104 |
 | REMOVE | 0 |
-| TRACE | 68 |
+| TRACE | 67 |
 | PARAM | 298 |
 | CORE | 28 |
 
-## RECOMMEND_ON (25)
+## RECOMMEND_ON (26)
 
 Arm in its regime. Machine-checked: a regime predicate here and a row in the loader's posture table.
 
@@ -162,6 +162,7 @@ Arm in its regime. Machine-checked: a regime predicate here and a row in the loa
 | `network.state_snapshot_require` | false |  | `warm` | Makes any refused warm resume a hard run error instead of a silent cold start; inert without a snapshot path, so out of regime on the cold goldens; the seam add-back needs it. | [CARD-AB-require-and-rx-clock-step](record/cards/harness/CARD-AB-require-and-rx-clock-step.md) |
 | `network.trace_epoch_status` | false | true | `True` | One CSV row per processed epoch recording the disposition (emitted, or why skipped) and sigma0; O(epochs) cost, solve-inert; pinned on in both goldens. |  |
 | `network.trace_flag_rates` | false | true | `True` | Per-tier QC flag counters plus network_flag_rates.csv and network_run_summary.csv at run end; solve-inert; pinned on in both goldens. End-of-run writer, so a killed run writes nothing. |  |
+| `network.trace_live_record` | false | true | `True` | Armed 2026-11-17 in the goldens at the author's decision (card NETVIEW section 13). Writes network_live.jsonl, one JSON line per processed epoch, flushed at each line, for the live monitor (scripts/netview/netview.py live): how the epoch ended, post-fit sigma0, per-receiver and per-satellite residual summaries, wet delay, receiver clock sigma, emitted clocks, the held-out user's error and the epoch's events; measure-only, no file when off. Verified 2026-11-17 by a 1 h same-build pair on DOY 129 (products byte-identical, traces identical but for their wall-clock columns, no measured cost), by the record against that run's traces and a 6 h run's (every epoch and every event equal) and by 1 h pairs on the sim and BeiDou goldens; to do: a streaming run. | [NETVIEW-network-view](cards/tools/NETVIEW-network-view.md) |
 | `network.trace_prefit_census` | false | true | `True` | Common-mode-removed prefit row census; 7.6 ms per epoch at 63 stations with the solve byte-identical; pinned on in both goldens. | [SPEC_prefit_census_observability](SPEC_prefit_census_observability.md) |
 | `network.trace_section_timers` | false | true | `True` | Per-epoch section-timer breakdown, measured byte-identical on and off; the only per-epoch cost attribution; pinned in both goldens. | [CARD-1B-JOINT-WHITENING](record/cards/network-vehicle/CARD-1B-JOINT-WHITENING.md) |
 | `network.trace_topology` | false | true | `True` | Topology ledger events (tie-row, row-kind and shared-column registry deltas) on the census walk; solve byte-identical on FT63 leg 19; pinned on in both goldens. | [SPEC_prefit_census_observability](SPEC_prefit_census_observability.md) |
@@ -518,7 +519,7 @@ Delete candidate: parsed but never read, inert as built, or a retired mechanism 
 | key | why | evidence |
 | --- | --- | --- |
 
-## TRACE (68)
+## TRACE (67)
 
 Observability only (a CSV, log line or record); solve-inert.
 
@@ -527,7 +528,7 @@ Observability only (a CSV, log line or record); solve-inert.
 - **ClosedLoop**: `network.closed_loop.ar_observe`, `network.closed_loop.trace_ar_fixes`
 - **EmissionFilters**: `network.clock_level_monitor`, `network.datum_graph_census`, `network.phase_visible_monitor`
 - **LaneLayers**: `network.sd_ewl.trace`
-- **ObservabilityAndSnapshot**: `network.adm_trace`, `network.neq_export_epoch`, `network.redundancy_census_stride`, `network.rhs_attrib_tow`, `network.seed_birth_check_sigma`, `network.state_snapshot_keep_history`, `network.trace_chain_datum`, `network.trace_consumer_sat`, `network.trace_live_record`, `network.trace_pb_prehold`, `network.trace_postfit_keyed`, `network.trace_postfit_rows`, `network.trace_rotate_mb`, `network.trace_rpb_states`, `network.trace_rx_states`, `network.trace_sat_bias_states`, `network.trace_sh_spectrum`, `network.trace_ssr_consumer`, `network.trace_station_block`, `network.trace_station_pd_null`, `network.trace_station_residuals`, `network.trace_zwd`
+- **ObservabilityAndSnapshot**: `network.adm_trace`, `network.neq_export_epoch`, `network.redundancy_census_stride`, `network.rhs_attrib_tow`, `network.seed_birth_check_sigma`, `network.state_snapshot_keep_history`, `network.trace_chain_datum`, `network.trace_consumer_sat`, `network.trace_pb_prehold`, `network.trace_postfit_keyed`, `network.trace_postfit_rows`, `network.trace_rotate_mb`, `network.trace_rpb_states`, `network.trace_rx_states`, `network.trace_sat_bias_states`, `network.trace_sh_spectrum`, `network.trace_ssr_consumer`, `network.trace_station_block`, `network.trace_station_pd_null`, `network.trace_station_residuals`, `network.trace_zwd`
 - **OutputAndParallel**: `network.trace_anchor_info`, `network.trace_clock_full`, `network.trace_estimability`, `network.trace_ionosphere`, `network.trace_slip_events`, `network.trace_slip_raw`, `network.trace_stations`
 - **ProducerAr**: `network.ambiguity_resolution.block_search`, `network.ambiguity_resolution.cycle_basis`, `network.ambiguity_resolution.decorrelated_partial`, `network.ambiguity_resolution.enable`, `network.ambiguity_resolution.suspect_epochs`, `network.ambiguity_resolution.trace_lattice`, `network.ambiguity_resolution.tree_basis`
 - **QcTiers**: `network.block_baarda`, `network.block_baarda_corroborate`, `network.block_baarda_estimable`, `network.congruence_screen`, `network.ledger_screens`, `network.level_authority_los_dump`, `network.mdb`, `network.raim_rate_hygiene`, `network.raim_station_factor`, `network.signal_roster`

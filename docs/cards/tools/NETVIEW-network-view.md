@@ -5,17 +5,17 @@
 - **id:** NETVIEW
 - **topic:** tools
 - **status:** open
-- **summary:** A tool that turns the traces of one network run into one self-contained HTML page. Since 2026-11-17 the page is a dashboard of layers a reader clicks through (section 11): overview, network links (the trees, held and float links, each link's whole numbers), receivers, satellites, cycle slips, stochastic model, atmosphere, products and the held-out user check, events; and pages of one receiver, one satellite and one line of sight, all on one time cursor. Made on request from existing traces; `netview.py arm` writes a config copy with the traces the reference configurations lack. A live monitor (section 12) follows a running engine through the live record (`network.trace_live_record`, section 13), the one engine change: an observer, off by default. Branch `viz/network-view`.
-- **dates:** 2026-11-15 (built and first version shown to the author); 2026-11-17 (the dashboard; the live monitor prototype, section 12; the live record in the engine and the monitor following it, section 13)
+- **summary:** A tool that turns the traces of one network run into one self-contained HTML page. Since 2026-11-17 the page is a dashboard of layers a reader clicks through (section 11): overview, network links (the trees, held and float links, each link's whole numbers), receivers, satellites, cycle slips, stochastic model, atmosphere, products and the held-out user check, events; and pages of one receiver, one satellite and one line of sight, all on one time cursor. Made on request from existing traces; `netview.py arm` writes a config copy with the traces the reference configurations lack. A live monitor (section 12) follows a running engine through the live record (`network.trace_live_record`, section 13), the one engine change: an observer, off by default in the loader and armed in the goldens since 2026-11-17 (section 14). Branch `viz/network-view`.
+- **dates:** 2026-11-15 (built and first version shown to the author); 2026-11-17 (the dashboard; the live monitor prototype, section 12; the live record in the engine and the monitor following it, section 13; the record armed in the goldens, section 14)
 - **code:** `scripts/netview/` (`netview.py` with the commands build, arm and compare; readers `nv_read.py` and `nv_tables.py`, aggregation `nv_build.py` (core block) and `layers/` (the other blocks), page writer `nv_page.py`, the page's sources in `page/`, unit tests `test_netview.py`; the live monitor in `live/`: `server.py`, the replay source `telemetry.py`, the follow source `follow.py`); the engine's record `include/network/diag/LiveRecord.hpp`, `src/core/network/diag/LiveRecord.cpp`, tests `tests/network/test_network_live_record.cpp`; how-to [onboarding/network_view.md](../../onboarding/network_view.md)
-- **knobs / posture:** `network.trace_live_record` (TRACE, off by default, measure-only; section 13). `arm` switches on trace keys only.
-- **run dirs:** pages of `D:\GnssProcessorSupport\runs_nom\_rap_o2s1j_n144`, `_rap_o2s1j_n144r`, `_rap_o2offj_n144`, `_rap_o9_n145`, `_rap_ka_sim` and `_rap_k0_sim` in `D:\GnssProcessorSupport\netview_out\` (the first page design); the dashboard of `_rap_l12_n144` as `D:\GnssProcessorSupport\netview_out\l12_n144.html`; the timing pair in `D:\GnssProcessorSupport\netview_out\timing\`; the live record's arms `D:\GnssProcessorSupport\runs_nom\_rap_lvr_smoke`, `_rap_lvr_off`, `_rap_lvr_on` and `_rap_lvr_live`
+- **knobs / posture:** `network.trace_live_record` (measure-only, loader default off; RECOMMEND_ON and pinned in the goldens since 2026-11-17, sections 13 and 14). `arm` switches on trace keys only.
+- **run dirs:** pages of `D:\GnssProcessorSupport\runs_nom\_rap_o2s1j_n144`, `_rap_o2s1j_n144r`, `_rap_o2offj_n144`, `_rap_o9_n145`, `_rap_ka_sim` and `_rap_k0_sim` in `D:\GnssProcessorSupport\netview_out\` (the first page design); the dashboard of `_rap_l12_n144` as `D:\GnssProcessorSupport\netview_out\l12_n144.html`; the timing pair in `D:\GnssProcessorSupport\netview_out\timing\`; the live record's arms `D:\GnssProcessorSupport\runs_nom\_rap_lvr_smoke`, `_rap_lvr_off`, `_rap_lvr_on`, `_rap_lvr_live`, `_rap_lvr_sim_off`, `_rap_lvr_sim_on`, `_rap_lvr_bds_off`, `_rap_lvr_bds_on` and `_rap_lvr_gsmoke`
 - **source:** the author's request of 2026-11-15 (section 1); the definitions of NRF and BER (branch `irdu/user-integers`, `docs/refound/NRF_network_ring_fixing_2026-11-14*.md`, `BER_bad_epoch_response_2026-11-15.md`) and of ARNF sections 3, 9 and 15 (branch `ar/rx-sat-code-bias`)
 
 **Outcome.** Built, then rebuilt as a dashboard (section 11), with a live monitor (sections 12 and 13). One
 command makes a 22 MB page from a 6 h run of 56 receivers in about 40 s; the overview is ready about 0.9 s
 after the page loads and a layer opens in 0.01 to 0.2 s. Nine layers lead to pages of one receiver, one
-satellite and one line of sight. The engine's live record (`network.trace_live_record`, off by default)
+satellite and one line of sight. The engine's live record (`network.trace_live_record`, armed in the goldens)
 writes one line per epoch, which `netview.py live` follows while the engine runs; its values equal the
 run's traces and the products stay byte-identical.
 
@@ -426,3 +426,30 @@ source of the live monitor, and the feed lists them under bookkeeping. The dashb
 1. Whether to arm the record in the reference configurations (TRACE now): about 12 MB per 6 h, no measured cost.
 2. Whether the event detail text, half of the bytes, should be optional for a 1 s network of hundreds of receivers.
 3. The hourly archive blocks of section 12 (a page of the last hours written by the live server) remain unbuilt.
+
+## 14. 2026-11-17: the live record armed in the goldens
+
+The author decided the same day to arm the record in the reference configurations (open question 1 of section 13).
+`network.trace_live_record` is pinned in `config/golden/golden_manifest.json` on the sim and field lineages, and so
+reaches the BeiDou lineage through its base, with a dated line in the manifest's comment; the ledger row is
+RECOMMEND_ON with regime `True` and `golden` set, so the verify requires the key on every golden. The regenerated
+goldens differ from the previous generation only by the key and their provenance header; the loader default stays
+off. The loader's posture readout (`src/core/config/GnssConfigNetworkPosture.cpp`, a log-only table that
+`scripts/config_posture_check.py --verify-loader` checks against the ledger) gains the key in its ON tier: 116 of
+116 recommended knobs named, and a 6-minute smoke of the regenerated observed-data golden (`_rap_lvr_gsmoke`, exe
+`gnss_processor_live2.exe`, sha256[:16] 5db85906c34489e9) reads "ON tier 25/25 armed" (24/24 before) and writes the
+record from the golden alone.
+
+Checks, 1 h each, the record on (as armed) against off, exe `gnss_processor_live.exe` (sha256[:16] fc7a2840f1ad0b12):
+
+| Golden | Arms | Products, both arms (sha256[:16]) | Traces beyond wall-clock columns | Record against traces | Record per epoch | Epoch loop, off / on |
+| --- | --- | --- | --- | --- | --- | --- |
+| observed data | `_rap_lvr_off`, `_rap_lvr_on` (section 13) | 33d206d2632bb303 | identical | 121 epochs, 8,371 events equal | 18.1 KB | 727 / 726 ms |
+| sim, from 00:30:15 | `_rap_lvr_sim_off`, `_rap_lvr_sim_on` | b1c9f964683ff776 | identical | 121 epochs, 5,046 events equal | 12.9 KB | 498 / 516 ms |
+| BeiDou lineage | `_rap_lvr_bds_off`, `_rap_lvr_bds_on` | 93917b76ab41459f | identical | 121 epochs, 12,566 events equal | 25.9 KB | 2305 / 2262 ms |
+
+The epoch-loop differences (-1.9 % to +3.6 %) lie within the spread of two runs made side by side on a shared machine;
+the record's own walk (one reconstruction and one clock variance per station) shows no cost above that spread.
+"Record against traces" is the comparison of section 13, every quantity on every epoch. The baseline pairs stand
+(products identical). Every golden run now writes the record: about 12 MB per 6 h on the observed-data golden (section
+13) and, from the first-hour sizes above, at most about 9 MB on the sim and 19 MB on the BeiDou lineage.
