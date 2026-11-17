@@ -417,6 +417,14 @@ namespace GnssProcessor {
               Tier::SCOPED, false, "network.zwd_event_inflate_m",
               "keep a receiver's wet delay with 2 cm of sigma added at a slip latch or a RAIM flag instead of "
               "erasing it; the companion of the gap cover (KIT300UZB's step at a return 1.02 -> 0.88 cm)" },
+            // --- The exact epoch time (adopted 2026-11-16, card NRF sections 80 and 81).
+            { nc.ring_fix.enable,
+              exact_epoch_time_,
+              Tier::SCOPED, false, "processing.exact_epoch_time",
+              "calendar times convert to GPS time from the whole days and the seconds of the day: the 30 s "
+              "epochs lose their rounding of up to 20 microseconds and the 675 s step it left in the satellite "
+              "clocks and the station residuals (DOY 144 and 145: clock step ratio 2.1 -> 1.0, residual "
+              "statistic 16 % lower)" },
             { !network_carry_invariant_ && network_phase_leveling_,
               network_shared_carry_full_cov_,
               Tier::SCOPED, false, "network.shared_carry_full_cov",
